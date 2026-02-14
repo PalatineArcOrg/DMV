@@ -3,6 +3,11 @@
 id.json
 /keypair*.json
 
+# Project docs (local only)
+CLAUDE.md
+IMPLEMENTATION.md
+DeadMansVault_Design_Spec.docx
+
 # Tokens and secrets
 .github_token
 *.token
