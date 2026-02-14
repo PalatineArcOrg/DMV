@@ -3,6 +3,10 @@
 id.json
 /keypair*.json
 
+# Tokens and secrets
+.github_token
+*.token
+
 # Environment variables
 .env
 .env.*
