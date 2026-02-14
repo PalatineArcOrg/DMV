@@ -20,6 +20,8 @@ dead-mans-vault/test-ledger
 # Node
 dead-mans-vault/node_modules
 dead-mans-vault/.yarn
+dead-mans-vault/app/node_modules
+dead-mans-vault/app/.expo
 
 # IDE
 .DS_Store
