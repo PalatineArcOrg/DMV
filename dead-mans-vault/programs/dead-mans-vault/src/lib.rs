@@ -1,0 +1,62 @@
+use anchor_lang::prelude::*;
+
+pub mod constants;
+pub mod errors;
+pub mod instructions;
+pub mod state;
+
+use instructions::*;
+
+declare_id!("GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb");
+
+#[program]
+pub mod dead_mans_vault {
+    use super::*;
+
+    pub fn initialize_vault(
+        ctx: Context<InitializeVault>,
+        params: InitializeVaultParams,
+    ) -> Result<()> {
+        instructions::initialize_vault::handler(ctx, params)
+    }
+
+    pub fn update_vault(
+        ctx: Context<UpdateVault>,
+        params: UpdateVaultParams,
+    ) -> Result<()> {
+        instructions::update_vault::handler(ctx, params)
+    }
+
+    pub fn record_heartbeat(
+        ctx: Context<RecordHeartbeat>,
+        method: state::HeartbeatMethod,
+    ) -> Result<()> {
+        instructions::record_heartbeat::handler(ctx, method)
+    }
+
+    pub fn execute_distribution(
+        ctx: Context<ExecuteDistribution>,
+        amount: u64,
+        attestation_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::execute_distribution::handler(ctx, amount, attestation_hash)
+    }
+
+    pub fn record_execution(
+        ctx: Context<RecordExecution>,
+        params: RecordExecutionParams,
+    ) -> Result<()> {
+        instructions::record_execution::handler(ctx, params)
+    }
+
+    pub fn revoke_vault(ctx: Context<RevokeVault>) -> Result<()> {
+        instructions::revoke_vault::handler(ctx)
+    }
+
+    pub fn rotate_agent(
+        ctx: Context<RotateAgent>,
+        new_agent_pubkey: Pubkey,
+    ) -> Result<()> {
+        instructions::rotate_agent::handler(ctx, new_agent_pubkey)
+    }
+}

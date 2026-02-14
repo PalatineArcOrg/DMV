@@ -1,0 +1,28 @@
+# Solana keypairs — NEVER commit these
+*-keypair.json
+id.json
+/keypair*.json
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Anchor / Solana build artifacts (also in dead-mans-vault/.gitignore)
+dead-mans-vault/.anchor
+dead-mans-vault/target
+dead-mans-vault/test-ledger
+
+# Node
+dead-mans-vault/node_modules
+dead-mans-vault/.yarn
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
