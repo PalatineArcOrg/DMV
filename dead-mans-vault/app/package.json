@@ -29,6 +29,7 @@
     "expo-clipboard": "~7.0.1",
     "expo-crypto": "~14.0.2",
     "expo-dev-client": "~5.0.19",
+    "expo-notifications": "~0.29.14",
     "expo-sqlite": "^16.0.10",
     "expo-status-bar": "~2.0.1",
     "expo-system-ui": "~4.0.9",

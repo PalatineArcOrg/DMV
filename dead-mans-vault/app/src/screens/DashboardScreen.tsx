@@ -11,7 +11,7 @@ import {
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useVaultProgram } from '../hooks/useVaultProgram';
-import { useEscalationStore } from '../store/useEscalationStore';
+import { useHeartbeat } from '../hooks/useHeartbeat';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { HeartbeatButton } from '../components/HeartbeatButton';
 import { EscalationBanner } from '../components/EscalationBanner';
@@ -24,10 +24,19 @@ export function DashboardScreen() {
     usePortfolio();
   const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } =
     useVaultProgram();
-  const { state: escalationState } = useEscalationStore();
   const [vaultData, setVaultData] = useState<any>(null);
   const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
+
+  const isVaultSetup = vaultData !== null;
+
+  const {
+    confirmHeartbeat,
+    status: heartbeatStatus,
+    escalationStage,
+    secondsRemaining,
+    isConfirming,
+  } = useHeartbeat(isVaultSetup && (vaultData?.active ?? false));
 
   const loadVaultState = useCallback(async () => {
     if (!publicKey) return;
@@ -58,6 +67,15 @@ export function DashboardScreen() {
     await Promise.all([refresh(), loadVaultState()]);
   }, [refresh, loadVaultState]);
 
+  const handleHeartbeat = useCallback(async () => {
+    try {
+      await confirmHeartbeat('active_tap');
+      await loadVaultState();
+    } catch {
+      // Error handling — could show toast in future
+    }
+  }, [confirmHeartbeat, loadVaultState]);
+
   // Not connected state
   if (!connected) {
     return (
@@ -73,8 +91,6 @@ export function DashboardScreen() {
     );
   }
 
-  const isVaultSetup = vaultData !== null;
-
   return (
     <ScrollView
       style={styles.container}
@@ -88,21 +104,43 @@ export function DashboardScreen() {
     >
       {/* Status Orb */}
       <StatusIndicator
-        stage={escalationState.stage}
+        stage={escalationStage}
         isActive={isVaultSetup ? (vaultData?.active ?? false) : false}
       />
 
       {/* Escalation Banner */}
-      <EscalationBanner stage={escalationState.stage} secondsRemaining={0} />
+      <EscalationBanner stage={escalationStage} secondsRemaining={secondsRemaining} />
 
       {/* Heartbeat Button */}
       <HeartbeatButton
-        onPress={() => {
-          /* Phase 3: wire to HeartbeatService */
-        }}
+        onPress={handleHeartbeat}
         disabled={!isVaultSetup}
+        loading={isConfirming}
         label={isVaultSetup ? 'Confirm Heartbeat' : 'Setup Required'}
       />
+
+      {/* Heartbeat Status */}
+      {heartbeatStatus && heartbeatStatus.lastHeartbeat > 0 && (
+        <View style={styles.statsCard}>
+          <Text style={styles.cardTitle}>Heartbeat Status</Text>
+          <StatRow
+            label="Last confirmed"
+            value={timeAgo(heartbeatStatus.lastHeartbeat)}
+          />
+          <StatRow
+            label="Method"
+            value={heartbeatStatus.lastMethod}
+          />
+          <StatRow
+            label="Total confirmations"
+            value={String(heartbeatStatus.totalHeartbeats)}
+          />
+          <StatRow
+            label="Status"
+            value={heartbeatStatus.isOverdue ? 'OVERDUE' : 'On time'}
+          />
+        </View>
+      )}
 
       {/* Vault Info */}
       {isLoadingVault ? (
@@ -135,8 +173,8 @@ export function DashboardScreen() {
           />
           <StatRow
             label="Stage"
-            value={`${escalationState.stage} (${
-              escalationState.stage === 0 ? 'Normal' : 'Escalating'
+            value={`${escalationStage} (${
+              escalationStage === 0 ? 'Normal' : escalationStage === 4 ? 'Executing' : 'Escalating'
             })`}
           />
         </View>

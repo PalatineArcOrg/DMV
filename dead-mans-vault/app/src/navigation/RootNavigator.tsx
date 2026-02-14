@@ -6,6 +6,7 @@ import { Text } from 'react-native';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ExecutionLogScreen } from '../screens/ExecutionLogScreen';
 import { SetupWizardScreen } from '../screens/SetupWizardScreen';
+import { HeartbeatConfigScreen } from '../screens/HeartbeatConfigScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { COLORS } from '../utils/constants';
 
@@ -47,6 +48,11 @@ function SetupStackScreen() {
         name="SetupWizard"
         component={SetupWizardScreen}
         options={{ title: 'Setup' }}
+      />
+      <SetupStack.Screen
+        name="HeartbeatConfig"
+        component={HeartbeatConfigScreen}
+        options={{ title: 'Heartbeat Config' }}
       />
     </SetupStack.Navigator>
   );

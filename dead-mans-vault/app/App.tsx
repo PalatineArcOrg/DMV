@@ -8,6 +8,7 @@ import { ConnectionProvider } from './src/utils/ConnectionProvider';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { initDatabase } from './src/db/database';
+import { NotificationService } from './src/notifications/NotificationService';
 import { COLORS } from './src/utils/constants';
 
 const queryClient = new QueryClient();
@@ -18,6 +19,7 @@ export default function App() {
 
   useEffect(() => {
     initDatabase()
+      .then(() => NotificationService.initialize())
       .then(() => setDbReady(true))
       .catch((err) => setDbError(err.message));
   }, []);
