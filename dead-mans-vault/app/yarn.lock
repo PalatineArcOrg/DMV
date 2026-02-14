@@ -2382,11 +2382,6 @@ available-typed-arrays@^1.0.7:
   dependencies:
     possible-typed-array-names "^1.0.0"
 
-await-lock@^2.2.2:
-  version "2.2.2"
-  resolved "https://registry.yarnpkg.com/await-lock/-/await-lock-2.2.2.tgz#a95a9b269bfd2f69d22b17a321686f551152bcef"
-  integrity sha512-aDczADvlvTGajTDjcjpJMqRkOF6Qdz3YbPZm/PyW6tKPkx2hlYBzxMhEywM/tU72HrVZjgl5VCdRuMlA7pZ8Gw==
-
 babel-core@^7.0.0-bridge.0:
   version "7.0.0-bridge.0"
   resolved "https://registry.yarnpkg.com/babel-core/-/babel-core-7.0.0-bridge.0.tgz#95a492ddd90f9b4e9a4a1da14eb335b87b634ece"
@@ -3616,12 +3611,10 @@ expo-secure-store@~14.0.1:
   resolved "https://registry.yarnpkg.com/expo-secure-store/-/expo-secure-store-14.0.1.tgz#8953d5966430f5ff262f4d99e7551205870078d7"
   integrity sha512-QUS+j4+UG4jRQalgnpmTvvrFnMVLqPiUZRzYPnG3+JrZ5kwVW2w6YS3WWerPoR7C6g3y/a2htRxRSylsDs+TaQ==
 
-expo-sqlite@^16.0.10:
-  version "16.0.10"
-  resolved "https://registry.yarnpkg.com/expo-sqlite/-/expo-sqlite-16.0.10.tgz#dd3275e3b1f79063b6121fa3b11a074b7b84ce1f"
-  integrity sha512-tUOKxE9TpfneRG3eOfbNfhN9236SJ7IiUnP8gCqU7umd9DtgDGB/5PhYVVfl+U7KskgolgNoB9v9OZ9iwXN8Eg==
-  dependencies:
-    await-lock "^2.2.2"
+expo-sqlite@~15.1.4:
+  version "15.1.4"
+  resolved "https://registry.yarnpkg.com/expo-sqlite/-/expo-sqlite-15.1.4.tgz#7827db7e6d376747d9d2a3a4eea9760e5bd41c42"
+  integrity sha512-1SG5Qi6/L2SK/o5EKtvEmlMVGdra/wYYh/intI94/ovsUfZGFrDG31YGtTt4rLpE95M6FwHUVpALO8g9/G9B2Q==
 
 expo-status-bar@~2.0.1:
   version "2.0.1"

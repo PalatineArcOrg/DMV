@@ -1,35 +1,46 @@
 {
   "expo": {
-    "name": "app",
-    "slug": "app",
+    "name": "Dead Man's Vault",
+    "slug": "dead-mans-vault",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#080A0F"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.solana.mobile.expo.template"
-    },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#080A0F"
       },
-      "package": "com.solana.mobile.expo.template"
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
+      "package": "com.romulusol.deadmansvault",
+      "versionCode": 1,
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
     },
     "plugins": [
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#00D4B4"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b1221e75-1816-4ff6-80bf-8f15f31b27d9"
+      }
+    }
   }
 }
