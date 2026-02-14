@@ -17,6 +17,7 @@ import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, SPACING, ESCALATION_DEFAULTS } from '../utils/constants';
+import { StepIndicator } from '../components/StepIndicator';
 
 export function EstateReviewScreen() {
   const navigation = useNavigation<any>();
@@ -104,6 +105,8 @@ export function EstateReviewScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <StepIndicator currentStep={4} totalSteps={4} />
+
       <Text style={styles.title}>Estate Plan Review</Text>
       <Text style={styles.subtitle}>
         Review your configuration before registering on-chain.
@@ -155,7 +158,7 @@ export function EstateReviewScreen() {
         {isRegistering ? (
           <ActivityIndicator color={COLORS.textPrimary} />
         ) : (
-          <Text style={styles.registerButtonText}>Register On-Chain</Text>
+          <Text style={styles.registerButtonText}>Activate Vault</Text>
         )}
       </TouchableOpacity>
 

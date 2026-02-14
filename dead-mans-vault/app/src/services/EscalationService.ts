@@ -2,6 +2,7 @@ import { EscalationStage, EscalationConfig } from '../types';
 import { HeartbeatService } from './HeartbeatService';
 import { NotificationService } from '../notifications/NotificationService';
 import { useEscalationStore } from '../store/useEscalationStore';
+import { useDemoStore } from '../store/useDemoStore';
 
 // Notification frequency caps (seconds)
 const NOTIFICATION_INTERVALS: Record<number, number> = {
@@ -39,8 +40,9 @@ export class EscalationService {
     // Run first evaluation immediately
     this.evaluate();
 
-    // Then evaluate every 60s (10s in dev mode for faster testing)
-    const intervalMs = __DEV__ ? 10_000 : 60_000;
+    // Then evaluate every 60s (10s in dev/demo mode for faster testing)
+    const useDevTimers = __DEV__ || useDemoStore.getState().isDemoMode;
+    const intervalMs = useDevTimers ? 10_000 : 60_000;
     this.evaluationInterval = setInterval(() => {
       this.evaluate();
     }, intervalMs);
@@ -150,7 +152,8 @@ export class EscalationService {
     const { lastNotificationAt } = store.state;
     const now = Math.floor(Date.now() / 1000);
 
-    const intervals = __DEV__ ? DEV_NOTIFICATION_INTERVALS : NOTIFICATION_INTERVALS;
+    const useDevTimers = __DEV__ || useDemoStore.getState().isDemoMode;
+    const intervals = useDevTimers ? DEV_NOTIFICATION_INTERVALS : NOTIFICATION_INTERVALS;
     const minInterval = intervals[stage] ?? 3600;
 
     if (lastNotificationAt && now - lastNotificationAt < minInterval) {

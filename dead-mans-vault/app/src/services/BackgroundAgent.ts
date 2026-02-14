@@ -4,6 +4,7 @@ import { EscalationService } from './EscalationService';
 import { ExecutionService } from './ExecutionService';
 import { EscalationConfig, HeartbeatConfig, Beneficiary } from '../types';
 import { ESCALATION_DEFAULTS } from '../utils/constants';
+import { useDemoStore } from '../store/useDemoStore';
 
 const DEV_ESCALATION_CONFIG: EscalationConfig = {
   stage1Duration: 30,
@@ -36,8 +37,9 @@ export class BackgroundAgent {
 
     this.heartbeatService = new HeartbeatService(heartbeatConfig);
 
+    const useDevTimers = __DEV__ || useDemoStore.getState().isDemoMode;
     const escConfig = escalationConfig ??
-      (__DEV__
+      (useDevTimers
         ? DEV_ESCALATION_CONFIG
         : {
             stage1Duration: ESCALATION_DEFAULTS.stage1,

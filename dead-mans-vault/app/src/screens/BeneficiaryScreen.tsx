@@ -16,6 +16,7 @@ import { isValidPublicKey, validateBeneficiaryShares } from '../utils/validation
 import { truncateAddress } from '../utils/formatting';
 import { COLORS, SPACING } from '../utils/constants';
 import { Beneficiary } from '../types/vault';
+import { StepIndicator } from '../components/StepIndicator';
 
 export function BeneficiaryScreen() {
   const navigation = useNavigation<any>();
@@ -95,11 +96,13 @@ export function BeneficiaryScreen() {
       Alert.alert('Error', 'Shares must sum to exactly 10,000 bps (100%).');
       return;
     }
-    navigation.navigate('DeFiPositions');
+    navigation.navigate('HeartbeatConfig');
   }, [isValid, navigation]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <StepIndicator currentStep={2} totalSteps={4} />
+
       {/* Allocation header */}
       <View style={styles.headerCard}>
         <Text style={styles.headerLabel}>Total Allocation</Text>

@@ -8,19 +8,20 @@ import { COLORS, SPACING } from '../utils/constants';
 
 export function SetupWizardScreen() {
   const navigation = useNavigation<any>();
-  const { beneficiaries, isSetupComplete, defiPositions } = useVaultStore();
+  const { beneficiaries, isSetupComplete } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
 
   const heartbeatDone = heartbeatConfig !== null;
   const beneficiariesDone = validateBeneficiaryShares(
     beneficiaries.map((b) => b.shareBps),
   );
-  const defiDone = defiPositions.length >= 0 && beneficiariesDone; // reviewed if beneficiaries done
 
   if (isSetupComplete) {
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.checkmark}>&#x2713;</Text>
+        <View style={styles.checkCircle}>
+          <Text style={styles.checkmark}>{'\u2713'}</Text>
+        </View>
         <Text style={styles.title}>Vault Active</Text>
         <Text style={styles.subtitle}>
           Your estate plan is registered on-chain and monitoring is active.
@@ -32,42 +33,31 @@ export function SetupWizardScreen() {
     );
   }
 
+  // Not setup — navigate to Welcome screen
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Estate Plan Setup</Text>
       <Text style={styles.subtitle}>Complete each step to register your vault.</Text>
 
-      {/* Step 1: Heartbeat */}
       <StepCard
         number={1}
-        title="Configure Heartbeat"
-        description="Set your heartbeat interval and confirmation methods."
-        done={heartbeatDone}
-        onPress={() => navigation.navigate('HeartbeatConfig')}
-      />
-
-      {/* Step 2: Beneficiaries */}
-      <StepCard
-        number={2}
         title="Add Beneficiaries"
         description="Add wallet addresses and percentage allocations."
         done={beneficiariesDone}
-        onPress={() => navigation.navigate('Beneficiaries')}
+        onPress={() => navigation.navigate('Welcome')}
       />
 
-      {/* Step 3: DeFi Positions */}
+      <StepCard
+        number={2}
+        title="Configure Heartbeat"
+        description="Set your check-in interval."
+        done={heartbeatDone}
+        disabled={!beneficiariesDone}
+        onPress={() => navigation.navigate('HeartbeatConfig')}
+      />
+
       <StepCard
         number={3}
-        title="Review DeFi Positions"
-        description="Scan for DeFi positions and set actions."
-        done={defiDone && beneficiariesDone}
-        disabled={!beneficiariesDone}
-        onPress={() => navigation.navigate('DeFiPositions')}
-      />
-
-      {/* Step 4: Review & Register */}
-      <StepCard
-        number={4}
         title="Review & Register"
         description="Review your estate plan and register on-chain."
         done={false}
@@ -131,10 +121,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: SPACING.xl,
   },
-  checkmark: {
-    fontSize: 48,
-    color: COLORS.healthy,
+  checkCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: COLORS.accent + '20',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: SPACING.md,
+  },
+  checkmark: {
+    fontSize: 32,
+    color: COLORS.accent,
   },
   title: {
     fontSize: 24,
@@ -146,6 +144,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     marginBottom: SPACING.lg,
+    textAlign: 'center',
   },
   detail: {
     fontSize: 14,
@@ -173,7 +172,7 @@ const styles = StyleSheet.create({
     marginRight: SPACING.md,
   },
   stepNumberDone: {
-    backgroundColor: COLORS.healthy,
+    backgroundColor: COLORS.accent,
   },
   stepNumberText: {
     color: COLORS.textPrimary,

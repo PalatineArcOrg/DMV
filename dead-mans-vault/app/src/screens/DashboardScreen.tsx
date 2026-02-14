@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,17 +6,18 @@ import {
   StyleSheet,
   RefreshControl,
   TouchableOpacity,
-  ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useVaultProgram } from '../hooks/useVaultProgram';
 import { useHeartbeat } from '../hooks/useHeartbeat';
+import { useDemoStore } from '../store/useDemoStore';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { HeartbeatButton } from '../components/HeartbeatButton';
 import { EscalationBanner } from '../components/EscalationBanner';
-import { COLORS, SPACING } from '../utils/constants';
+import { COLORS, SPACING, FONTS } from '../utils/constants';
 import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
 
 export function DashboardScreen() {
@@ -26,6 +27,7 @@ export function DashboardScreen() {
     usePortfolio();
   const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } =
     useVaultProgram();
+  const isDemoMode = useDemoStore((s) => s.isDemoMode);
   const [vaultData, setVaultData] = useState<any>(null);
   const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
@@ -74,7 +76,7 @@ export function DashboardScreen() {
       await confirmHeartbeat('active_tap');
       await loadVaultState();
     } catch {
-      // Error handling — could show toast in future
+      // Error handling
     }
   }, [confirmHeartbeat, loadVaultState]);
 
@@ -82,8 +84,8 @@ export function DashboardScreen() {
   if (!connected) {
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.title}>Dead Man's Vault</Text>
-        <Text style={styles.subtitle}>
+        <Text style={styles.heroTitle}>Dead Man's Vault</Text>
+        <Text style={styles.heroSubtitle}>
           Connect your wallet to get started
         </Text>
         <TouchableOpacity style={styles.connectButton} onPress={connect}>
@@ -104,13 +106,85 @@ export function DashboardScreen() {
         />
       }
     >
-      {/* Status Orb */}
+      {/* Demo Mode Badge */}
+      {isDemoMode && (
+        <View style={styles.demoBadge}>
+          <Text style={styles.demoBadgeText}>DEMO MODE</Text>
+        </View>
+      )}
+
+      {/* Portfolio Header */}
+      <View style={styles.portfolioHeader}>
+        {isLoading && balances.length === 0 ? (
+          <>
+            <SkeletonBar width={180} height={36} />
+            <SkeletonBar width={100} height={18} style={{ marginTop: SPACING.xs }} />
+          </>
+        ) : (
+          <>
+            <Text style={styles.portfolioValue}>{formatUsd(totalUsdValue)}</Text>
+            <Text style={styles.portfolioSol}>
+              {formatTokenAmount(solBalance, 4)} SOL
+            </Text>
+          </>
+        )}
+      </View>
+
+      {/* Token List */}
+      <View style={styles.card}>
+        {error && <Text style={styles.errorText}>{error}</Text>}
+
+        {isLoading && balances.length === 0 ? (
+          <>
+            <SkeletonTokenRow />
+            <SkeletonTokenRow />
+            <SkeletonTokenRow />
+          </>
+        ) : balances.length === 0 ? (
+          <Text style={styles.emptyText}>No tokens found</Text>
+        ) : (
+          balances.map((token, i) => (
+            <View key={i} style={[styles.tokenRow, i === 0 && { borderTopWidth: 0 }]}>
+              <View style={styles.tokenLeft}>
+                <View style={[styles.tokenIcon, { backgroundColor: COLORS.accent + '20' }]}>
+                  <Text style={styles.tokenIconText}>
+                    {token.symbol.charAt(0)}
+                  </Text>
+                </View>
+                <View>
+                  <Text style={styles.tokenSymbol}>{token.symbol}</Text>
+                  <Text style={[styles.tokenAmount, { fontFamily: FONTS.mono }]}>
+                    {formatTokenAmount(token.amount, token.decimals > 4 ? 4 : token.decimals)}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.tokenRight}>
+                {token.usdValue > 0 && (
+                  <Text style={styles.tokenUsd}>{formatUsd(token.usdValue)}</Text>
+                )}
+                {token.change24h != null && (
+                  <Text
+                    style={[
+                      styles.tokenChange,
+                      { color: token.change24h >= 0 ? COLORS.healthy : COLORS.critical },
+                    ]}
+                  >
+                    {token.change24h >= 0 ? '+' : ''}
+                    {token.change24h.toFixed(1)}%
+                  </Text>
+                )}
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+
+      {/* Vault Section */}
       <StatusIndicator
         stage={escalationStage}
         isActive={isVaultSetup ? (vaultData?.active ?? false) : false}
       />
 
-      {/* Escalation Banner */}
       <EscalationBanner stage={escalationStage} secondsRemaining={secondsRemaining} />
 
       {/* Execution in Progress card */}
@@ -143,22 +217,20 @@ export function DashboardScreen() {
           onPress={handleHeartbeat}
           disabled={!isVaultSetup}
           loading={isConfirming}
-          label={isVaultSetup ? 'Confirm Heartbeat' : 'Setup Required'}
+          stage={escalationStage}
+          secondsRemaining={secondsRemaining}
         />
       )}
 
       {/* Heartbeat Status */}
       {heartbeatStatus && heartbeatStatus.lastHeartbeat > 0 && (
-        <View style={styles.statsCard}>
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>Heartbeat Status</Text>
           <StatRow
             label="Last confirmed"
             value={timeAgo(heartbeatStatus.lastHeartbeat)}
           />
-          <StatRow
-            label="Method"
-            value={heartbeatStatus.lastMethod}
-          />
+          <StatRow label="Method" value={heartbeatStatus.lastMethod} />
           <StatRow
             label="Total confirmations"
             value={String(heartbeatStatus.totalHeartbeats)}
@@ -172,12 +244,13 @@ export function DashboardScreen() {
 
       {/* Vault Info */}
       {isLoadingVault ? (
-        <ActivityIndicator
-          color={COLORS.accent}
-          style={{ marginTop: SPACING.lg }}
-        />
+        <View style={styles.card}>
+          <SkeletonBar width={120} height={16} />
+          <SkeletonBar width={'100%' as any} height={14} style={{ marginTop: SPACING.sm }} />
+          <SkeletonBar width={'80%' as any} height={14} style={{ marginTop: SPACING.xs }} />
+        </View>
       ) : isVaultSetup ? (
-        <View style={styles.statsCard}>
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>Vault Status</Text>
           <StatRow
             label="Last Heartbeat"
@@ -202,12 +275,16 @@ export function DashboardScreen() {
           <StatRow
             label="Stage"
             value={`${escalationStage} (${
-              escalationStage === 0 ? 'Normal' : escalationStage === 4 ? 'Executing' : 'Escalating'
+              escalationStage === 0
+                ? 'Normal'
+                : escalationStage === 4
+                  ? 'Executing'
+                  : 'Escalating'
             })`}
           />
         </View>
       ) : (
-        <View style={styles.statsCard}>
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>No Vault Configured</Text>
           <Text style={styles.cardSubtitle}>
             Go to Setup tab to create your estate plan.
@@ -215,36 +292,12 @@ export function DashboardScreen() {
         </View>
       )}
 
-      {/* Portfolio */}
-      <View style={styles.statsCard}>
-        <Text style={styles.cardTitle}>Portfolio</Text>
-        <Text style={styles.portfolioValue}>{formatUsd(totalUsdValue)}</Text>
-        <Text style={styles.portfolioSol}>
-          {formatTokenAmount(solBalance, 4)} SOL
-        </Text>
-
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
-        {balances.map((token, i) => (
-          <View key={i} style={styles.tokenRow}>
-            <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-            <View style={styles.tokenRight}>
-              <Text style={styles.tokenAmount}>
-                {formatTokenAmount(token.amount, token.decimals > 4 ? 4 : token.decimals)}
-              </Text>
-              {token.usdValue > 0 && (
-                <Text style={styles.tokenUsd}>{formatUsd(token.usdValue)}</Text>
-              )}
-            </View>
-          </View>
-        ))}
-      </View>
-
       {/* Wallet Info */}
-      <View style={styles.statsCard}>
+      <View style={styles.card}>
         <StatRow
           label="Wallet"
           value={truncateAddress(publicKey?.toString() ?? '', 6)}
+          mono
         />
       </View>
 
@@ -253,11 +306,84 @@ export function DashboardScreen() {
   );
 }
 
-function StatRow({ label, value }: { label: string; value: string }) {
+function StatRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
     <View style={styles.statRow}>
       <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
+      <Text style={[styles.statValue, mono && { fontFamily: FONTS.mono }]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function SkeletonBar({
+  width,
+  height,
+  style,
+}: {
+  width: number | string;
+  height: number;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 0.7,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.3,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width: width as any,
+          height,
+          backgroundColor: COLORS.surfaceHover,
+          borderRadius: 4,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+function SkeletonTokenRow() {
+  return (
+    <View style={[styles.tokenRow, { borderTopWidth: 0 }]}>
+      <View style={styles.tokenLeft}>
+        <SkeletonBar width={32} height={32} style={{ borderRadius: 16 }} />
+        <View>
+          <SkeletonBar width={50} height={14} />
+          <SkeletonBar width={80} height={12} style={{ marginTop: 4 }} />
+        </View>
+      </View>
+      <View style={styles.tokenRight}>
+        <SkeletonBar width={60} height={14} />
+      </View>
     </View>
   );
 }
@@ -274,13 +400,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: SPACING.xl,
   },
-  title: {
+  heroTitle: {
     fontSize: 28,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.textPrimary,
     marginBottom: SPACING.sm,
   },
-  subtitle: {
+  heroSubtitle: {
     fontSize: 16,
     color: COLORS.textSecondary,
     marginBottom: SPACING.xl,
@@ -297,7 +423,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  statsCard: {
+  demoBadge: {
+    backgroundColor: COLORS.accent + '20',
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    borderRadius: 20,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    alignSelf: 'center',
+    marginTop: SPACING.sm,
+  },
+  demoBadgeText: {
+    color: COLORS.accent,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+  },
+  portfolioHeader: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.xs,
+  },
+  portfolioValue: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  portfolioSol: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.mono,
+    marginTop: 2,
+  },
+  card: {
     backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: SPACING.md,
@@ -314,15 +472,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
   },
-  portfolioValue: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  portfolioSol: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.md,
+  emptyText: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    paddingVertical: SPACING.md,
   },
   tokenRow: {
     flexDirection: 'row',
@@ -330,23 +484,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: SPACING.sm,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: COLORS.borderLight,
+  },
+  tokenLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  tokenIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tokenIconText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.accent,
   },
   tokenSymbol: {
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.textPrimary,
   },
+  tokenAmount: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 1,
+  },
   tokenRight: {
     alignItems: 'flex-end',
   },
-  tokenAmount: {
+  tokenUsd: {
     fontSize: 14,
+    fontWeight: '500',
     color: COLORS.textPrimary,
   },
-  tokenUsd: {
+  tokenChange: {
     fontSize: 12,
-    color: COLORS.textSecondary,
+    fontWeight: '600',
+    marginTop: 1,
   },
   statRow: {
     flexDirection: 'row',
@@ -365,7 +543,7 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 13,
     color: COLORS.critical,
-    marginTop: SPACING.xs,
+    marginBottom: SPACING.xs,
   },
   executionCard: {
     backgroundColor: COLORS.critical + '20',

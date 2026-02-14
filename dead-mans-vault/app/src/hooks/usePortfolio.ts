@@ -3,6 +3,7 @@ import { PortfolioScanner } from '../services/PortfolioScanner';
 import { TokenBalance, DeFiPosition } from '../types';
 import { useWallet } from './useWallet';
 import { HELIUS_API_KEY, RPC_URL } from '../utils/constants';
+import { saveDailyPrice, getPreviousPrice } from '../db/priceHistoryRepo';
 
 export function usePortfolio() {
   const { publicKey } = useWallet();
@@ -35,7 +36,29 @@ export function usePortfolio() {
         scanner.getTokenBalances(publicKey),
         scanner.detectDeFiPositions(publicKey),
       ]);
-      setBalances(tokens);
+
+      // Save daily prices and compute 24h changes
+      const enrichedTokens: TokenBalance[] = await Promise.all(
+        tokens.map(async (token) => {
+          const mintStr = token.mint.toString();
+          let change24h: number | null = null;
+
+          if (token.usdValue > 0 && token.amount > 0) {
+            const pricePerToken = token.usdValue / token.amount;
+            // Save first fetch of the day
+            await saveDailyPrice(mintStr, pricePerToken).catch(() => {});
+            // Get yesterday's price
+            const prevPrice = await getPreviousPrice(mintStr).catch(() => null);
+            if (prevPrice && prevPrice > 0) {
+              change24h = ((pricePerToken - prevPrice) / prevPrice) * 100;
+            }
+          }
+
+          return { ...token, change24h };
+        }),
+      );
+
+      setBalances(enrichedTokens);
       setDefiPositions(positions);
     } catch (err: any) {
       setError(err.message || 'Failed to scan portfolio');

@@ -2,10 +2,11 @@ import React from 'react';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Text } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ExecutionLogScreen } from '../screens/ExecutionLogScreen';
 import { SetupWizardScreen } from '../screens/SetupWizardScreen';
+import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { HeartbeatConfigScreen } from '../screens/HeartbeatConfigScreen';
 import { BeneficiaryScreen } from '../screens/BeneficiaryScreen';
 import { DeFiPositionsScreen } from '../screens/DeFiPositionsScreen';
@@ -53,9 +54,14 @@ function SetupStackScreen() {
         options={{ title: 'Setup' }}
       />
       <SetupStack.Screen
+        name="Welcome"
+        component={WelcomeScreen}
+        options={{ title: 'Welcome' }}
+      />
+      <SetupStack.Screen
         name="HeartbeatConfig"
         component={HeartbeatConfigScreen}
-        options={{ title: 'Heartbeat Config' }}
+        options={{ title: 'Heartbeat' }}
       />
       <SetupStack.Screen
         name="Beneficiaries"
@@ -70,29 +76,17 @@ function SetupStackScreen() {
       <SetupStack.Screen
         name="EstateReview"
         component={EstateReviewScreen}
-        options={{ title: 'Review & Register' }}
+        options={{ title: 'Review' }}
       />
     </SetupStack.Navigator>
   );
 }
 
-function TabIcon({ label, focused }: { label: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    Status: '\u25CF',
-    Setup: '\u2699',
-    Settings: '\u2630',
-  };
-  return (
-    <Text
-      style={{
-        fontSize: 18,
-        color: focused ? COLORS.accent : COLORS.textMuted,
-      }}
-    >
-      {icons[label] || '\u25CB'}
-    </Text>
-  );
-}
+const TAB_ICONS: Record<string, keyof typeof MaterialIcons.glyphMap> = {
+  Status: 'dashboard',
+  Setup: 'shield',
+  Settings: 'settings',
+};
 
 const DMVDarkTheme = {
   ...DarkTheme,
@@ -118,9 +112,12 @@ export function RootNavigator() {
           },
           tabBarActiveTintColor: COLORS.accent,
           tabBarInactiveTintColor: COLORS.textMuted,
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label={route.name} focused={focused} />
-          ),
+          tabBarIcon: ({ focused, color, size }) => {
+            const iconName = TAB_ICONS[route.name] ?? 'circle';
+            return (
+              <MaterialIcons name={iconName} size={size ?? 24} color={color} />
+            );
+          },
         })}
       >
         <Tab.Screen name="Status" component={DashboardStackScreen} />

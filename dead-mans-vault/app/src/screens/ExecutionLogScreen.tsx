@@ -9,7 +9,7 @@ import {
 import { getExecutionSteps } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepStatus } from '../types/execution';
 import { truncateAddress, formatTimestamp } from '../utils/formatting';
-import { COLORS, SPACING } from '../utils/constants';
+import { COLORS, SPACING, FONTS } from '../utils/constants';
 
 const STATUS_COLORS: Record<ExecutionStepStatus, string> = {
   completed: COLORS.healthy,
@@ -187,6 +187,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.accent,
     marginTop: SPACING.xs,
+    fontFamily: FONTS.mono,
   },
   errorText: {
     fontSize: 12,
@@ -202,5 +203,6 @@ const styles = StyleSheet.create({
   timestampText: {
     fontSize: 11,
     color: COLORS.textMuted,
+    fontFamily: FONTS.mono,
   },
 });

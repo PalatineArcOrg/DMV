@@ -40,6 +40,13 @@ export async function initDatabase(): Promise<void> {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS price_history (
+      mint TEXT NOT NULL,
+      price REAL NOT NULL,
+      date TEXT NOT NULL,
+      PRIMARY KEY (mint, date)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_heartbeat_timestamp
       ON heartbeat_history(timestamp DESC);
 

@@ -1,22 +1,28 @@
+import { Platform } from 'react-native';
+
 export const PROGRAM_ID = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
 export const RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
 export const HELIUS_API_KEY = process.env.EXPO_PUBLIC_HELIUS_API_KEY || '';
 export const HELIUS_API_BASE = 'https://api-devnet.helius.xyz/v0';
 
 export const COLORS = {
-  bg: '#1C1917',
-  surface: '#292524',
-  surfaceHover: '#3D3835',
-  healthy: '#16A34A',
-  warning: '#D97706',
-  critical: '#DC2626',
-  accent: '#7C3AED',
-  accentLight: '#A78BFA',
-  textPrimary: '#F5F5F4',
-  textSecondary: '#A8A29E',
-  textMuted: '#78716C',
-  border: '#44403C',
-  borderLight: '#57534E',
+  bg: '#080A0F',
+  surface: '#12162D',
+  surfaceHover: '#1A1F3D',
+  healthy: '#00D4B4',
+  warning: '#FFB932',
+  critical: '#FF4D4D',
+  accent: '#00D4B4',
+  accentLight: '#33DFCA',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#B4B9C3',
+  textMuted: '#505564',
+  border: '#1A1F3D',
+  borderLight: '#252A45',
+};
+
+export const FONTS = {
+  mono: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
 };
 
 export const SPACING = {

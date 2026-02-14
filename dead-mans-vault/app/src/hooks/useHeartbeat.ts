@@ -4,6 +4,7 @@ import { HeartbeatService } from '../services/HeartbeatService';
 import { EscalationService } from '../services/EscalationService';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
+import { useDemoStore } from '../store/useDemoStore';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS } from '../utils/constants';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
@@ -32,6 +33,7 @@ export function useHeartbeat(vaultActive: boolean): UseHeartbeatResult {
   const heartbeatConfig = useHeartbeatStore((s) => s.config) ?? DEFAULT_CONFIG;
   const heartbeatStatus = useHeartbeatStore((s) => s.status);
   const escalationState = useEscalationStore((s) => s.state);
+  const isDemoMode = useDemoStore((s) => s.isDemoMode);
 
   const heartbeatServiceRef = useRef<HeartbeatService | null>(null);
   const escalationServiceRef = useRef<EscalationService | null>(null);
@@ -61,7 +63,8 @@ export function useHeartbeat(vaultActive: boolean): UseHeartbeatResult {
     const hbService = new HeartbeatService(heartbeatConfig);
     heartbeatServiceRef.current = hbService;
 
-    const escConfig = __DEV__
+    const useDevTimers = __DEV__ || isDemoMode;
+    const escConfig = useDevTimers
       ? DEV_ESCALATION
       : {
           stage1Duration: ESCALATION_DEFAULTS.stage1,
@@ -105,7 +108,7 @@ export function useHeartbeat(vaultActive: boolean): UseHeartbeatResult {
       }
       setIsMonitoring(false);
     };
-  }, [vaultActive, heartbeatConfig]);
+  }, [vaultActive, heartbeatConfig, isDemoMode]);
 
   const confirmHeartbeat = useCallback(
     async (method: HeartbeatMethod = 'active_tap') => {
