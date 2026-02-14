@@ -7,6 +7,9 @@ import { DashboardScreen } from '../screens/DashboardScreen';
 import { ExecutionLogScreen } from '../screens/ExecutionLogScreen';
 import { SetupWizardScreen } from '../screens/SetupWizardScreen';
 import { HeartbeatConfigScreen } from '../screens/HeartbeatConfigScreen';
+import { BeneficiaryScreen } from '../screens/BeneficiaryScreen';
+import { DeFiPositionsScreen } from '../screens/DeFiPositionsScreen';
+import { EstateReviewScreen } from '../screens/EstateReviewScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { COLORS } from '../utils/constants';
 
@@ -53,6 +56,21 @@ function SetupStackScreen() {
         name="HeartbeatConfig"
         component={HeartbeatConfigScreen}
         options={{ title: 'Heartbeat Config' }}
+      />
+      <SetupStack.Screen
+        name="Beneficiaries"
+        component={BeneficiaryScreen}
+        options={{ title: 'Beneficiaries' }}
+      />
+      <SetupStack.Screen
+        name="DeFiPositions"
+        component={DeFiPositionsScreen}
+        options={{ title: 'DeFi Positions' }}
+      />
+      <SetupStack.Screen
+        name="EstateReview"
+        component={EstateReviewScreen}
+        options={{ title: 'Review & Register' }}
       />
     </SetupStack.Navigator>
   );

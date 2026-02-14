@@ -22,10 +22,15 @@ export class EscalationService {
   private config: EscalationConfig;
   private evaluationInterval: ReturnType<typeof setInterval> | null = null;
   private currentStage: EscalationStage = 0;
+  private executionCallback: (() => void) | null = null;
 
   constructor(heartbeatService: HeartbeatService, config: EscalationConfig) {
     this.heartbeatService = heartbeatService;
     this.config = config;
+  }
+
+  setExecutionCallback(callback: () => void): void {
+    this.executionCallback = callback;
   }
 
   start(): void {
@@ -128,7 +133,9 @@ export class EscalationService {
       case 4:
         NotificationService.sendExecutionStarted();
         store.recordNotification();
-        // Phase 4: trigger ExecutionService here
+        if (this.executionCallback) {
+          this.executionCallback();
+        }
         break;
     }
   }

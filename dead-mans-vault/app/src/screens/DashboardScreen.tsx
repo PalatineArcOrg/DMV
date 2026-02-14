@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useVaultProgram } from '../hooks/useVaultProgram';
@@ -19,6 +20,7 @@ import { COLORS, SPACING } from '../utils/constants';
 import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
 
 export function DashboardScreen() {
+  const navigation = useNavigation<any>();
   const { publicKey, connected, connect } = useWallet();
   const { balances, totalUsdValue, solBalance, isLoading, error, refresh } =
     usePortfolio();
@@ -111,13 +113,39 @@ export function DashboardScreen() {
       {/* Escalation Banner */}
       <EscalationBanner stage={escalationStage} secondsRemaining={secondsRemaining} />
 
+      {/* Execution in Progress card */}
+      {escalationStage === 4 && (
+        <TouchableOpacity
+          style={styles.executionCard}
+          onPress={() => navigation.navigate('ExecutionLog')}
+        >
+          <Text style={styles.executionTitle}>Execution In Progress</Text>
+          <Text style={styles.executionSubtitle}>
+            Assets are being distributed to beneficiaries.
+          </Text>
+          <Text style={styles.executionLink}>View Execution Log →</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Vault Executed state */}
+      {vaultData?.executed && (
+        <View style={styles.executedCard}>
+          <Text style={styles.executedTitle}>Vault Executed</Text>
+          <Text style={styles.executedSubtitle}>
+            Estate plan has been executed. Assets have been distributed.
+          </Text>
+        </View>
+      )}
+
       {/* Heartbeat Button */}
-      <HeartbeatButton
-        onPress={handleHeartbeat}
-        disabled={!isVaultSetup}
-        loading={isConfirming}
-        label={isVaultSetup ? 'Confirm Heartbeat' : 'Setup Required'}
-      />
+      {!vaultData?.executed && (
+        <HeartbeatButton
+          onPress={handleHeartbeat}
+          disabled={!isVaultSetup}
+          loading={isConfirming}
+          label={isVaultSetup ? 'Confirm Heartbeat' : 'Setup Required'}
+        />
+      )}
 
       {/* Heartbeat Status */}
       {heartbeatStatus && heartbeatStatus.lastHeartbeat > 0 && (
@@ -337,6 +365,50 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 13,
     color: COLORS.critical,
+    marginTop: SPACING.xs,
+  },
+  executionCard: {
+    backgroundColor: COLORS.critical + '20',
+    borderRadius: 12,
+    padding: SPACING.md,
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.critical,
+  },
+  executionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.critical,
+  },
+  executionSubtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.xs,
+  },
+  executionLink: {
+    fontSize: 14,
+    color: COLORS.accent,
+    marginTop: SPACING.sm,
+    fontWeight: '600',
+  },
+  executedCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: SPACING.md,
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.textMuted,
+  },
+  executedTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  executedSubtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
     marginTop: SPACING.xs,
   },
 });
