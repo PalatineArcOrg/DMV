@@ -8,11 +8,14 @@ skip-lint = false
 [programs.localnet]
 dead_mans_vault = "GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb"
 
+[programs.devnet]
+dead_mans_vault = "GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb"
+
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
