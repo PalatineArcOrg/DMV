@@ -78,7 +78,11 @@ export function EstateReviewScreen() {
       const { context } = await txService.getConnection().getLatestBlockhashAndContext();
       const txSig = await signAndSendTransaction(tx, context.slot);
 
-      // 5. Mark setup complete
+      // 5. Fetch on-chain vault data and update store
+      const vaultConfig = await txService.fetchVaultConfig(publicKey);
+      if (vaultConfig) {
+        setVaultConfig(vaultConfig);
+      }
       setSetupComplete(true);
 
       Alert.alert('Success', `Vault registered on-chain!\n\nTx: ${txSig}`, [

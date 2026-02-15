@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useVaultProgram } from '../hooks/useVaultProgram';
@@ -66,6 +66,15 @@ export function DashboardScreen() {
       loadVaultState();
     }
   }, [connected, publicKey]);
+
+  // Reload vault state when screen comes into focus (e.g. after setup)
+  useFocusEffect(
+    useCallback(() => {
+      if (connected && publicKey) {
+        loadVaultState();
+      }
+    }, [connected, publicKey, loadVaultState]),
+  );
 
   const onRefresh = useCallback(async () => {
     await Promise.all([refresh(), loadVaultState()]);
