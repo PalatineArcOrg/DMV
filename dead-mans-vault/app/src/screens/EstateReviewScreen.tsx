@@ -69,14 +69,15 @@ export function EstateReviewScreen() {
         onChainBeneficiaries,
       );
 
-      // 3. Set feePayer and blockhash
+      // 3. Set feePayer and get fresh blockhash right before signing
       tx.feePayer = publicKey;
-      const { blockhash } = await txService.getConnection().getLatestBlockhash();
+      const { blockhash, lastValidBlockHeight } = await txService
+        .getConnection()
+        .getLatestBlockhash('confirmed');
       tx.recentBlockhash = blockhash;
 
       // 4. Sign via MWA and send
-      const { context } = await txService.getConnection().getLatestBlockhashAndContext();
-      const txSig = await signAndSendTransaction(tx, context.slot);
+      const txSig = await signAndSendTransaction(tx, 0);
 
       // 5. Fetch on-chain vault data and update store
       const vaultConfig = await txService.fetchVaultConfig(publicKey);
@@ -92,7 +93,15 @@ export function EstateReviewScreen() {
         },
       ]);
     } catch (err: any) {
-      Alert.alert('Registration Failed', err.message || 'Unknown error');
+      const msg = err.message || String(err);
+      if (msg.includes('CancellationException') || msg.includes('cancelled')) {
+        Alert.alert(
+          'Wallet Cancelled',
+          'The wallet signing was cancelled. Please try again and approve the transaction in your wallet when prompted.',
+        );
+      } else {
+        Alert.alert('Registration Failed', msg);
+      }
     } finally {
       setIsRegistering(false);
     }
