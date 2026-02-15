@@ -16,9 +16,17 @@ export type DeFiProtocol =
   | 'meteora'
   | 'marinade'
   | 'jito'
+  | 'sanctum'
+  | 'kamino'
+  | 'jupiter'
   | 'native_stake';
 
 export type DeFiPositionAction = 'close' | 'transfer' | 'ignore';
+
+export type ClosureStrategy =
+  | 'jupiter_swap'
+  | 'protocol_native'
+  | 'unsupported';
 
 export interface DeFiPosition {
   protocol: DeFiProtocol;
@@ -29,5 +37,17 @@ export interface DeFiPosition {
   tokens: TokenBalance[];
   action: DeFiPositionAction;
   accountAddress: PublicKey;
+  closureStrategy: ClosureStrategy;
+  tokenMint?: string;
+  tokenAmount?: number;
+  tokenDecimals?: number;
   rawData?: unknown;
+}
+
+export interface ClosureResult {
+  success: boolean;
+  txSignature?: string;
+  solRecovered?: number;
+  error?: string;
+  simulated: boolean;
 }

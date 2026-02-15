@@ -2,7 +2,7 @@ import { PublicKey } from '@solana/web3.js';
 import { HeartbeatService } from './HeartbeatService';
 import { EscalationService } from './EscalationService';
 import { ExecutionService } from './ExecutionService';
-import { EscalationConfig, HeartbeatConfig, Beneficiary } from '../types';
+import { EscalationConfig, HeartbeatConfig, Beneficiary, DeFiPosition } from '../types';
 import { ESCALATION_DEFAULTS } from '../utils/constants';
 import { useDemoStore } from '../store/useDemoStore';
 
@@ -32,6 +32,7 @@ export class BackgroundAgent {
     escalationConfig?: EscalationConfig,
     ownerPubkey?: PublicKey,
     beneficiaries?: Beneficiary[],
+    defiPositions?: DeFiPosition[],
   ): void {
     if (this.running) return;
 
@@ -56,7 +57,7 @@ export class BackgroundAgent {
     // Wire Stage 4 execution callback
     if (ownerPubkey && beneficiaries && beneficiaries.length > 0) {
       this.escalationService.setExecutionCallback(() => {
-        const executor = new ExecutionService(ownerPubkey, beneficiaries);
+        const executor = new ExecutionService(ownerPubkey, beneficiaries, defiPositions || []);
         executor.execute().catch((err) => {
           console.error('ExecutionService error:', err);
         });

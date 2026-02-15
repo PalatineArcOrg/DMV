@@ -15,6 +15,7 @@ import { useVaultProgram } from '../hooks/useVaultProgram';
 import { useHeartbeat } from '../hooks/useHeartbeat';
 import { useDemoStore } from '../store/useDemoStore';
 import { useVaultStore } from '../store/useVaultStore';
+import { DeFiPosition } from '../types/defi';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { HeartbeatButton } from '../components/HeartbeatButton';
 import { EscalationBanner } from '../components/EscalationBanner';
@@ -32,6 +33,7 @@ export function DashboardScreen() {
   const [vaultData, setVaultData] = useState<any>(null);
   const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
+  const defiPositions = useVaultStore((s) => s.defiPositions);
 
   const isVaultSetup = vaultData !== null;
 
@@ -326,6 +328,31 @@ export function DashboardScreen() {
           <Text style={styles.cardSubtitle}>
             Go to Setup tab to create your estate plan.
           </Text>
+        </View>
+      )}
+
+      {/* DeFi Positions Summary */}
+      {defiPositions.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>
+            DeFi Positions ({defiPositions.length})
+          </Text>
+          {defiPositions.slice(0, 3).map((pos: DeFiPosition, i: number) => (
+            <StatRow
+              key={i}
+              label={pos.protocol.replace('_', ' ')}
+              value={
+                pos.estimatedValueSol > 0
+                  ? `~${pos.estimatedValueSol.toFixed(4)} SOL`
+                  : pos.type
+              }
+            />
+          ))}
+          {defiPositions.length > 3 && (
+            <Text style={styles.cardSubtitle}>
+              +{defiPositions.length - 3} more positions
+            </Text>
+          )}
         </View>
       )}
 

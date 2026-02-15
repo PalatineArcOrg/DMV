@@ -1,6 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { TokenBalance, DeFiPosition } from '../types';
 import { HELIUS_API_BASE } from '../utils/constants';
+import { DeFiDetector } from '../defi/detector';
 
 export class PortfolioScanner {
   private connection: Connection;
@@ -82,33 +83,12 @@ export class PortfolioScanner {
   }
 
   async detectDeFiPositions(wallet: PublicKey): Promise<DeFiPosition[]> {
-    // Phase 2 stub — real detection comes in Phase 3/4
-    const positions: DeFiPosition[] = [];
     try {
-      const stakePositions = await this.detectNativeStake(wallet);
-      positions.push(...stakePositions);
+      const tokenBalances = await this.getTokenBalances(wallet);
+      const detector = new DeFiDetector(this.connection, this.heliusApiKey);
+      return detector.detectAll(wallet, tokenBalances);
     } catch {
-      // Non-fatal
+      return [];
     }
-    return positions;
-  }
-
-  private async detectNativeStake(wallet: PublicKey): Promise<DeFiPosition[]> {
-    const STAKE_PROGRAM = new PublicKey('Stake11111111111111111111111111111111111111');
-    const stakeAccounts = await this.connection.getParsedProgramAccounts(
-      STAKE_PROGRAM,
-      { filters: [{ memcmp: { offset: 12, bytes: wallet.toBase58() } }] },
-    );
-
-    return stakeAccounts.map((account) => ({
-      protocol: 'native_stake' as const,
-      type: 'staking',
-      description: `Native SOL stake (${account.pubkey.toString().slice(0, 8)}...)`,
-      estimatedValueUsd: 0,
-      estimatedValueSol: 0,
-      tokens: [],
-      action: 'close' as const,
-      accountAddress: account.pubkey,
-    }));
   }
 }

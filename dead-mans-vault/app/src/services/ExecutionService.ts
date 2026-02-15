@@ -8,17 +8,25 @@ import {
 } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepType } from '../types/execution';
 import { Beneficiary } from '../types/vault';
+import { DeFiPosition } from '../types/defi';
+import { DeFiClosureService } from '../defi/closer';
 
 const SOL_RESERVE = 0.1 * LAMPORTS_PER_SOL; // 0.1 SOL reserve for fees
 
 export class ExecutionService {
   private ownerPubkey: PublicKey;
   private beneficiaries: Beneficiary[];
+  private defiPositions: DeFiPosition[];
   private isExecuting = false;
 
-  constructor(ownerPubkey: PublicKey, beneficiaries: Beneficiary[]) {
+  constructor(
+    ownerPubkey: PublicKey,
+    beneficiaries: Beneficiary[],
+    defiPositions: DeFiPosition[] = [],
+  ) {
     this.ownerPubkey = ownerPubkey;
     this.beneficiaries = beneficiaries;
+    this.defiPositions = defiPositions;
   }
 
   async execute(): Promise<void> {
@@ -62,10 +70,30 @@ export class ExecutionService {
     // Step 0: Revoke approvals (skipped for MVP)
     steps.push(this.makeStep(order++, 'revoke_approvals', 'Revoke token approvals', 'skipped'));
 
-    // Step 1: Close DeFi positions (skipped for MVP)
-    steps.push(this.makeStep(order++, 'close_defi_position', 'Close DeFi positions', 'skipped'));
+    // Steps: Close each DeFi position with action === 'close'
+    const closablePositions = this.defiPositions.filter((p) => p.action === 'close');
+    if (closablePositions.length === 0) {
+      steps.push(this.makeStep(order++, 'close_defi_position', 'No DeFi positions to close', 'skipped'));
+    } else {
+      for (const position of closablePositions) {
+        const desc = position.closureStrategy === 'unsupported'
+          ? `Detected ${position.protocol} ${position.type} (closure unsupported)`
+          : `Close ${position.protocol}: ${position.description}`;
+        const status = position.closureStrategy === 'unsupported' ? 'skipped' : 'pending';
+        steps.push(
+          this.makeStep(order++, 'close_defi_position', desc, status, {
+            protocol: position.protocol,
+            closureStrategy: position.closureStrategy,
+            tokenMint: position.tokenMint,
+            tokenAmount: position.tokenAmount,
+            tokenDecimals: position.tokenDecimals,
+            accountAddress: position.accountAddress.toString(),
+          }),
+        );
+      }
+    }
 
-    // Step 2: Distribute specific assets (skipped for MVP)
+    // Distribute specific assets (skipped for MVP)
     steps.push(this.makeStep(order++, 'distribute_specific_asset', 'Distribute specific assets', 'skipped'));
 
     // Steps 3+N: Distribute percentage to each beneficiary
@@ -117,12 +145,14 @@ export class ExecutionService {
   private async executeStep(step: ExecutionStep): Promise<string | undefined> {
     switch (step.type) {
       case 'revoke_approvals':
-      case 'close_defi_position':
       case 'distribute_specific_asset':
       case 'burn_asset':
       case 'close_accounts':
         // Skipped for MVP
         return undefined;
+
+      case 'close_defi_position':
+        return this.executeCloseDeFiPosition(step);
 
       case 'distribute_percentage':
         return this.executeDistributePercentage(step);
@@ -137,6 +167,40 @@ export class ExecutionService {
       default:
         return undefined;
     }
+  }
+
+  private async executeCloseDeFiPosition(step: ExecutionStep): Promise<string | undefined> {
+    const strategy = step.metadata?.closureStrategy as string;
+    if (strategy === 'unsupported') return undefined;
+
+    const keyManager = KeyManager.getInstance();
+    const agentKeypair = await keyManager.getKeypair();
+    const txService = new VaultTransactionService();
+
+    // Reconstruct a minimal position from step metadata
+    const position: DeFiPosition = {
+      protocol: step.metadata?.protocol as any,
+      type: '',
+      description: step.description,
+      estimatedValueUsd: 0,
+      estimatedValueSol: 0,
+      tokens: [],
+      action: 'close',
+      accountAddress: new PublicKey(step.metadata?.accountAddress as string),
+      closureStrategy: strategy as any,
+      tokenMint: step.metadata?.tokenMint as string | undefined,
+      tokenAmount: step.metadata?.tokenAmount as number | undefined,
+      tokenDecimals: step.metadata?.tokenDecimals as number | undefined,
+    };
+
+    const closureService = new DeFiClosureService(txService.getConnection());
+    const result = await closureService.closePosition(position, agentKeypair);
+
+    if (!result.success) {
+      throw new Error(result.error || 'DeFi position closure failed');
+    }
+
+    return result.txSignature;
   }
 
   private async executeDistributePercentage(step: ExecutionStep): Promise<string> {
