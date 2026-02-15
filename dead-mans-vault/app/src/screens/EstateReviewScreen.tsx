@@ -53,8 +53,24 @@ export function EstateReviewScreen() {
       }
       const agentPubkey = new PublicKey(agentPubkeyStr);
 
-      // 2. Build initialize_vault transaction
       const txService = new VaultTransactionService();
+
+      // 2. Check if vault already exists on-chain (from a previous successful TX)
+      const existingVault = await txService.fetchVaultConfig(publicKey);
+      if (existingVault) {
+        // Vault already initialized — just sync local state
+        setVaultConfig(existingVault);
+        setSetupComplete(true);
+        Alert.alert('Success', 'Vault already active on-chain! Synced to device.', [
+          {
+            text: 'OK',
+            onPress: () => navigation.getParent()?.navigate('Status'),
+          },
+        ]);
+        return;
+      }
+
+      // 3. Build initialize_vault transaction
       const onChainBeneficiaries = beneficiaries.map((b) => ({
         wallet: new PublicKey(b.wallet.toBase58()),
         shareBps: b.shareBps,
@@ -69,17 +85,17 @@ export function EstateReviewScreen() {
         onChainBeneficiaries,
       );
 
-      // 3. Set feePayer and get fresh blockhash right before signing
+      // 4. Set feePayer and get fresh blockhash right before signing
       tx.feePayer = publicKey;
       const connection = txService.getConnection();
       const { blockhash, lastValidBlockHeight } = await connection
         .getLatestBlockhash('confirmed');
       tx.recentBlockhash = blockhash;
 
-      // 4. Sign via MWA (sign only, we send manually for reliability)
+      // 5. Sign via MWA (sign only, we send manually for reliability)
       const signedTx = await signTransaction(tx);
 
-      // 5. Send the signed transaction ourselves
+      // 6. Send the signed transaction ourselves
       const txSig = await connection.sendRawTransaction(
         signedTx.serialize(),
         { skipPreflight: false, preflightCommitment: 'confirmed' },
@@ -89,7 +105,7 @@ export function EstateReviewScreen() {
         'confirmed',
       );
 
-      // 6. Fetch on-chain vault data and update store
+      // 7. Fetch on-chain vault data and update store
       const vaultConfig = await txService.fetchVaultConfig(publicKey);
       if (vaultConfig) {
         setVaultConfig(vaultConfig);
@@ -123,6 +139,7 @@ export function EstateReviewScreen() {
     gracePeriod,
     signTransaction,
     setSetupComplete,
+    setVaultConfig,
     navigation,
   ]);
 
