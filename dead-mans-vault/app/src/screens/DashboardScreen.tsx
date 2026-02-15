@@ -14,6 +14,7 @@ import { usePortfolio } from '../hooks/usePortfolio';
 import { useVaultProgram } from '../hooks/useVaultProgram';
 import { useHeartbeat } from '../hooks/useHeartbeat';
 import { useDemoStore } from '../store/useDemoStore';
+import { useVaultStore } from '../store/useVaultStore';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { HeartbeatButton } from '../components/HeartbeatButton';
 import { EscalationBanner } from '../components/EscalationBanner';
@@ -49,6 +50,7 @@ export function DashboardScreen() {
       const vault = await fetchVaultConfig(publicKey);
       setVaultData(vault);
       if (vault) {
+        useVaultStore.getState().setSetupComplete(true);
         const [vaultPda] = getVaultPDA(publicKey);
         const hb = await fetchHeartbeatRecord(vaultPda);
         setHeartbeatData(hb);

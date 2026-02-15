@@ -136,10 +136,12 @@ export function HeartbeatButton({
     onPress();
   }, [onPress]);
 
-  const borderOpacity = borderAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.4, 1],
-  });
+  const animatedBorderColor = config.showPulse
+    ? borderAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [config.borderColor + '66', config.borderColor],
+      })
+    : config.borderColor;
 
   const flashBg = flashAnim.interpolate({
     inputRange: [0, 1],
@@ -159,11 +161,10 @@ export function HeartbeatButton({
           styles.button,
           {
             backgroundColor: flashBg,
-            borderColor: config.borderColor,
+            borderColor: animatedBorderColor,
             borderWidth: 1.5,
             opacity: isDisabledState ? 0.5 : 1,
           },
-          config.showPulse && { borderColor: config.borderColor },
         ]}
       >
         {loading ? (

@@ -9,6 +9,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { initDatabase } from './src/db/database';
 import { NotificationService } from './src/notifications/NotificationService';
+import { useDemoStore } from './src/store/useDemoStore';
+import { useHeartbeatStore } from './src/store/useHeartbeatStore';
+import { getSetting } from './src/db/settingsRepo';
 import { COLORS } from './src/utils/constants';
 
 const queryClient = new QueryClient();
@@ -20,6 +23,15 @@ export default function App() {
   useEffect(() => {
     initDatabase()
       .then(() => NotificationService.initialize())
+      .then(async () => {
+        await useDemoStore.getState().loadFromDb();
+        const savedHbConfig = await getSetting('heartbeat_config');
+        if (savedHbConfig) {
+          try {
+            useHeartbeatStore.getState().setConfig(JSON.parse(savedHbConfig));
+          } catch {}
+        }
+      })
       .then(() => setDbReady(true))
       .catch((err) => setDbError(err.message));
   }, []);

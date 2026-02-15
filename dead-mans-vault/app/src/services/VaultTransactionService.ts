@@ -118,7 +118,7 @@ export class VaultTransactionService {
     // for MVP we demonstrate the flow with agent-signed system transfers
     const tx = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: ownerPubkey,
+        fromPubkey: agentKeypair.publicKey,
         toPubkey: beneficiaryWallet,
         lamports: amountLamports,
       }),
