@@ -12,7 +12,7 @@ const webCrypto = typeof crypto !== "undefined" ? crypto : new Crypto();
 
 (() => {
   if (typeof crypto === "undefined") {
-    Object.defineProperty(window, "crypto", {
+    Object.defineProperty(global, "crypto", {
       configurable: true,
       enumerable: true,
       get: () => webCrypto,
