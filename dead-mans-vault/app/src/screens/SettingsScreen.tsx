@@ -4,6 +4,7 @@ import { useWallet } from '../hooks/useWallet';
 import { useDemoStore } from '../store/useDemoStore';
 import { COLORS, SPACING, PROGRAM_ID, RPC_URL, FONTS } from '../utils/constants';
 import { truncateAddress } from '../utils/formatting';
+import appJson from '../../app.json';
 
 export function SettingsScreen() {
   const { publicKey, connected, connect, disconnect } = useWallet();
@@ -68,7 +69,7 @@ export function SettingsScreen() {
         <Text style={styles.cardTitle}>About</Text>
         <SettingRow label="App" value="Dead Man's Vault" />
         <TouchableOpacity onPress={incrementTap} activeOpacity={0.7}>
-          <SettingRow label="Version" value="0.1.0" />
+          <SettingRow label="Version" value={appJson.expo.version} />
         </TouchableOpacity>
       </View>
 
