@@ -54,12 +54,17 @@ export function EstateReviewScreen() {
       const agentPubkey = new PublicKey(agentPubkeyStr);
 
       const txService = new VaultTransactionService();
+      const connection = txService.getConnection();
 
-      // 2. Check if vault already exists on-chain (from a previous successful TX)
-      const existingVault = await txService.fetchVaultConfig(publicKey);
-      if (existingVault) {
-        // Vault already initialized — just sync local state
-        setVaultConfig(existingVault);
+      // 2. Check if vault PDA already exists on-chain (raw check, no Anchor deserialization)
+      const [vaultPda] = txService.getVaultPDA(publicKey);
+      const existingAccount = await connection.getAccountInfo(vaultPda);
+      if (existingAccount && existingAccount.data.length > 0) {
+        // Vault PDA already allocated — try Anchor fetch for store data
+        const existingVault = await txService.fetchVaultConfig(publicKey);
+        if (existingVault) {
+          setVaultConfig(existingVault);
+        }
         setSetupComplete(true);
         Alert.alert('Success', 'Vault already active on-chain! Synced to device.', [
           {
@@ -87,7 +92,6 @@ export function EstateReviewScreen() {
 
       // 4. Set feePayer and get fresh blockhash right before signing
       tx.feePayer = publicKey;
-      const connection = txService.getConnection();
       const { blockhash, lastValidBlockHeight } = await connection
         .getLatestBlockhash('confirmed');
       tx.recentBlockhash = blockhash;
@@ -120,6 +124,26 @@ export function EstateReviewScreen() {
       ]);
     } catch (err: any) {
       const msg = err.message || String(err);
+      // Recovery: if init failed because vault already exists, sync it
+      if (msg.includes('already in use') || msg.includes('custom program error: 0x0')) {
+        try {
+          const recoveryService = new VaultTransactionService();
+          const vault = await recoveryService.fetchVaultConfig(publicKey);
+          if (vault) {
+            setVaultConfig(vault);
+          }
+          setSetupComplete(true);
+          Alert.alert('Success', 'Vault already active on-chain! Synced to device.', [
+            {
+              text: 'OK',
+              onPress: () => navigation.getParent()?.navigate('Status'),
+            },
+          ]);
+          return;
+        } catch {
+          // Recovery failed, fall through to show original error
+        }
+      }
       if (msg.includes('CancellationException') || msg.includes('cancelled')) {
         Alert.alert(
           'Wallet Cancelled',
