@@ -60,16 +60,21 @@ export function EstateReviewScreen() {
       const [vaultPda] = txService.getVaultPDA(publicKey);
       const existingAccount = await connection.getAccountInfo(vaultPda);
       if (existingAccount && existingAccount.data.length > 0) {
-        // Vault PDA already allocated — try Anchor fetch for store data
+        // Vault PDA already allocated — sync local state
         const existingVault = await txService.fetchVaultConfig(publicKey);
         if (existingVault) {
           setVaultConfig(existingVault);
+        } else {
+          // Anchor fetch failed (Hermes compat) — set minimal config from local data
+          setSetupComplete(true);
         }
-        setSetupComplete(true);
         Alert.alert('Success', 'Vault already active on-chain! Synced to device.', [
           {
             text: 'OK',
-            onPress: () => navigation.getParent()?.navigate('Status'),
+            onPress: () => {
+              navigation.popToTop();
+              navigation.getParent()?.navigate('Status');
+            },
           },
         ]);
         return;
@@ -113,13 +118,17 @@ export function EstateReviewScreen() {
       const vaultConfig = await txService.fetchVaultConfig(publicKey);
       if (vaultConfig) {
         setVaultConfig(vaultConfig);
+      } else {
+        setSetupComplete(true);
       }
-      setSetupComplete(true);
 
       Alert.alert('Success', `Vault registered on-chain!\n\nTx: ${txSig}`, [
         {
           text: 'OK',
-          onPress: () => navigation.getParent()?.navigate('Status'),
+          onPress: () => {
+            navigation.popToTop();
+            navigation.getParent()?.navigate('Status');
+          },
         },
       ]);
     } catch (err: any) {
@@ -136,7 +145,10 @@ export function EstateReviewScreen() {
           Alert.alert('Success', 'Vault already active on-chain! Synced to device.', [
             {
               text: 'OK',
-              onPress: () => navigation.getParent()?.navigate('Status'),
+              onPress: () => {
+                navigation.popToTop();
+                navigation.getParent()?.navigate('Status');
+              },
             },
           ]);
           return;
