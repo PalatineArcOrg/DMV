@@ -5,7 +5,7 @@ import { useMobileWallet } from '../utils/useMobileWallet';
 
 export function useWallet() {
   const { selectedAccount, isLoading } = useAuthorization();
-  const { connect: mobileConnect, disconnect: mobileDisconnect, signAndSendTransaction, signMessage } = useMobileWallet();
+  const { connect: mobileConnect, disconnect: mobileDisconnect, signTransaction, signAndSendTransaction, signMessage } = useMobileWallet();
 
   const publicKey = useMemo(
     () => selectedAccount?.publicKey ?? null,
@@ -28,6 +28,7 @@ export function useWallet() {
     isLoading,
     connect,
     disconnect,
+    signTransaction,
     signAndSendTransaction,
     signMessage,
     selectedAccount,

@@ -21,7 +21,7 @@ import { StepIndicator } from '../components/StepIndicator';
 
 export function EstateReviewScreen() {
   const navigation = useNavigation<any>();
-  const { publicKey, signAndSendTransaction } = useWallet();
+  const { publicKey, signTransaction } = useWallet();
   const { beneficiaries, escalationConfig, setSetupComplete, setVaultConfig } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
 
@@ -71,15 +71,25 @@ export function EstateReviewScreen() {
 
       // 3. Set feePayer and get fresh blockhash right before signing
       tx.feePayer = publicKey;
-      const { blockhash, lastValidBlockHeight } = await txService
-        .getConnection()
+      const connection = txService.getConnection();
+      const { blockhash, lastValidBlockHeight } = await connection
         .getLatestBlockhash('confirmed');
       tx.recentBlockhash = blockhash;
 
-      // 4. Sign via MWA and send
-      const txSig = await signAndSendTransaction(tx, 0);
+      // 4. Sign via MWA (sign only, we send manually for reliability)
+      const signedTx = await signTransaction(tx);
 
-      // 5. Fetch on-chain vault data and update store
+      // 5. Send the signed transaction ourselves
+      const txSig = await connection.sendRawTransaction(
+        signedTx.serialize(),
+        { skipPreflight: false, preflightCommitment: 'confirmed' },
+      );
+      await connection.confirmTransaction(
+        { signature: txSig, blockhash, lastValidBlockHeight },
+        'confirmed',
+      );
+
+      // 6. Fetch on-chain vault data and update store
       const vaultConfig = await txService.fetchVaultConfig(publicKey);
       if (vaultConfig) {
         setVaultConfig(vaultConfig);
@@ -111,7 +121,7 @@ export function EstateReviewScreen() {
     beneficiaries,
     escalationConfig,
     gracePeriod,
-    signAndSendTransaction,
+    signTransaction,
     setSetupComplete,
     navigation,
   ]);

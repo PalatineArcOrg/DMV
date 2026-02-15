@@ -33,10 +33,25 @@ export function useMobileWallet() {
     });
   }, [deauthorizeSession]);
 
+  const signTransaction = useCallback(
+    async (
+      transaction: Transaction | VersionedTransaction,
+    ): Promise<Transaction | VersionedTransaction> => {
+      return await transact(async (wallet) => {
+        await authorizeSession(wallet);
+        const signedTransactions = await wallet.signTransactions({
+          transactions: [transaction],
+        });
+        return signedTransactions[0];
+      });
+    },
+    [authorizeSession]
+  );
+
   const signAndSendTransaction = useCallback(
     async (
       transaction: Transaction | VersionedTransaction,
-      minContextSlot: number,
+      minContextSlot?: number,
     ): Promise<TransactionSignature> => {
       return await transact(async (wallet) => {
         await authorizeSession(wallet);
@@ -69,9 +84,10 @@ export function useMobileWallet() {
       connect,
       signIn,
       disconnect,
+      signTransaction,
       signAndSendTransaction,
       signMessage,
     }),
-    [signAndSendTransaction, signMessage]
+    [signTransaction, signAndSendTransaction, signMessage]
   );
 }
