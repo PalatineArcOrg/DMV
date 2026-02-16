@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { PortfolioScanner } from '../services/PortfolioScanner';
 import { TokenBalance, DeFiPosition } from '../types';
 import { useWallet } from './useWallet';
+import { useVaultStore } from '../store/useVaultStore';
 import { HELIUS_API_KEY, RPC_URL } from '../utils/constants';
 import { saveDailyPrice, getPreviousPrice } from '../db/priceHistoryRepo';
 
@@ -60,6 +61,8 @@ export function usePortfolio() {
 
       setBalances(enrichedTokens);
       setDefiPositions(positions);
+      // Also persist to Zustand store so Dashboard can display them
+      useVaultStore.getState().setDefiPositions(positions);
     } catch (err: any) {
       setError(err.message || 'Failed to scan portfolio');
     } finally {

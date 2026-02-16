@@ -59,11 +59,18 @@ export class DeFiDetector {
       this.detectViaHelius(wallet),
     ]);
 
-    // Collect all fulfilled positions
+    // Collect all fulfilled positions, log failures
+    const labels = [
+      'liquidStaking', 'jupiter', 'kamino', 'raydium',
+      'nativeStake', 'orca', 'meteora', 'marginfi', 'helius',
+    ];
     const allPositions: DeFiPosition[] = [];
-    for (const result of results) {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
       if (result.status === 'fulfilled' && result.value) {
         allPositions.push(...result.value);
+      } else if (result.status === 'rejected') {
+        console.warn(`DeFi detector [${labels[i]}] failed:`, result.reason?.message || result.reason);
       }
     }
 
@@ -79,7 +86,7 @@ export class DeFiDetector {
     if (!this.heliusApiKey) return [];
 
     try {
-      const url = `https://api.helius.xyz/v0/addresses/${wallet.toString()}/transactions?api-key=${this.heliusApiKey}&limit=50`;
+      const url = `https://api-devnet.helius-rpc.com/v0/addresses/${wallet.toString()}/transactions/?api-key=${this.heliusApiKey}&limit=50`;
       const response = await fetch(url);
       if (!response.ok) return [];
 

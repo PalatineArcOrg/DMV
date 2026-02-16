@@ -178,6 +178,39 @@ export const PROTOCOL_PROGRAMS: Record<string, { protocol: DeFiProtocol; name: s
 export const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 /**
+ * Well-known token symbols for devnet fallback.
+ * Helius devnet API doesn't return symbol metadata, so we map them here.
+ */
+export const KNOWN_TOKEN_SYMBOLS: Record<string, { symbol: string; name: string }> = {
+  // Wrapped SOL
+  'So11111111111111111111111111111111111111112': { symbol: 'SOL', name: 'Wrapped SOL' },
+  // USDC (devnet)
+  '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': { symbol: 'USDC', name: 'USD Coin' },
+  // EURC (devnet)
+  'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr': { symbol: 'EURC', name: 'Euro Coin' },
+  // USDC (mainnet)
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': { symbol: 'USDC', name: 'USD Coin' },
+  // USDT
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': { symbol: 'USDT', name: 'Tether USD' },
+  // Marinade mSOL
+  'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': { symbol: 'mSOL', name: 'Marinade Staked SOL' },
+  // Jito jitoSOL
+  'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn': { symbol: 'jitoSOL', name: 'Jito Staked SOL' },
+  // Sanctum bSOL
+  'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1': { symbol: 'bSOL', name: 'BlazeStake SOL' },
+  // Sanctum INF
+  '5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm': { symbol: 'INF', name: 'Sanctum Infinity' },
+  // Jupiter JLP
+  '27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4': { symbol: 'JLP', name: 'Jupiter LP' },
+  // jupSOL
+  'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v': { symbol: 'jupSOL', name: 'Jupiter Staked SOL' },
+  // Kamino kSOL
+  'KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS': { symbol: 'kSOL', name: 'Kamino SOL' },
+  // MNDE (Marinade governance, devnet)
+  'MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey': { symbol: 'MNDE', name: 'Marinade' },
+};
+
+/**
  * Helius Enhanced Transaction source labels mapped to our DeFi protocols.
  */
 export const HELIUS_SOURCE_MAP: Record<string, DeFiProtocol> = {
