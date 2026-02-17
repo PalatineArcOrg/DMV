@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
-import { COLORS, SPACING } from '../utils/constants';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { COLORS, FONTS, STAGE_CONFIG } from '../utils/constants';
 import { EscalationStage } from '../types';
 import { formatDuration } from '../utils/formatting';
 
@@ -19,59 +19,42 @@ function formatCountdown(seconds: number): string {
   return formatDuration(seconds);
 }
 
-function getBannerConfig(stage: EscalationStage) {
-  switch (stage) {
-    case 1:
-      return {
-        bg: COLORS.warning + '20',
-        border: COLORS.warning,
-        icon: 'favorite' as const,
-        iconColor: COLORS.warning,
-        text: 'Heartbeat overdue. Confirm to reset.',
-      };
-    case 2:
-      return {
-        bg: COLORS.warning + '30',
-        border: COLORS.warning,
-        icon: 'warning' as const,
-        iconColor: COLORS.warning,
-        text: 'Emergency contacts notified. Confirm to prevent execution.',
-      };
-    case 3:
-      return {
-        bg: COLORS.critical + '30',
-        border: COLORS.critical,
-        icon: 'error' as const,
-        iconColor: COLORS.critical,
-        text: 'FINAL WARNING. Estate plan executes soon.',
-      };
-    default:
-      return null;
-  }
-}
+const ICON_MAP: Record<number, keyof typeof MaterialCommunityIcons.glyphMap> = {
+  1: 'clock-outline',
+  2: 'alert',
+  3: 'alert-octagon',
+};
 
 export function EscalationBanner({ stage, secondsRemaining }: EscalationBannerProps) {
-  const config = getBannerConfig(stage);
-  if (!config || stage === 0 || stage === 4) return null;
+  if (stage === 0 || stage === 4) return null;
+
+  const cfg = STAGE_CONFIG[stage] || STAGE_CONFIG[1];
+  const iconName = ICON_MAP[stage] || 'alert';
+
+  const textMap: Record<number, string> = {
+    1: 'Heartbeat overdue. Confirm to reset.',
+    2: 'Emergency contacts notified. Confirm to prevent execution.',
+    3: 'FINAL WARNING. Estate plan executes soon.',
+  };
 
   return (
     <View
       style={[
         styles.container,
-        { backgroundColor: config.bg, borderColor: config.border },
+        { backgroundColor: cfg.dimColor, borderColor: cfg.borderColor },
       ]}
     >
       <View style={styles.row}>
-        <MaterialIcons
-          name={config.icon}
-          size={20}
-          color={config.iconColor}
+        <MaterialCommunityIcons
+          name={iconName}
+          size={18}
+          color={cfg.color}
           style={styles.icon}
         />
-        <Text style={styles.text}>{config.text}</Text>
+        <Text style={[styles.text, { fontFamily: FONTS.primarySemiBold }]}>{textMap[stage]}</Text>
       </View>
       {secondsRemaining > 0 && (
-        <Text style={styles.countdown}>
+        <Text style={[styles.countdown, { fontFamily: FONTS.primary }]}>
           Escalating in {formatCountdown(secondsRemaining)}
         </Text>
       )}
@@ -82,28 +65,28 @@ export function EscalationBanner({ stage, secondsRemaining }: EscalationBannerPr
 const styles = StyleSheet.create({
   container: {
     borderWidth: 1,
-    borderRadius: 8,
-    padding: SPACING.md,
-    marginHorizontal: SPACING.md,
-    marginVertical: SPACING.sm,
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginVertical: 8,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   icon: {
-    marginRight: SPACING.sm,
+    marginRight: 8,
   },
   text: {
     color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
     flex: 1,
   },
   countdown: {
     color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: SPACING.xs,
-    marginLeft: 28,
+    fontSize: 11,
+    marginTop: 4,
+    marginLeft: 26,
   },
 });

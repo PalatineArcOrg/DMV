@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
@@ -15,20 +16,106 @@ import { useVaultProgram } from '../hooks/useVaultProgram';
 import { useHeartbeat } from '../hooks/useHeartbeat';
 import { useDemoStore } from '../store/useDemoStore';
 import { useVaultStore } from '../store/useVaultStore';
+import { useEscalationStore } from '../store/useEscalationStore';
 import { DeFiPosition } from '../types/defi';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { HeartbeatButton } from '../components/HeartbeatButton';
 import { EscalationBanner } from '../components/EscalationBanner';
-import { COLORS, SPACING, FONTS } from '../utils/constants';
+import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
+import { EscalationStage } from '../types';
+
+// --- Helpers ---
+
+function TokenIcon({ symbol }: { symbol: string }) {
+  const color = TOKEN_COLORS[symbol] || COLORS.accent;
+  return (
+    <View style={[styles.tokenIcon, { backgroundColor: color + '22', borderColor: color + '44' }]}>
+      <Text style={[styles.tokenIconText, { color }]}>{symbol.slice(0, 3)}</Text>
+    </View>
+  );
+}
+
+function DemoControls({ stage }: { stage: EscalationStage }) {
+  const setEscalationStage = useEscalationStore((s) => s.setStage);
+  const stages: EscalationStage[] = [0, 1, 2, 3, 4];
+
+  return (
+    <View style={styles.demoControlsContainer}>
+      <Text style={styles.demoControlsLabel}>DEMO — ESCALATION STAGES</Text>
+      <View style={styles.demoControlsRow}>
+        {stages.map((s) => {
+          const c = STAGE_CONFIG[s];
+          const active = s === stage;
+          return (
+            <TouchableOpacity
+              key={s}
+              style={[
+                styles.demoControlsButton,
+                {
+                  backgroundColor: active ? c.dimColor : 'rgba(255,255,255,0.04)',
+                  borderColor: active ? c.borderColor : 'rgba(255,255,255,0.06)',
+                },
+              ]}
+              onPress={() => setEscalationStage(s)}
+            >
+              <Text
+                style={[
+                  styles.demoControlsButtonText,
+                  { color: active ? c.color : 'rgba(255,255,255,0.3)' },
+                ]}
+              >
+                S{s}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function SkeletonBar({ width, height, style }: { width: number | string; height: number; style?: any }) {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.7, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, []);
+  return (
+    <Animated.View style={[{ width: width as any, height, backgroundColor: COLORS.surfaceHover, borderRadius: 4, opacity }, style]} />
+  );
+}
+
+function SkeletonTokenRow() {
+  return (
+    <View style={[styles.tokenRow, { borderTopWidth: 0 }]}>
+      <View style={styles.tokenLeft}>
+        <SkeletonBar width={36} height={36} style={{ borderRadius: 18 }} />
+        <View>
+          <SkeletonBar width={50} height={14} />
+          <SkeletonBar width={80} height={12} style={{ marginTop: 4 }} />
+        </View>
+      </View>
+      <View style={styles.tokenRight}>
+        <SkeletonBar width={60} height={14} />
+      </View>
+    </View>
+  );
+}
+
+// --- Main Component ---
 
 export function DashboardScreen() {
   const navigation = useNavigation<any>();
   const { publicKey, connected, connect } = useWallet();
-  const { balances, totalUsdValue, solBalance, isLoading, error, refresh } =
-    usePortfolio();
-  const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } =
-    useVaultProgram();
+  const { balances, totalUsdValue, solBalance, isLoading, error, refresh } = usePortfolio();
+  const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } = useVaultProgram();
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
   const [vaultData, setVaultData] = useState<any>(null);
   const [heartbeatData, setHeartbeatData] = useState<any>(null);
@@ -45,23 +132,21 @@ export function DashboardScreen() {
     isConfirming,
   } = useHeartbeat(isVaultSetup && (vaultData?.active ?? false));
 
+  const cfg = STAGE_CONFIG[escalationStage] || STAGE_CONFIG[0];
+
   const loadVaultState = useCallback(async () => {
     if (!publicKey) return;
     setIsLoadingVault(true);
     try {
       let vault: any = await fetchVaultConfig(publicKey);
-
-      // Fallback: if Anchor fetch fails (Hermes compat), check raw account
       if (!vault) {
         const { VaultTransactionService } = require('../services/VaultTransactionService');
         const txService = new VaultTransactionService();
         const [vaultPda] = txService.getVaultPDA(publicKey);
         const rawAccount = await txService.getConnection().getAccountInfo(vaultPda);
         if (rawAccount && rawAccount.data.length > 0) {
-          // Vault exists on-chain — try VaultTransactionService fetch (separate Anchor instance)
           vault = await txService.fetchVaultConfig(publicKey);
           if (!vault) {
-            // Still failed — use minimal stub so UI shows vault as active
             const store = useVaultStore.getState();
             vault = {
               active: true,
@@ -75,7 +160,6 @@ export function DashboardScreen() {
           }
         }
       }
-
       setVaultData(vault);
       if (vault) {
         useVaultStore.getState().setSetupComplete(true);
@@ -97,7 +181,6 @@ export function DashboardScreen() {
     }
   }, [connected, publicKey]);
 
-  // Reload vault state when screen comes into focus (e.g. after setup)
   useFocusEffect(
     useCallback(() => {
       if (connected && publicKey) {
@@ -119,16 +202,31 @@ export function DashboardScreen() {
     }
   }, [confirmHeartbeat, loadVaultState]);
 
+  // Heartbeat stats
+  const lastBeatLabel = heartbeatData
+    ? timeAgo(heartbeatData.lastHeartbeat.toNumber())
+    : heartbeatStatus?.lastHeartbeat
+      ? timeAgo(heartbeatStatus.lastHeartbeat)
+      : 'N/A';
+
+  const nextDueLabel = escalationStage === 0
+    ? (heartbeatStatus?.nextDue ? timeAgo(heartbeatStatus.nextDue).replace(' ago', '') : 'N/A')
+    : 'Overdue';
+
+  const beneficiaryCount = vaultData?.beneficiaries?.length ?? useVaultStore.getState().beneficiaries.length;
+
   // Not connected state
   if (!connected) {
     return (
       <View style={styles.centerContainer}>
+        <View style={styles.connectLogoContainer}>
+          <MaterialCommunityIcons name="shield-lock" size={40} color={COLORS.accent} />
+        </View>
         <Text style={styles.heroTitle}>Dead Man's Vault</Text>
-        <Text style={styles.heroSubtitle}>
-          Connect your wallet to get started
-        </Text>
+        <Text style={styles.heroSubtitle}>Connect your wallet to get started</Text>
         <TouchableOpacity style={styles.connectButton} onPress={connect}>
           <Text style={styles.connectButtonText}>Connect Wallet</Text>
+          <MaterialCommunityIcons name="arrow-right" size={18} color={COLORS.bg} style={{ marginLeft: 8 }} />
         </TouchableOpacity>
       </View>
     );
@@ -137,42 +235,128 @@ export function DashboardScreen() {
   return (
     <ScrollView
       style={styles.container}
+      showsVerticalScrollIndicator={false}
       refreshControl={
-        <RefreshControl
-          refreshing={isLoading}
-          onRefresh={onRefresh}
-          tintColor={COLORS.accent}
-        />
+        <RefreshControl refreshing={isLoading} onRefresh={onRefresh} tintColor={COLORS.accent} />
       }
     >
-      {/* Demo Mode Badge */}
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={styles.headerLogo}>
+            <MaterialCommunityIcons name="shield" size={16} color={COLORS.solanaPurple} />
+          </View>
+          <View>
+            <Text style={styles.headerTitle}>Dead Man's Vault</Text>
+            <Text style={styles.headerSubtitle}>Solana Seeker</Text>
+          </View>
+        </View>
+        <TouchableOpacity style={styles.headerSettingsBtn} onPress={() => navigation.getParent()?.navigate('Settings')}>
+          <MaterialCommunityIcons name="cog" size={16} color="rgba(255,255,255,0.5)" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Demo badge */}
       {isDemoMode && (
         <View style={styles.demoBadge}>
           <Text style={styles.demoBadgeText}>DEMO MODE</Text>
         </View>
       )}
 
-      {/* Portfolio Header */}
-      <View style={styles.portfolioHeader}>
+      {/* Portfolio Card */}
+      <View style={styles.portfolioCard}>
+        <Text style={styles.portfolioLabel}>TOTAL PORTFOLIO</Text>
         {isLoading && balances.length === 0 ? (
           <>
             <SkeletonBar width={180} height={36} />
-            <SkeletonBar width={100} height={18} style={{ marginTop: SPACING.xs }} />
+            <SkeletonBar width={100} height={14} style={{ marginTop: 8 }} />
           </>
         ) : (
           <>
-            <Text style={styles.portfolioValue}>{formatUsd(totalUsdValue)}</Text>
-            <Text style={styles.portfolioSol}>
+            <View style={styles.portfolioRow}>
+              <Text style={styles.portfolioValue}>{formatUsd(totalUsdValue)}</Text>
+              {totalUsdValue > 0 && (
+                <View style={styles.changeBadge}>
+                  <Text style={styles.changeArrow}>{'\u25B2'}</Text>
+                  <Text style={styles.changeText}>+2.8%</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.portfolioSubtext}>
               {formatTokenAmount(solBalance, 4)} SOL
             </Text>
           </>
         )}
       </View>
 
-      {/* Token List */}
-      <View style={styles.card}>
-        {error && <Text style={styles.errorText}>{error}</Text>}
+      {/* Vault Status Card */}
+      {isVaultSetup && !vaultData?.executed && (
+        <View style={[styles.vaultCard, { borderColor: cfg.borderColor }]}>
+          {/* Status Header */}
+          <StatusIndicator stage={escalationStage} isActive={vaultData?.active ?? false} />
 
+          {/* Heartbeat Button */}
+          <View style={styles.heartbeatContainer}>
+            <HeartbeatButton
+              onPress={handleHeartbeat}
+              disabled={!isVaultSetup}
+              loading={isConfirming}
+              stage={escalationStage}
+              secondsRemaining={secondsRemaining}
+            />
+          </View>
+
+          {/* Stats Row */}
+          <View style={styles.statsRow}>
+            <View style={styles.statCell}>
+              <MaterialCommunityIcons name="clock-outline" size={11} color={escalationStage > 0 ? cfg.color : 'rgba(255,255,255,0.3)'} />
+              <Text style={[styles.statValue, escalationStage > 0 && { color: cfg.color }]}>{lastBeatLabel}</Text>
+              <Text style={styles.statLabel}>Last Beat</Text>
+            </View>
+            <View style={[styles.statCell, styles.statCellBorder]}>
+              <MaterialCommunityIcons name="clock-outline" size={11} color={escalationStage > 0 ? cfg.color : 'rgba(255,255,255,0.3)'} />
+              <Text style={[styles.statValue, escalationStage > 0 && { color: cfg.color }]}>{nextDueLabel}</Text>
+              <Text style={styles.statLabel}>Next Due</Text>
+            </View>
+            <View style={styles.statCell}>
+              <MaterialCommunityIcons name="account-group" size={11} color="rgba(255,255,255,0.3)" />
+              <Text style={styles.statValue}>{String(beneficiaryCount)}</Text>
+              <Text style={styles.statLabel}>Beneficiaries</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Execution In Progress */}
+      {escalationStage === 4 && (
+        <TouchableOpacity style={styles.executionCard} onPress={() => navigation.navigate('ExecutionLog')}>
+          <MaterialCommunityIcons name="alert-octagon" size={20} color={COLORS.critical} />
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <Text style={styles.executionTitle}>Distribution In Progress</Text>
+            <Text style={styles.executionSubtitle}>Assets are being distributed to beneficiaries.</Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={18} color="rgba(255,255,255,0.3)" />
+        </TouchableOpacity>
+      )}
+
+      {/* Vault Executed */}
+      {vaultData?.executed && (
+        <View style={styles.executedCard}>
+          <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.accent} />
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <Text style={styles.executedTitle}>Vault Executed</Text>
+            <Text style={styles.executedSubtitle}>Estate plan executed. Assets distributed.</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Token List */}
+      <View style={styles.tokenListHeader}>
+        <Text style={styles.tokenListLabel}>YOUR TOKENS</Text>
+        <Text style={styles.tokenListCount}>{balances.length} assets</Text>
+      </View>
+      <View style={styles.tokenListCard}>
+        {error && <Text style={styles.errorText}>{error}</Text>}
         {isLoading && balances.length === 0 ? (
           <>
             <SkeletonTokenRow />
@@ -183,33 +367,24 @@ export function DashboardScreen() {
           <Text style={styles.emptyText}>No tokens found</Text>
         ) : (
           balances.map((token, i) => (
-            <View key={i} style={[styles.tokenRow, i === 0 && { borderTopWidth: 0 }]}>
+            <View
+              key={i}
+              style={[styles.tokenRow, i < balances.length - 1 && styles.tokenRowBorder]}
+            >
+              <TokenIcon symbol={token.symbol} />
               <View style={styles.tokenLeft}>
-                <View style={[styles.tokenIcon, { backgroundColor: COLORS.accent + '20' }]}>
-                  <Text style={styles.tokenIconText}>
-                    {token.symbol.charAt(0)}
-                  </Text>
-                </View>
-                <View>
-                  <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                  <Text style={[styles.tokenAmount, { fontFamily: FONTS.mono }]}>
-                    {formatTokenAmount(token.amount, token.decimals > 4 ? 4 : token.decimals)}
-                  </Text>
-                </View>
+                <Text style={styles.tokenSymbol}>{token.symbol}</Text>
+                <Text style={styles.tokenAmount}>
+                  {formatTokenAmount(token.amount, token.decimals > 4 ? 4 : token.decimals)} {token.symbol}
+                </Text>
               </View>
               <View style={styles.tokenRight}>
                 {token.usdValue > 0 && (
                   <Text style={styles.tokenUsd}>{formatUsd(token.usdValue)}</Text>
                 )}
                 {token.change24h != null && (
-                  <Text
-                    style={[
-                      styles.tokenChange,
-                      { color: token.change24h >= 0 ? COLORS.healthy : COLORS.critical },
-                    ]}
-                  >
-                    {token.change24h >= 0 ? '+' : ''}
-                    {token.change24h.toFixed(1)}%
+                  <Text style={[styles.tokenChange, { color: token.change24h >= 0 ? COLORS.accent : COLORS.critical }]}>
+                    {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
                   </Text>
                 )}
               </View>
@@ -218,237 +393,46 @@ export function DashboardScreen() {
         )}
       </View>
 
-      {/* Vault Section */}
-      <StatusIndicator
-        stage={escalationStage}
-        isActive={isVaultSetup ? (vaultData?.active ?? false) : false}
-      />
-
-      <EscalationBanner stage={escalationStage} secondsRemaining={secondsRemaining} />
-
-      {/* Execution in Progress card */}
-      {escalationStage === 4 && (
+      {/* Setup CTA if no vault */}
+      {!isVaultSetup && (
         <TouchableOpacity
-          style={styles.executionCard}
-          onPress={() => navigation.navigate('ExecutionLog')}
+          style={styles.setupCta}
+          onPress={() => navigation.getParent()?.navigate('Setup')}
         >
-          <Text style={styles.executionTitle}>Execution In Progress</Text>
-          <Text style={styles.executionSubtitle}>
-            Assets are being distributed to beneficiaries.
-          </Text>
-          <Text style={styles.executionLink}>View Execution Log →</Text>
+          <View style={styles.setupCtaIcon}>
+            <MaterialCommunityIcons name="account-group" size={16} color={COLORS.solanaPurple} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.setupCtaTitle}>No beneficiaries set</Text>
+            <Text style={styles.setupCtaSubtitle}>Complete vault setup to protect your crypto</Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={16} color="rgba(153,69,255,0.6)" />
         </TouchableOpacity>
-      )}
-
-      {/* Vault Executed state */}
-      {vaultData?.executed && (
-        <View style={styles.executedCard}>
-          <Text style={styles.executedTitle}>Vault Executed</Text>
-          <Text style={styles.executedSubtitle}>
-            Estate plan has been executed. Assets have been distributed.
-          </Text>
-        </View>
-      )}
-
-      {/* Heartbeat Button */}
-      {!vaultData?.executed && (
-        <HeartbeatButton
-          onPress={handleHeartbeat}
-          disabled={!isVaultSetup}
-          loading={isConfirming}
-          stage={escalationStage}
-          secondsRemaining={secondsRemaining}
-        />
-      )}
-
-      {/* Heartbeat Status */}
-      {heartbeatStatus && heartbeatStatus.lastHeartbeat > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Heartbeat Status</Text>
-          <StatRow
-            label="Last confirmed"
-            value={timeAgo(heartbeatStatus.lastHeartbeat)}
-          />
-          <StatRow label="Method" value={heartbeatStatus.lastMethod} />
-          <StatRow
-            label="Total confirmations"
-            value={String(heartbeatStatus.totalHeartbeats)}
-          />
-          <StatRow
-            label="Status"
-            value={heartbeatStatus.isOverdue ? 'OVERDUE' : 'On time'}
-          />
-        </View>
-      )}
-
-      {/* Vault Info */}
-      {isLoadingVault ? (
-        <View style={styles.card}>
-          <SkeletonBar width={120} height={16} />
-          <SkeletonBar width={'100%' as any} height={14} style={{ marginTop: SPACING.sm }} />
-          <SkeletonBar width={'80%' as any} height={14} style={{ marginTop: SPACING.xs }} />
-        </View>
-      ) : isVaultSetup ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Vault Status</Text>
-          <StatRow
-            label="Last Heartbeat"
-            value={
-              heartbeatData
-                ? timeAgo(heartbeatData.lastHeartbeat.toNumber())
-                : 'N/A'
-            }
-          />
-          <StatRow
-            label="Total Heartbeats"
-            value={
-              heartbeatData
-                ? heartbeatData.totalHeartbeats.toString()
-                : '0'
-            }
-          />
-          <StatRow
-            label="Beneficiaries"
-            value={String(vaultData?.beneficiaries?.length ?? 0)}
-          />
-          <StatRow
-            label="Stage"
-            value={`${escalationStage} (${
-              escalationStage === 0
-                ? 'Normal'
-                : escalationStage === 4
-                  ? 'Executing'
-                  : 'Escalating'
-            })`}
-          />
-        </View>
-      ) : (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>No Vault Configured</Text>
-          <Text style={styles.cardSubtitle}>
-            Go to Setup tab to create your estate plan.
-          </Text>
-        </View>
       )}
 
       {/* DeFi Positions Summary */}
       {defiPositions.length > 0 && (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>
-            DeFi Positions ({defiPositions.length})
-          </Text>
+          <Text style={styles.sectionLabel}>DEFI POSITIONS ({defiPositions.length})</Text>
           {defiPositions.slice(0, 3).map((pos: DeFiPosition, i: number) => (
-            <StatRow
-              key={i}
-              label={pos.protocol.replace('_', ' ')}
-              value={
-                pos.estimatedValueSol > 0
-                  ? `~${pos.estimatedValueSol.toFixed(4)} SOL`
-                  : pos.type
-              }
-            />
+            <View key={i} style={styles.defiRow}>
+              <Text style={styles.defiLabel}>{pos.protocol.replace('_', ' ')}</Text>
+              <Text style={styles.defiValue}>
+                {pos.estimatedValueSol > 0 ? `~${pos.estimatedValueSol.toFixed(4)} SOL` : pos.type}
+              </Text>
+            </View>
           ))}
           {defiPositions.length > 3 && (
-            <Text style={styles.cardSubtitle}>
-              +{defiPositions.length - 3} more positions
-            </Text>
+            <Text style={styles.defiMore}>+{defiPositions.length - 3} more positions</Text>
           )}
         </View>
       )}
 
-      {/* Wallet Info */}
-      <View style={styles.card}>
-        <StatRow
-          label="Wallet"
-          value={truncateAddress(publicKey?.toString() ?? '', 6)}
-          mono
-        />
-      </View>
+      {/* Demo Controls */}
+      {isDemoMode && <DemoControls stage={escalationStage} />}
 
-      <View style={{ height: SPACING.xxl }} />
+      <View style={{ height: 48 }} />
     </ScrollView>
-  );
-}
-
-function StatRow({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <View style={styles.statRow}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={[styles.statValue, mono && { fontFamily: FONTS.mono }]}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function SkeletonBar({
-  width,
-  height,
-  style,
-}: {
-  width: number | string;
-  height: number;
-  style?: any;
-}) {
-  const opacity = useRef(new Animated.Value(0.3)).current;
-
-  useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: 0.7,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 0.3,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, []);
-
-  return (
-    <Animated.View
-      style={[
-        {
-          width: width as any,
-          height,
-          backgroundColor: COLORS.surfaceHover,
-          borderRadius: 4,
-          opacity,
-        },
-        style,
-      ]}
-    />
-  );
-}
-
-function SkeletonTokenRow() {
-  return (
-    <View style={[styles.tokenRow, { borderTopWidth: 0 }]}>
-      <View style={styles.tokenLeft}>
-        <SkeletonBar width={32} height={32} style={{ borderRadius: 16 }} />
-        <View>
-          <SkeletonBar width={50} height={14} />
-          <SkeletonBar width={80} height={12} style={{ marginTop: 4 }} />
-        </View>
-      </View>
-      <View style={styles.tokenRight}>
-        <SkeletonBar width={60} height={14} />
-      </View>
-    </View>
   );
 }
 
@@ -462,195 +446,475 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.xl,
+    padding: 32,
+  },
+  connectLogoContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(0,255,163,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,163,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
   },
   heroTitle: {
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 26,
+    fontWeight: '700',
     color: COLORS.textPrimary,
-    marginBottom: SPACING.sm,
+    fontFamily: FONTS.primaryBold,
+    marginBottom: 8,
   },
   heroSubtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: COLORS.textSecondary,
-    marginBottom: SPACING.xl,
+    fontFamily: FONTS.primary,
+    marginBottom: 32,
     textAlign: 'center',
   },
   connectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.accent,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.xl,
-    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 16,
   },
   connectButtonText: {
-    color: COLORS.textPrimary,
-    fontSize: 16,
+    color: COLORS.bg,
+    fontSize: 15,
     fontWeight: '700',
+    fontFamily: FONTS.primaryBold,
   },
-  demoBadge: {
-    backgroundColor: COLORS.accent + '20',
+
+  // Header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerLogo: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: 'rgba(153,69,255,0.2)',
     borderWidth: 1,
-    borderColor: COLORS.accent,
+    borderColor: 'rgba(153,69,255,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+    fontFamily: FONTS.primaryBold,
+  },
+  headerSubtitle: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 10,
+    fontFamily: FONTS.primary,
+  },
+  headerSettingsBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Demo badge
+  demoBadge: {
+    backgroundColor: 'rgba(0,255,163,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,163,0.2)',
     borderRadius: 20,
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.md,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
     alignSelf: 'center',
-    marginTop: SPACING.sm,
+    marginTop: 4,
+    marginBottom: 8,
   },
   demoBadgeText: {
     color: COLORS.accent,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.5,
+    fontFamily: FONTS.primaryBold,
   },
-  portfolioHeader: {
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.xs,
+
+  // Portfolio Card
+  portfolioCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  portfolioLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 1.5,
+    marginBottom: 4,
+    fontFamily: FONTS.primaryMedium,
+  },
+  portfolioRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 12,
   },
   portfolioValue: {
     fontSize: 36,
-    fontWeight: '800',
-    color: COLORS.textPrimary,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+    fontFamily: FONTS.primaryBold,
+    lineHeight: 40,
   },
-  portfolioSol: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-    fontFamily: FONTS.mono,
-    marginTop: 2,
+  changeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,255,163,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,163,0.2)',
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginBottom: 4,
   },
-  card: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
-    marginHorizontal: SPACING.md,
-    marginTop: SPACING.md,
+  changeArrow: {
+    color: COLORS.accent,
+    fontSize: 8,
   },
-  cardTitle: {
-    fontSize: 16,
+  changeText: {
+    color: COLORS.accent,
+    fontSize: 11,
     fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.sm,
+    fontFamily: FONTS.primarySemiBold,
   },
-  cardSubtitle: {
-    fontSize: 14,
+  portfolioSubtext: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 11,
+    marginTop: 4,
+    fontFamily: FONTS.primary,
+  },
+
+  // Vault Status Card
+  vaultCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  heartbeatContainer: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  statCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    backgroundColor: COLORS.surface,
+  },
+  statCellBorder: {
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  statValue: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 2,
+    fontFamily: FONTS.primaryBold,
+  },
+  statLabel: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 9,
+    marginTop: 1,
+    fontFamily: FONTS.primary,
+  },
+
+  // Execution card
+  executionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(220,38,38,0.1)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.3)',
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  executionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.critical,
+    fontFamily: FONTS.primaryBold,
+  },
+  executionSubtitle: {
+    fontSize: 12,
     color: COLORS.textSecondary,
+    marginTop: 2,
+    fontFamily: FONTS.primary,
   },
-  emptyText: {
-    fontSize: 14,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    paddingVertical: SPACING.md,
+
+  // Executed card
+  executedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,255,163,0.06)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,163,0.2)',
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  executedTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.accent,
+    fontFamily: FONTS.primaryBold,
+  },
+  executedSubtitle: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    fontFamily: FONTS.primary,
+  },
+
+  // Token list
+  tokenListHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  tokenListLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1,
+    fontFamily: FONTS.primarySemiBold,
+  },
+  tokenListCount: {
+    color: 'rgba(255,255,255,0.2)',
+    fontSize: 10,
+    fontFamily: FONTS.primary,
+  },
+  tokenListCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    overflow: 'hidden',
   },
   tokenRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.borderLight,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
-  tokenLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
+  tokenRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   tokenIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   tokenIconText: {
-    fontSize: 14,
+    fontSize: 10,
     fontWeight: '700',
-    color: COLORS.accent,
+    fontFamily: FONTS.primaryBold,
+  },
+  tokenLeft: {
+    flex: 1,
+    minWidth: 0,
   },
   tokenSymbol: {
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
-    color: COLORS.textPrimary,
+    fontFamily: FONTS.primarySemiBold,
   },
   tokenAmount: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+    fontFamily: FONTS.primary,
     marginTop: 1,
   },
   tokenRight: {
     alignItems: 'flex-end',
   },
   tokenUsd: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: COLORS.textPrimary,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: FONTS.primarySemiBold,
   },
   tokenChange: {
+    fontSize: 11,
+    marginTop: 1,
+    fontFamily: FONTS.primary,
+  },
+
+  // Setup CTA
+  setupCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(153,69,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(153,69,255,0.2)',
+    borderRadius: 16,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    gap: 12,
+  },
+  setupCtaIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(153,69,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  setupCtaTitle: {
+    color: COLORS.solanaPurple,
     fontSize: 12,
     fontWeight: '600',
-    marginTop: 1,
+    fontFamily: FONTS.primarySemiBold,
   },
-  statRow: {
+  setupCtaSubtitle: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+    fontFamily: FONTS.primary,
+  },
+
+  // Card
+  card: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  sectionLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1,
+    marginBottom: 8,
+    fontFamily: FONTS.primarySemiBold,
+  },
+  defiRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: SPACING.xs,
+    paddingVertical: 4,
   },
-  statLabel: {
-    fontSize: 14,
+  defiLabel: {
     color: COLORS.textSecondary,
+    fontSize: 12,
+    fontFamily: FONTS.primary,
   },
-  statValue: {
-    fontSize: 14,
+  defiValue: {
     color: COLORS.textPrimary,
+    fontSize: 12,
     fontWeight: '500',
+    fontFamily: FONTS.primaryMedium,
   },
-  errorText: {
-    fontSize: 13,
-    color: COLORS.critical,
-    marginBottom: SPACING.xs,
-  },
-  executionCard: {
-    backgroundColor: COLORS.critical + '20',
-    borderRadius: 12,
-    padding: SPACING.md,
-    marginHorizontal: SPACING.md,
-    marginTop: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.critical,
-  },
-  executionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.critical,
-  },
-  executionSubtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.xs,
-  },
-  executionLink: {
-    fontSize: 14,
-    color: COLORS.accent,
-    marginTop: SPACING.sm,
-    fontWeight: '600',
-  },
-  executedCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
-    marginHorizontal: SPACING.md,
-    marginTop: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.textMuted,
-  },
-  executedTitle: {
-    fontSize: 16,
-    fontWeight: '700',
+  defiMore: {
     color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 4,
+    fontFamily: FONTS.primary,
   },
-  executedSubtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.xs,
+
+  // Error/empty
+  errorText: {
+    fontSize: 12,
+    color: COLORS.critical,
+    padding: 16,
+    fontFamily: FONTS.primary,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    padding: 24,
+    fontFamily: FONTS.primary,
+  },
+
+  // Demo controls
+  demoControlsContainer: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  demoControlsLabel: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 1,
+    marginBottom: 6,
+    fontFamily: FONTS.primarySemiBold,
+  },
+  demoControlsRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  demoControlsButton: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  demoControlsButtonText: {
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: FONTS.primarySemiBold,
   },
 });

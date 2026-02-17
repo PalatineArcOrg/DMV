@@ -4,6 +4,13 @@ import './src/polyfills';
 import React, { useEffect, useState } from 'react';
 import { StatusBar, View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import {
+  useFonts,
+  SpaceGrotesk_400Regular,
+  SpaceGrotesk_500Medium,
+  SpaceGrotesk_600SemiBold,
+  SpaceGrotesk_700Bold,
+} from '@expo-google-fonts/space-grotesk';
 import { ConnectionProvider } from './src/utils/ConnectionProvider';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RootNavigator } from './src/navigation/RootNavigator';
@@ -12,13 +19,20 @@ import { NotificationService } from './src/notifications/NotificationService';
 import { useDemoStore } from './src/store/useDemoStore';
 import { useHeartbeatStore } from './src/store/useHeartbeatStore';
 import { getSetting } from './src/db/settingsRepo';
-import { COLORS } from './src/utils/constants';
+import { COLORS, FONTS } from './src/utils/constants';
 
 const queryClient = new QueryClient();
 
 export default function App() {
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
+
+  const [fontsLoaded] = useFonts({
+    SpaceGrotesk_400Regular,
+    SpaceGrotesk_500Medium,
+    SpaceGrotesk_600SemiBold,
+    SpaceGrotesk_700Bold,
+  });
 
   useEffect(() => {
     initDatabase()
@@ -44,10 +58,13 @@ export default function App() {
     );
   }
 
-  if (!dbReady) {
+  if (!dbReady || !fontsLoaded) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color={COLORS.accent} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.accent} />
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
       </View>
     );
   }
@@ -71,8 +88,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.bg,
   },
+  loadingContainer: {
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 13,
+    fontFamily: FONTS.primary,
+  },
   errorText: {
     color: COLORS.critical,
     fontSize: 14,
+    fontFamily: FONTS.primary,
   },
 });

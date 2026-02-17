@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
+    "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-navigation/bottom-tabs": "^6.5.16",
     "@react-navigation/native": "^6.1.14",
@@ -30,6 +31,8 @@
     "expo-clipboard": "~7.0.1",
     "expo-crypto": "~14.0.2",
     "expo-dev-client": "~5.0.19",
+    "expo-font": "~13.0.4",
+    "expo-modules-core": "~2.2.3",
     "expo-notifications": "~0.29.14",
     "expo-secure-store": "~14.0.1",
     "expo-sqlite": "~15.1.4",

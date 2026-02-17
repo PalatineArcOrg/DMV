@@ -855,6 +855,11 @@
   dependencies:
     eslint-visitor-keys "^3.4.3"
 
+"@expo-google-fonts/space-grotesk@^0.4.1":
+  version "0.4.1"
+  resolved "https://registry.yarnpkg.com/@expo-google-fonts/space-grotesk/-/space-grotesk-0.4.1.tgz#cb1f58e17e9bc91d2b87270d37cb26cd6b6773ac"
+  integrity sha512-ZVQYw4Ok/pgcSJiufP8oRZE3AVxS9xtmKEUfsurbHkHNdMc/GA1gDXP9G4Cr7KL4KqSc0haexR2TuMigotCn4Q==
+
 "@expo/bunyan@^4.0.0":
   version "4.0.1"
   resolved "https://registry.yarnpkg.com/@expo/bunyan/-/bunyan-4.0.1.tgz#ab9e17e36c71c704a0ce72168378a487368da736"
@@ -3586,7 +3591,7 @@ expo-modules-autolinking@2.0.8:
     require-from-string "^2.0.2"
     resolve-from "^5.0.0"
 
-expo-modules-core@2.2.3:
+expo-modules-core@2.2.3, expo-modules-core@~2.2.3:
   version "2.2.3"
   resolved "https://registry.yarnpkg.com/expo-modules-core/-/expo-modules-core-2.2.3.tgz#438084d5386a95dc7327656072c4ff05dd101d99"
   integrity sha512-01QqZzpP/wWlxnNly4G06MsOBUTbMDj02DQigZoXfDh80vd/rk3/uVXqnZgOdLSggTs6DnvOgAUy0H2q30XdUg==

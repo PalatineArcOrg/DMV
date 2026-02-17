@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
-import { COLORS, SPACING } from '../utils/constants';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { COLORS, FONTS, STAGE_CONFIG } from '../utils/constants';
 import { EscalationStage } from '../types';
 
 interface StatusIndicatorProps {
@@ -8,141 +9,57 @@ interface StatusIndicatorProps {
   isActive: boolean;
 }
 
-function getColor(stage: EscalationStage, isActive: boolean): string {
-  if (!isActive) return COLORS.textMuted;
-  switch (stage) {
-    case 0:
-      return COLORS.healthy;
-    case 1:
-    case 2:
-      return COLORS.warning;
-    case 3:
-    case 4:
-      return COLORS.critical;
-    default:
-      return COLORS.textMuted;
-  }
-}
-
-function getLabel(stage: EscalationStage, isActive: boolean): string {
-  if (!isActive) return 'Inactive';
-  switch (stage) {
-    case 0:
-      return 'Vault Active';
-    case 1:
-      return 'Heartbeat Overdue';
-    case 2:
-      return 'Emergency Alert';
-    case 3:
-      return 'Final Warning';
-    case 4:
-      return 'Executing';
-    default:
-      return 'Unknown';
-  }
-}
-
-function getPulseConfig(stage: EscalationStage, isActive: boolean) {
-  if (!isActive) return { minScale: 1, maxScale: 1, duration: 2000 };
-  switch (stage) {
-    case 0:
-      return { minScale: 0.95, maxScale: 1.08, duration: 2000 };
-    case 1:
-    case 2:
-      return { minScale: 0.92, maxScale: 1.1, duration: 1200 };
-    case 3:
-    case 4:
-      return { minScale: 0.9, maxScale: 1.15, duration: 500 };
-    default:
-      return { minScale: 1, maxScale: 1, duration: 2000 };
-  }
-}
-
 export function StatusIndicator({ stage, isActive }: StatusIndicatorProps) {
-  const color = getColor(stage, isActive);
-  const label = getLabel(stage, isActive);
-  const pulseConfig = getPulseConfig(stage, isActive);
-
-  const pulseAnim = useRef(new Animated.Value(0)).current;
+  const cfg = STAGE_CONFIG[stage] || STAGE_CONFIG[0];
+  const iconScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (!isActive) {
-      pulseAnim.setValue(0);
-      return;
+    if (isActive && stage >= 1) {
+      const anim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(iconScale, { toValue: 1.1, duration: 750, useNativeDriver: true }),
+          Animated.timing(iconScale, { toValue: 1, duration: 750, useNativeDriver: true }),
+        ]),
+      );
+      anim.start();
+      return () => anim.stop();
+    } else {
+      iconScale.setValue(1);
     }
+  }, [stage, isActive]);
 
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: pulseConfig.duration,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 0,
-          duration: pulseConfig.duration,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    animation.start();
-
-    return () => animation.stop();
-  }, [stage, isActive, pulseConfig.duration]);
-
-  const scale = pulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [pulseConfig.minScale, pulseConfig.maxScale],
-  });
-
-  const glowScale = pulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [pulseConfig.minScale * 0.95, pulseConfig.maxScale * 1.1],
-  });
-
-  const glowOpacity = pulseAnim.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [0.15, 0.3, 0.15],
-  });
+  const stageStatus = stage === 4 ? 'Irreversible' : stage === 0 ? 'Healthy' : 'Action required';
+  const label = isActive ? cfg.label : 'Inactive';
+  const color = isActive ? cfg.color : COLORS.textMuted;
 
   return (
-    <View style={styles.container}>
-      {/* Glow ring */}
-      <Animated.View
-        style={[
-          styles.glowRing,
-          {
-            backgroundColor: color + '30',
-            transform: [{ scale: glowScale }],
-            opacity: glowOpacity,
-          },
-        ]}
-      />
-
-      {/* Main orb */}
-      <Animated.View
-        style={[
-          styles.orb,
-          {
-            backgroundColor: color,
-            transform: [{ scale }],
-            shadowColor: color,
-            shadowOpacity: 0.6,
-            shadowRadius: 20,
-            shadowOffset: { width: 0, height: 0 },
-            elevation: 12,
-          },
-        ]}
-      >
-        <View style={[styles.orbHighlight, { backgroundColor: color + 'CC' }]} />
-      </Animated.View>
-
-      {/* Label */}
-      <View style={styles.labelContainer}>
-        <Text style={[styles.label, { color }]}>{label}</Text>
-        <Text style={styles.sublabel}>
-          {isActive ? `Stage ${stage}` : 'Setup Required'}
-        </Text>
+    <View style={[styles.container, { backgroundColor: isActive ? cfg.dimColor : 'transparent', borderBottomColor: isActive ? cfg.borderColor : COLORS.borderLight }]}>
+      <View style={styles.row}>
+        <Animated.View
+          style={[
+            styles.iconBadge,
+            {
+              backgroundColor: isActive ? cfg.dimColor : 'rgba(255,255,255,0.06)',
+              borderColor: isActive ? cfg.borderColor : 'rgba(255,255,255,0.1)',
+              transform: [{ scale: iconScale }],
+            },
+          ]}
+        >
+          <MaterialCommunityIcons
+            name={(cfg.icon as any) || 'shield-check'}
+            size={13}
+            color={color}
+          />
+        </Animated.View>
+        <View style={styles.labelColumn}>
+          <Text style={[styles.label, { color }]}>{label}</Text>
+          <Text style={styles.sublabel}>
+            {isActive ? `Stage ${stage} \u00B7 ${stageStatus}` : 'Setup Required'}
+          </Text>
+        </View>
+      </View>
+      <View style={[styles.statusDot, { backgroundColor: cfg.dimColor, borderColor: cfg.borderColor }]}>
+        <Text style={{ color, fontSize: 10, fontWeight: '700' }}>{'\u25CF'}</Text>
       </View>
     </View>
   );
@@ -150,40 +67,43 @@ export function StatusIndicator({ stage, isActive }: StatusIndicatorProps) {
 
 const styles = StyleSheet.create({
   container: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.lg,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  iconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  glowRing: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-  },
-  orb: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  orbHighlight: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    opacity: 0.5,
-  },
-  labelContainer: {
-    alignItems: 'center',
-    marginTop: SPACING.sm,
+  labelColumn: {
+    flexDirection: 'column',
   },
   label: {
-    fontSize: 18,
+    fontSize: 13,
     fontWeight: '700',
+    fontFamily: FONTS.primaryBold,
   },
   sublabel: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    marginTop: 2,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.4)',
+    fontFamily: FONTS.primary,
+  },
+  statusDot: {
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
   },
 });

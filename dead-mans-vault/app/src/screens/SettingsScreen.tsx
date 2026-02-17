@@ -1,206 +1,480 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Animated,
+  Alert,
+} from 'react-native';
+import * as ExpoClipboard from 'expo-clipboard';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useWallet } from '../hooks/useWallet';
 import { useDemoStore } from '../store/useDemoStore';
-import { COLORS, SPACING, PROGRAM_ID, RPC_URL, FONTS } from '../utils/constants';
-import { truncateAddress } from '../utils/formatting';
+import { useVaultStore } from '../store/useVaultStore';
+import { useHeartbeatStore } from '../store/useHeartbeatStore';
+import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG } from '../utils/constants';
+import { truncateAddress, formatDuration } from '../utils/formatting';
+import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
 
 export function SettingsScreen() {
   const { publicKey, connected, connect, disconnect } = useWallet();
   const { isDemoMode, setDemoMode, incrementTap } = useDemoStore();
+  const { beneficiaries, vaultConfig } = useVaultStore();
+  const heartbeatConfig = useHeartbeatStore((s) => s.config);
+  const escalationStage = useEscalationStore((s) => s.state.stage);
+  const [copied, setCopied] = useState(false);
+
+  const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
+
+  const handleCopy = useCallback(() => {
+    if (publicKey) {
+      ExpoClipboard.setStringAsync(publicKey.toBase58());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [publicKey]);
+
+  const handleReset = useCallback(() => {
+    Alert.alert(
+      'Reset Vault?',
+      'This will clear all local vault data including beneficiaries and settings. On-chain state is unaffected.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            useVaultStore.getState().reset?.();
+          },
+        },
+      ],
+    );
+  }, []);
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Text style={styles.header}>Settings</Text>
 
-      {isDemoMode && (
-        <View style={styles.demoBadge}>
-          <Text style={styles.demoBadgeText}>DEMO MODE ACTIVE</Text>
+      {/* Vault Status */}
+      {vaultConfig && (
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionLabel}>VAULT STATUS</Text>
+          <View style={styles.card}>
+            <View style={[styles.statusRow, { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }]}>
+              <View style={[styles.statusDot, { backgroundColor: stageCfg.color }]} />
+              <Text style={[styles.statusLabel, { color: stageCfg.color }]}>{stageCfg.label}</Text>
+              <Text style={styles.statusStageBadge}>{'\u00B7'} Stage {escalationStage}</Text>
+            </View>
+            <View style={styles.statusGrid}>
+              <View style={styles.statusGridCell}>
+                <Text style={styles.statusGridLabel}>Interval</Text>
+                <Text style={styles.statusGridValue}>
+                  {heartbeatConfig ? formatDuration(heartbeatConfig.intervalSeconds) : '-'}
+                </Text>
+              </View>
+              <View style={[styles.statusGridCell, styles.statusGridCellBorder]}>
+                <Text style={styles.statusGridLabel}>Grace</Text>
+                <Text style={styles.statusGridValue}>
+                  {heartbeatConfig ? `${Math.round(heartbeatConfig.intervalSeconds / 86400 * 3)}d` : '-'}
+                </Text>
+              </View>
+              <View style={styles.statusGridCell}>
+                <Text style={styles.statusGridLabel}>Recipients</Text>
+                <Text style={styles.statusGridValue}>{beneficiaries.length}</Text>
+              </View>
+            </View>
+          </View>
         </View>
       )}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Wallet</Text>
-        {connected && publicKey ? (
-          <>
-            <SettingRow
-              label="Address"
-              value={truncateAddress(publicKey.toString(), 8)}
-              mono
-            />
-            <TouchableOpacity
-              style={styles.disconnectButton}
-              onPress={disconnect}
-            >
-              <Text style={styles.disconnectText}>Disconnect</Text>
+      {/* Developer */}
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionLabel}>DEVELOPER</Text>
+        <View style={styles.card}>
+          <ToggleRow
+            icon="flash"
+            iconColor="#F59E0B"
+            label="Demo Mode"
+            description="Show stage controls on dashboard"
+            value={isDemoMode}
+            onChange={setDemoMode}
+          />
+        </View>
+      </View>
+
+      {/* Wallet */}
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionLabel}>WALLET</Text>
+        <View style={styles.card}>
+          {connected && publicKey ? (
+            <>
+              <View style={styles.walletRow}>
+                <View style={styles.walletIcon}>
+                  <MaterialCommunityIcons name="wallet" size={15} color={COLORS.solanaPurple} />
+                </View>
+                <View style={styles.walletInfo}>
+                  <Text style={styles.walletLabel}>Connected Wallet</Text>
+                  <Text style={styles.walletAddr}>{truncateAddress(publicKey.toBase58(), 6)}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.copyBtn, copied && styles.copyBtnActive]}
+                  onPress={handleCopy}
+                >
+                  <MaterialCommunityIcons
+                    name={copied ? 'check' : 'content-copy'}
+                    size={13}
+                    color={copied ? COLORS.accent : 'rgba(255,255,255,0.4)'}
+                  />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.rowDivider} />
+              <TouchableOpacity style={styles.actionRow} onPress={disconnect}>
+                <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
+                  <MaterialCommunityIcons name="logout" size={15} color={COLORS.critical} />
+                </View>
+                <Text style={[styles.actionLabel, { color: COLORS.critical }]}>Disconnect Wallet</Text>
+                <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity style={styles.connectBtn} onPress={connect}>
+              <MaterialCommunityIcons name="wallet" size={16} color={COLORS.bg} />
+              <Text style={styles.connectBtnText}>Connect Wallet</Text>
             </TouchableOpacity>
-          </>
-        ) : (
-          <TouchableOpacity style={styles.connectButton} onPress={connect}>
-            <Text style={styles.connectText}>Connect Wallet</Text>
+          )}
+        </View>
+      </View>
+
+      {/* Vault Contract */}
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionLabel}>VAULT CONTRACT</Text>
+        <View style={styles.card}>
+          <SettingRow icon="shield-check" iconColor={COLORS.accent} label="Vault Program" value={truncateAddress(PROGRAM_ID, 4)} />
+          <View style={styles.rowDivider} />
+          <SettingRow icon="account-group" iconColor={COLORS.solanaPurple} label="Beneficiaries" value={`${beneficiaries.length} configured`} />
+          <View style={styles.rowDivider} />
+          <SettingRow icon="clock-outline" iconColor={COLORS.blueAccent} label="Heartbeat Interval" value={heartbeatConfig ? formatDuration(heartbeatConfig.intervalSeconds) : 'Not set'} />
+          <View style={styles.rowDivider} />
+          <SettingRow icon="web" iconColor="rgba(255,255,255,0.3)" label="Network" value="Devnet" />
+        </View>
+      </View>
+
+      {/* About */}
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionLabel}>ABOUT</Text>
+        <View style={styles.card}>
+          <TouchableOpacity onPress={incrementTap} activeOpacity={0.7}>
+            <SettingRow icon="information-outline" iconColor="rgba(255,255,255,0.3)" label="Version" value={`v${appJson.expo.version}`} />
           </TouchableOpacity>
-        )}
+          <View style={styles.rowDivider} />
+          <SettingRow icon="shield" iconColor="rgba(255,255,255,0.3)" label="Built for" value="Solana Seeker" />
+        </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Demo Mode</Text>
-        <Text style={styles.demoDescription}>
-          Use fast timers (30s stages) for testing escalation and execution flows.
-        </Text>
-        <TouchableOpacity
-          style={[styles.demoToggle, isDemoMode && styles.demoToggleActive]}
-          onPress={() => setDemoMode(!isDemoMode)}
-        >
-          <Text style={[styles.demoToggleText, isDemoMode && styles.demoToggleTextActive]}>
-            {isDemoMode ? 'Disable Demo Mode' : 'Enable Demo Mode'}
-          </Text>
-        </TouchableOpacity>
+      {/* Danger Zone */}
+      <View style={styles.sectionBlock}>
+        <Text style={[styles.sectionLabel, { color: 'rgba(239,68,68,0.4)' }]}>DANGER ZONE</Text>
+        <View style={[styles.card, { borderColor: 'rgba(239,68,68,0.15)' }]}>
+          <TouchableOpacity style={styles.actionRow} onPress={handleReset}>
+            <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
+              <MaterialCommunityIcons name="logout" size={15} color="#EF4444" />
+            </View>
+            <Text style={[styles.actionLabel, { color: '#EF4444' }]}>Reset Vault & Restart</Text>
+            <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Network</Text>
-        <SettingRow label="RPC" value={RPC_URL} mono />
-        <SettingRow label="Program ID" value={truncateAddress(PROGRAM_ID, 6)} mono />
-        <SettingRow label="Network" value="Devnet" />
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>About</Text>
-        <SettingRow label="App" value="Dead Man's Vault" />
-        <TouchableOpacity onPress={incrementTap} activeOpacity={0.7}>
-          <SettingRow label="Version" value={appJson.expo.version} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={{ height: SPACING.xxl }} />
+      <View style={{ height: 48 }} />
     </ScrollView>
   );
 }
 
-function SettingRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function SettingRow({ icon, iconColor, label, value }: {
+  icon: string;
+  iconColor: string;
+  label: string;
+  value: string;
+}) {
   return (
     <View style={styles.settingRow}>
-      <Text style={styles.settingLabel}>{label}</Text>
-      <Text
-        style={[styles.settingValue, mono && { fontFamily: FONTS.mono }]}
-        numberOfLines={1}
-      >
-        {value}
-      </Text>
+      <View style={[styles.settingIcon, { backgroundColor: iconColor + '15', borderColor: iconColor + '25' }]}>
+        <MaterialCommunityIcons name={icon as any} size={15} color={iconColor} />
+      </View>
+      <View style={styles.settingInfo}>
+        <Text style={styles.settingLabel}>{label}</Text>
+        {value ? <Text style={styles.settingValue}>{value}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+function ToggleRow({ icon, iconColor, label, description, value, onChange }: {
+  icon: string;
+  iconColor: string;
+  label: string;
+  description?: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const thumbAnim = useRef(new Animated.Value(value ? 1 : 0)).current;
+
+  const handleToggle = useCallback(() => {
+    const newVal = !value;
+    Animated.spring(thumbAnim, { toValue: newVal ? 1 : 0, useNativeDriver: false, friction: 8 }).start();
+    onChange(newVal);
+  }, [value, onChange, thumbAnim]);
+
+  const thumbLeft = thumbAnim.interpolate({ inputRange: [0, 1], outputRange: [2, 22] });
+  const trackColor = thumbAnim.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0.1)', iconColor] });
+  const thumbColor = thumbAnim.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0.5)', COLORS.bg] });
+
+  return (
+    <View style={styles.toggleRow}>
+      <View style={[styles.settingIcon, { backgroundColor: iconColor + '15', borderColor: iconColor + '25' }]}>
+        <MaterialCommunityIcons name={icon as any} size={15} color={iconColor} />
+      </View>
+      <View style={styles.toggleInfo}>
+        <Text style={styles.toggleLabel}>{label}</Text>
+        {description && <Text style={styles.toggleDesc}>{description}</Text>}
+      </View>
+      <TouchableOpacity onPress={handleToggle} activeOpacity={0.7}>
+        <Animated.View style={[styles.toggleTrack, { backgroundColor: trackColor }]}>
+          <Animated.View style={[styles.toggleThumb, { left: thumbLeft, backgroundColor: thumbColor }]} />
+        </Animated.View>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-    padding: SPACING.md,
-  },
+  container: { flex: 1, backgroundColor: COLORS.bg },
+  content: { paddingHorizontal: 16 },
   header: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.lg,
-    marginTop: SPACING.md,
+    color: '#FFFFFF',
+    fontFamily: FONTS.primaryBold,
+    marginTop: 16,
+    marginBottom: 20,
   },
-  demoBadge: {
-    backgroundColor: COLORS.accent + '20',
-    borderWidth: 1,
-    borderColor: COLORS.accent,
-    borderRadius: 8,
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.md,
-    alignSelf: 'flex-start',
-    marginBottom: SPACING.md,
-  },
-  demoBadgeText: {
-    color: COLORS.accent,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
+  sectionBlock: { marginBottom: 16 },
+  sectionLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.3)',
+    letterSpacing: 1.2,
+    fontFamily: FONTS.primarySemiBold,
+    marginBottom: 8,
+    paddingLeft: 4,
   },
   card: {
     backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: SPACING.sm,
-  },
-  demoDescription: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.sm,
-    lineHeight: 18,
-  },
-  demoToggle: {
-    backgroundColor: COLORS.surfaceHover,
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    paddingVertical: SPACING.sm,
-    borderRadius: 8,
+    borderColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  /* Vault Status */
+  statusRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.xs,
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
-  demoToggleActive: {
-    backgroundColor: COLORS.accent + '20',
-    borderColor: COLORS.accent,
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  demoToggleText: {
-    color: COLORS.textSecondary,
+  statusLabel: {
+    fontSize: 13,
     fontWeight: '600',
+    fontFamily: FONTS.primarySemiBold,
+  },
+  statusStageBadge: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: FONTS.primary,
+  },
+  statusGrid: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  statusGridCell: {
+    flex: 1,
+  },
+  statusGridCellBorder: {
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 12,
+  },
+  statusGridLabel: {
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.25)',
+    fontFamily: FONTS.primary,
+  },
+  statusGridValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+    fontFamily: FONTS.primarySemiBold,
+    marginTop: 2,
+  },
+  /* Wallet */
+  walletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  walletIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 12,
+    backgroundColor: 'rgba(153,69,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(153,69,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  walletInfo: { flex: 1 },
+  walletLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#FFFFFF',
+    fontFamily: FONTS.primaryMedium,
+  },
+  walletAddr: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: FONTS.mono,
+    marginTop: 1,
+  },
+  copyBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  copyBtnActive: {
+    backgroundColor: 'rgba(0,255,163,0.12)',
+    borderColor: 'rgba(0,255,163,0.25)',
+  },
+  connectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.accent,
+    borderRadius: 12,
+    paddingVertical: 14,
+    margin: 16,
+  },
+  connectBtnText: {
+    color: COLORS.bg,
     fontSize: 14,
+    fontWeight: '700',
+    fontFamily: FONTS.primaryBold,
   },
-  demoToggleTextActive: {
-    color: COLORS.accent,
+  /* Action rows */
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
+  actionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+    fontFamily: FONTS.primaryMedium,
+  },
+  /* Setting rows */
   settingRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: SPACING.sm,
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
+  settingIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingInfo: { flex: 1 },
   settingLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#FFFFFF',
+    fontFamily: FONTS.primaryMedium,
   },
   settingValue: {
-    fontSize: 14,
-    color: COLORS.textPrimary,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: FONTS.mono,
+    marginTop: 1,
+  },
+  /* Toggle */
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  toggleInfo: { flex: 1 },
+  toggleLabel: {
+    fontSize: 13,
     fontWeight: '500',
-    maxWidth: '60%',
+    color: '#FFFFFF',
+    fontFamily: FONTS.primaryMedium,
   },
-  connectButton: {
-    backgroundColor: COLORS.accent,
-    paddingVertical: SPACING.sm,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: SPACING.sm,
+  toggleDesc: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: FONTS.primary,
+    marginTop: 1,
   },
-  connectText: {
-    color: COLORS.textPrimary,
-    fontWeight: '600',
-    fontSize: 14,
+  toggleTrack: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    position: 'relative',
   },
-  disconnectButton: {
-    backgroundColor: COLORS.critical + '20',
-    borderWidth: 1,
-    borderColor: COLORS.critical,
-    paddingVertical: SPACING.sm,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: SPACING.sm,
-  },
-  disconnectText: {
-    color: COLORS.critical,
-    fontWeight: '600',
-    fontSize: 14,
+  toggleThumb: {
+    position: 'absolute',
+    top: 2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
   },
 });

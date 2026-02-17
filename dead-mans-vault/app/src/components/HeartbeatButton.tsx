@@ -1,13 +1,13 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import {
   TouchableOpacity,
   Text,
   View,
   StyleSheet,
-  ActivityIndicator,
   Animated,
 } from 'react-native';
-import { COLORS, SPACING } from '../utils/constants';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { COLORS, FONTS, STAGE_CONFIG } from '../utils/constants';
 import { EscalationStage } from '../types';
 
 interface HeartbeatButtonProps {
@@ -19,69 +19,25 @@ interface HeartbeatButtonProps {
   secondsRemaining?: number;
 }
 
-function formatCountdown(seconds: number): string {
-  if (seconds <= 0) return '0:00';
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  if (m >= 60) {
-    const h = Math.floor(m / 60);
-    const rm = m % 60;
-    return `${h}h ${rm}m`;
-  }
-  return `${m}:${s.toString().padStart(2, '0')}`;
+const ICON_MAP: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
+  'shield-check': 'shield-check',
+  'clock-outline': 'clock-outline',
+  'alert': 'alert',
+  'alert-octagon': 'alert-octagon',
+  'flash': 'flash',
+};
+
+function getButtonSize(stage: number): number {
+  if (stage <= 1) return 120;
+  if (stage === 2) return 130;
+  return 140;
 }
 
-function getStageConfig(stage: EscalationStage) {
-  switch (stage) {
-    case 0:
-      return {
-        bg: 'transparent',
-        borderColor: COLORS.accent,
-        textColor: COLORS.accent,
-        label: 'Vault Active',
-        showPulse: false,
-      };
-    case 1:
-      return {
-        bg: COLORS.warning + '15',
-        borderColor: COLORS.warning,
-        textColor: COLORS.warning,
-        label: 'Confirm Heartbeat',
-        showPulse: true,
-      };
-    case 2:
-      return {
-        bg: COLORS.warning + '25',
-        borderColor: COLORS.warning,
-        textColor: COLORS.warning,
-        label: 'Confirm Heartbeat',
-        showPulse: true,
-      };
-    case 3:
-      return {
-        bg: COLORS.critical + '25',
-        borderColor: COLORS.critical,
-        textColor: COLORS.critical,
-        label: 'CONFIRM NOW',
-        showPulse: true,
-      };
-    case 4:
-      return {
-        bg: COLORS.critical + '15',
-        borderColor: COLORS.critical,
-        textColor: COLORS.critical,
-        label: 'Executing...',
-        showPulse: false,
-      };
-    default:
-      return {
-        bg: 'transparent',
-        borderColor: COLORS.border,
-        textColor: COLORS.textMuted,
-        label: 'Setup Required',
-        showPulse: false,
-      };
-  }
+function getPulseDuration(stage: number): number {
+  if (stage <= 1) return 2500;
+  if (stage === 2) return 1800;
+  if (stage === 3) return 1200;
+  return 1800;
 }
 
 export function HeartbeatButton({
@@ -92,129 +48,251 @@ export function HeartbeatButton({
   stage = 0,
   secondsRemaining = 0,
 }: HeartbeatButtonProps) {
-  const borderAnim = useRef(new Animated.Value(0)).current;
-  const flashAnim = useRef(new Animated.Value(0)).current;
+  const [confirmed, setConfirmed] = useState(false);
+  const wasLoading = useRef(false);
 
-  const config = getStageConfig(stage);
-  const displayLabel = label ?? config.label;
+  const cfg = STAGE_CONFIG[stage] || STAGE_CONFIG[0];
+  const buttonSize = getButtonSize(stage);
+  const pulseDuration = getPulseDuration(stage);
+  const containerSize = buttonSize + 80;
 
-  // Pulsing border for warning/critical stages
+  // Pulse ring animations
+  const pulseScale0 = useRef(new Animated.Value(1)).current;
+  const pulseScale1 = useRef(new Animated.Value(1)).current;
+  const pulseScale2 = useRef(new Animated.Value(1)).current;
+  const pulseOpacity0 = useRef(new Animated.Value(0.4)).current;
+  const pulseOpacity1 = useRef(new Animated.Value(0.3)).current;
+  const pulseOpacity2 = useRef(new Animated.Value(0.2)).current;
+
+  // Spinner rotation
+  const spinAnim = useRef(new Animated.Value(0)).current;
+
+  // Confirm check scale
+  const checkScale = useRef(new Animated.Value(0)).current;
+
+  // Icon pulse for stage >= 1
+  const iconScale = useRef(new Animated.Value(1)).current;
+
+  const pulseScales = [pulseScale0, pulseScale1, pulseScale2];
+  const pulseOpacities = [pulseOpacity0, pulseOpacity1, pulseOpacity2];
+
+  // Pulse ring animation
   useEffect(() => {
-    if (!config.showPulse) {
-      borderAnim.setValue(0);
+    if (!cfg.buttonActive) {
+      pulseScales.forEach(s => s.setValue(1));
+      pulseOpacities.forEach((o, i) => o.setValue(0.4 - i * 0.1));
       return;
     }
 
-    const duration = stage >= 3 ? 400 : 800;
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(borderAnim, {
+    const animations = pulseScales.map((scale, i) => {
+      const opacity = pulseOpacities[i];
+      const delay = i * (pulseDuration / 3);
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.parallel([
+            Animated.timing(scale, {
+              toValue: 1.6 + i * 0.2,
+              duration: pulseDuration,
+              useNativeDriver: true,
+            }),
+            Animated.timing(opacity, {
+              toValue: 0,
+              duration: pulseDuration,
+              useNativeDriver: true,
+            }),
+          ]),
+          Animated.parallel([
+            Animated.timing(scale, { toValue: 1, duration: 0, useNativeDriver: true }),
+            Animated.timing(opacity, { toValue: 0.4 - i * 0.1, duration: 0, useNativeDriver: true }),
+          ]),
+        ]),
+      );
+    });
+
+    animations.forEach(a => a.start());
+    return () => animations.forEach(a => a.stop());
+  }, [stage, cfg.buttonActive, pulseDuration]);
+
+  // Spinner animation
+  useEffect(() => {
+    if (loading) {
+      const spin = Animated.loop(
+        Animated.timing(spinAnim, {
           toValue: 1,
-          duration,
-          useNativeDriver: false,
+          duration: 1000,
+          useNativeDriver: true,
         }),
-        Animated.timing(borderAnim, {
-          toValue: 0,
-          duration,
-          useNativeDriver: false,
-        }),
-      ]),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [stage, config.showPulse]);
+      );
+      spin.start();
+      return () => spin.stop();
+    } else {
+      spinAnim.setValue(0);
+    }
+  }, [loading]);
+
+  // Icon scale pulse for active stages
+  useEffect(() => {
+    if (stage >= 1 && stage <= 3) {
+      const anim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(iconScale, { toValue: 1.1, duration: 750, useNativeDriver: true }),
+          Animated.timing(iconScale, { toValue: 1, duration: 750, useNativeDriver: true }),
+        ]),
+      );
+      anim.start();
+      return () => anim.stop();
+    } else {
+      iconScale.setValue(1);
+    }
+  }, [stage]);
+
+  // Detect loading -> not loading transition to show confirmed state
+  useEffect(() => {
+    if (wasLoading.current && !loading) {
+      setConfirmed(true);
+      checkScale.setValue(0);
+      Animated.spring(checkScale, {
+        toValue: 1,
+        friction: 5,
+        tension: 100,
+        useNativeDriver: true,
+      }).start();
+      const timer = setTimeout(() => setConfirmed(false), 800);
+      return () => clearTimeout(timer);
+    }
+    wasLoading.current = loading;
+  }, [loading]);
 
   const handlePress = useCallback(() => {
-    // Flash green on confirmation
-    flashAnim.setValue(1);
-    Animated.timing(flashAnim, {
-      toValue: 0,
-      duration: 600,
-      useNativeDriver: false,
-    }).start();
-
+    if (confirmed) return;
     onPress();
-  }, [onPress]);
-
-  const animatedBorderColor = config.showPulse
-    ? borderAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: [config.borderColor + '66', config.borderColor],
-      })
-    : config.borderColor;
-
-  const flashBg = flashAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [config.bg || COLORS.surface, COLORS.healthy + '40'],
-  });
+  }, [onPress, confirmed]);
 
   const isDisabledState = disabled || stage === 4;
+  const displayLabel = label ?? cfg.buttonLabel;
+  const iconName = ICON_MAP[cfg.icon] || 'shield-check';
+  const iconSize = stage >= 3 ? 28 : 24;
+
+  const spinRotation = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   return (
-    <TouchableOpacity
-      onPress={handlePress}
-      disabled={isDisabledState || loading}
-      activeOpacity={0.7}
-    >
-      <Animated.View
+    <View style={[styles.container, { width: containerSize, height: containerSize + 40 }]}>
+      {/* Pulse rings */}
+      {cfg.buttonActive && [0, 1, 2].map(i => (
+        <Animated.View
+          key={i}
+          style={[
+            styles.pulseRing,
+            {
+              width: buttonSize,
+              height: buttonSize,
+              borderRadius: buttonSize / 2,
+              borderColor: cfg.color,
+              transform: [{ scale: pulseScales[i] }],
+              opacity: pulseOpacities[i],
+              position: 'absolute',
+            },
+          ]}
+        />
+      ))}
+
+      {/* Main circular button */}
+      <TouchableOpacity
+        onPress={handlePress}
+        disabled={isDisabledState || loading || confirmed}
+        activeOpacity={0.8}
         style={[
           styles.button,
           {
-            backgroundColor: flashBg,
-            borderColor: animatedBorderColor,
-            borderWidth: 1.5,
-            opacity: isDisabledState ? 0.5 : 1,
+            width: buttonSize,
+            height: buttonSize,
+            borderRadius: buttonSize / 2,
+            backgroundColor: confirmed ? '#00FFA3' : cfg.dimColor,
+            borderColor: confirmed ? '#00FFA3' : cfg.borderColor,
+            opacity: isDisabledState && !loading ? 0.5 : 1,
+            shadowColor: cfg.glowColor,
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: stage >= 3 ? 0.8 : 0.4,
+            shadowRadius: stage >= 3 ? 20 : 12,
+            elevation: stage >= 3 ? 12 : 6,
           },
         ]}
       >
-        {loading ? (
-          <ActivityIndicator color={config.textColor} />
+        {confirmed ? (
+          <Animated.View style={{ transform: [{ scale: checkScale }] }}>
+            <MaterialCommunityIcons name="check" size={28} color="#07090F" />
+          </Animated.View>
+        ) : loading ? (
+          <Animated.View
+            style={[
+              styles.spinner,
+              {
+                borderColor: cfg.color,
+                borderTopColor: 'transparent',
+                transform: [{ rotate: spinRotation }],
+              },
+            ]}
+          />
         ) : (
-          <View style={styles.content}>
-            <Text
-              style={[
-                styles.text,
-                { color: config.textColor },
-                stage >= 3 && styles.textLarge,
-              ]}
-            >
-              {displayLabel}
-            </Text>
-            {stage > 0 && stage < 4 && secondsRemaining > 0 && (
-              <Text style={[styles.countdown, { color: config.textColor }]}>
-                {formatCountdown(secondsRemaining)} remaining
-              </Text>
+          <Animated.View style={{ transform: [{ scale: iconScale }] }}>
+            {stage === 0 ? (
+              <MaterialCommunityIcons name="heart-pulse" size={36} color={cfg.color} />
+            ) : (
+              <MaterialCommunityIcons name={iconName} size={iconSize} color={cfg.color} />
             )}
-          </View>
+          </Animated.View>
         )}
-      </Animated.View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+
+      {/* Label */}
+      <View style={styles.labelContainer}>
+        <Text style={[styles.label, { color: confirmed ? '#00FFA3' : cfg.color }]}>
+          {confirmed ? '\u2713 Vault Secured' : displayLabel}
+        </Text>
+        {stage > 0 && stage < 4 && !confirmed && (
+          <Text style={styles.sublabel}>{cfg.sublabel}</Text>
+        )}
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  button: {
-    minHeight: 64,
-    borderRadius: 12,
+  container: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.xl,
   },
-  content: {
+  pulseRing: {
+    borderWidth: 1,
+  },
+  button: {
+    borderWidth: 1.5,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  text: {
-    fontSize: 16,
-    fontWeight: '700',
+  spinner: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 3,
   },
-  textLarge: {
-    fontSize: 18,
+  labelContainer: {
+    alignItems: 'center',
+    marginTop: 12,
   },
-  countdown: {
+  label: {
     fontSize: 13,
-    marginTop: SPACING.xs,
-    opacity: 0.8,
+    fontWeight: '600',
+    fontFamily: FONTS.primarySemiBold,
+  },
+  sublabel: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 11,
+    marginTop: 2,
+    fontFamily: FONTS.primary,
   },
 });

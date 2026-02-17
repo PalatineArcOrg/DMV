@@ -1,118 +1,160 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { COLORS, SPACING } from '../utils/constants';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { COLORS, FONTS } from '../utils/constants';
 
 interface StepIndicatorProps {
   currentStep: number;
   totalSteps: number;
+  labels?: string[];
 }
 
-export function StepIndicator({ currentStep, totalSteps }: StepIndicatorProps) {
-  const progress = currentStep / totalSteps;
+export function StepIndicator({ currentStep, totalSteps, labels }: StepIndicatorProps) {
+  const steps = Array.from({ length: totalSteps }, (_, i) => i + 1);
 
   return (
     <View style={styles.container}>
-      {/* Progress bar */}
-      <View style={styles.track}>
-        <View style={[styles.fill, { width: `${progress * 100}%` }]} />
-      </View>
-
-      {/* Step dots */}
-      <View style={styles.dots}>
-        {Array.from({ length: totalSteps }, (_, i) => {
-          const step = i + 1;
+      {/* Dots and connectors */}
+      <View style={styles.dotsRow}>
+        {steps.map((step, i) => {
           const isCompleted = step < currentStep;
           const isActive = step === currentStep;
+          const isPending = step > currentStep;
 
           return (
-            <View
-              key={step}
-              style={[
-                styles.dot,
-                isCompleted && styles.dotCompleted,
-                isActive && styles.dotActive,
-              ]}
-            >
-              {isCompleted ? (
-                <Text style={styles.checkText}>{'\u2713'}</Text>
-              ) : (
-                <Text
+            <React.Fragment key={step}>
+              <View
+                style={[
+                  styles.dot,
+                  isCompleted && styles.dotCompleted,
+                  isActive && styles.dotActive,
+                  isPending && styles.dotPending,
+                ]}
+              >
+                {isCompleted ? (
+                  <MaterialCommunityIcons name="check" size={14} color="#FFFFFF" />
+                ) : (
+                  <Text
+                    style={[
+                      styles.dotText,
+                      isActive && styles.dotTextActive,
+                      isPending && styles.dotTextPending,
+                    ]}
+                  >
+                    {step}
+                  </Text>
+                )}
+              </View>
+              {i < totalSteps - 1 && (
+                <View
                   style={[
-                    styles.dotText,
-                    isActive && styles.dotTextActive,
+                    styles.connector,
+                    { backgroundColor: step < currentStep ? COLORS.accent : 'rgba(255,255,255,0.08)' },
                   ]}
-                >
-                  {step}
-                </Text>
+                />
               )}
-            </View>
+            </React.Fragment>
           );
         })}
       </View>
 
-      <Text style={styles.stepLabel}>
-        Step {currentStep} of {totalSteps}
-      </Text>
+      {/* Labels */}
+      {labels && labels.length === totalSteps && (
+        <View style={styles.labelsRow}>
+          {steps.map((step, i) => {
+            const isCompleted = step < currentStep;
+            const isActive = step === currentStep;
+            return (
+              <React.Fragment key={step}>
+                <Text
+                  style={[
+                    styles.labelText,
+                    isActive && styles.labelActive,
+                    isCompleted && styles.labelCompleted,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {labels[i]}
+                </Text>
+                {i < totalSteps - 1 && <View style={styles.labelSpacer} />}
+              </React.Fragment>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
-  track: {
-    height: 3,
-    backgroundColor: COLORS.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  fill: {
-    height: '100%',
-    backgroundColor: COLORS.accent,
-    borderRadius: 2,
-  },
-  dots: {
+  dotsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: SPACING.sm,
+    alignItems: 'center',
   },
   dot: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: COLORS.surface,
-    borderWidth: 2,
-    borderColor: COLORS.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
   dotCompleted: {
     backgroundColor: COLORS.accent,
-    borderColor: COLORS.accent,
   },
   dotActive: {
+    backgroundColor: 'rgba(0,255,163,0.15)',
+    borderWidth: 1.5,
     borderColor: COLORS.accent,
-    backgroundColor: COLORS.surface,
+  },
+  dotPending: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   dotText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: FONTS.primarySemiBold,
   },
   dotTextActive: {
     color: COLORS.accent,
   },
-  checkText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+  dotTextPending: {
+    color: 'rgba(255,255,255,0.3)',
   },
-  stepLabel: {
-    fontSize: 12,
-    color: COLORS.textMuted,
+  connector: {
+    flex: 1,
+    height: 1,
+    marginHorizontal: 4,
+  },
+  labelsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  labelText: {
+    width: 28,
     textAlign: 'center',
-    marginTop: SPACING.xs,
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.2)',
+    fontFamily: FONTS.primary,
+    fontWeight: '400',
+  },
+  labelActive: {
+    color: COLORS.accent,
+    fontWeight: '600',
+    fontFamily: FONTS.primarySemiBold,
+  },
+  labelCompleted: {
+    color: 'rgba(0,255,163,0.6)',
+  },
+  labelSpacer: {
+    flex: 1,
   },
 });
