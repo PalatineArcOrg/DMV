@@ -217,6 +217,30 @@ export class VaultTransactionService {
     }
   }
 
+  async buildRevokeVaultTx(owner: PublicKey): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+
+    const readonlyWallet = {
+      publicKey: owner,
+      signTransaction: async (tx: Transaction) => tx,
+      signAllTransactions: async (txs: Transaction[]) => txs,
+    };
+    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+      commitment: 'confirmed',
+    });
+    const program = new Program<DeadMansVault>(idl as any, provider);
+
+    const tx = await program.methods
+      .revokeVault()
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+      })
+      .transaction();
+
+    return tx;
+  }
+
   async buildRotateAgentTx(
     owner: PublicKey,
     newAgentPubkey: PublicKey,

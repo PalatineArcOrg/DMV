@@ -34,6 +34,7 @@ function getButtonSize(stage: number): number {
 }
 
 function getPulseDuration(stage: number): number {
+  if (stage === 0) return 3000; // Slow breathing
   if (stage <= 1) return 2500;
   if (stage === 2) return 1800;
   if (stage === 3) return 1200;
@@ -76,14 +77,56 @@ export function HeartbeatButton({
   const pulseScales = [pulseScale0, pulseScale1, pulseScale2];
   const pulseOpacities = [pulseOpacity0, pulseOpacity1, pulseOpacity2];
 
-  // Pulse ring animation
+  // Pulse ring animation — branched by stage
   useEffect(() => {
-    if (!cfg.buttonActive) {
+    // Stage 4: no rings at all
+    if (stage === 4) {
       pulseScales.forEach(s => s.setValue(1));
       pulseOpacities.forEach((o, i) => o.setValue(0.4 - i * 0.1));
       return;
     }
 
+    if (stage === 0) {
+      // Stage 0: Gentle breathing — rings scale 1 <-> 1.05, opacity cycles slowly
+      const animations = pulseScales.map((scale, i) => {
+        const opacity = pulseOpacities[i];
+        const delay = i * (pulseDuration / 3);
+        return Animated.loop(
+          Animated.sequence([
+            Animated.delay(delay),
+            Animated.parallel([
+              Animated.timing(scale, {
+                toValue: 1.05 + i * 0.02,
+                duration: pulseDuration / 2,
+                useNativeDriver: true,
+              }),
+              Animated.timing(opacity, {
+                toValue: 0.15,
+                duration: pulseDuration / 2,
+                useNativeDriver: true,
+              }),
+            ]),
+            Animated.parallel([
+              Animated.timing(scale, {
+                toValue: 1,
+                duration: pulseDuration / 2,
+                useNativeDriver: true,
+              }),
+              Animated.timing(opacity, {
+                toValue: 0.4 - i * 0.1,
+                duration: pulseDuration / 2,
+                useNativeDriver: true,
+              }),
+            ]),
+          ]),
+        );
+      });
+
+      animations.forEach(a => a.start());
+      return () => animations.forEach(a => a.stop());
+    }
+
+    // Stages 1-3: Existing expand-fade pulse — unchanged
     const animations = pulseScales.map((scale, i) => {
       const opacity = pulseOpacities[i];
       const delay = i * (pulseDuration / 3);
@@ -112,7 +155,7 @@ export function HeartbeatButton({
 
     animations.forEach(a => a.start());
     return () => animations.forEach(a => a.stop());
-  }, [stage, cfg.buttonActive, pulseDuration]);
+  }, [stage, pulseDuration]);
 
   // Spinner animation
   useEffect(() => {
@@ -173,6 +216,7 @@ export function HeartbeatButton({
   const displayLabel = label ?? cfg.buttonLabel;
   const iconName = ICON_MAP[cfg.icon] || 'shield-check';
   const iconSize = stage >= 3 ? 28 : 24;
+  const showRings = stage >= 0 && stage <= 3;
 
   const spinRotation = spinAnim.interpolate({
     inputRange: [0, 1],
@@ -181,72 +225,75 @@ export function HeartbeatButton({
 
   return (
     <View style={[styles.container, { width: containerSize, height: containerSize + 40 }]}>
-      {/* Pulse rings */}
-      {cfg.buttonActive && [0, 1, 2].map(i => (
-        <Animated.View
-          key={i}
+      {/* Pulse area — fixed square container for button + rings */}
+      <View style={[styles.pulseArea, { width: containerSize, height: containerSize }]}>
+        {/* Pulse rings */}
+        {showRings && [0, 1, 2].map(i => (
+          <Animated.View
+            key={i}
+            style={[
+              styles.pulseRing,
+              {
+                width: buttonSize,
+                height: buttonSize,
+                borderRadius: buttonSize / 2,
+                borderColor: cfg.color,
+                transform: [{ scale: pulseScales[i] }],
+                opacity: pulseOpacities[i],
+                position: 'absolute',
+              },
+            ]}
+          />
+        ))}
+
+        {/* Main circular button */}
+        <TouchableOpacity
+          onPress={handlePress}
+          disabled={isDisabledState || loading || confirmed}
+          activeOpacity={0.8}
           style={[
-            styles.pulseRing,
+            styles.button,
             {
               width: buttonSize,
               height: buttonSize,
               borderRadius: buttonSize / 2,
-              borderColor: cfg.color,
-              transform: [{ scale: pulseScales[i] }],
-              opacity: pulseOpacities[i],
-              position: 'absolute',
+              backgroundColor: confirmed ? '#00FFA3' : cfg.dimColor,
+              borderColor: confirmed ? '#00FFA3' : cfg.borderColor,
+              opacity: isDisabledState && !loading ? 0.5 : 1,
+              shadowColor: cfg.glowColor,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: stage >= 3 ? 0.8 : 0.4,
+              shadowRadius: stage >= 3 ? 20 : 12,
+              elevation: stage >= 3 ? 12 : 6,
             },
           ]}
-        />
-      ))}
-
-      {/* Main circular button */}
-      <TouchableOpacity
-        onPress={handlePress}
-        disabled={isDisabledState || loading || confirmed}
-        activeOpacity={0.8}
-        style={[
-          styles.button,
-          {
-            width: buttonSize,
-            height: buttonSize,
-            borderRadius: buttonSize / 2,
-            backgroundColor: confirmed ? '#00FFA3' : cfg.dimColor,
-            borderColor: confirmed ? '#00FFA3' : cfg.borderColor,
-            opacity: isDisabledState && !loading ? 0.5 : 1,
-            shadowColor: cfg.glowColor,
-            shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: stage >= 3 ? 0.8 : 0.4,
-            shadowRadius: stage >= 3 ? 20 : 12,
-            elevation: stage >= 3 ? 12 : 6,
-          },
-        ]}
-      >
-        {confirmed ? (
-          <Animated.View style={{ transform: [{ scale: checkScale }] }}>
-            <MaterialCommunityIcons name="check" size={28} color="#07090F" />
-          </Animated.View>
-        ) : loading ? (
-          <Animated.View
-            style={[
-              styles.spinner,
-              {
-                borderColor: cfg.color,
-                borderTopColor: 'transparent',
-                transform: [{ rotate: spinRotation }],
-              },
-            ]}
-          />
-        ) : (
-          <Animated.View style={{ transform: [{ scale: iconScale }] }}>
-            {stage === 0 ? (
-              <MaterialCommunityIcons name="heart-pulse" size={36} color={cfg.color} />
-            ) : (
-              <MaterialCommunityIcons name={iconName} size={iconSize} color={cfg.color} />
-            )}
-          </Animated.View>
-        )}
-      </TouchableOpacity>
+        >
+          {confirmed ? (
+            <Animated.View style={{ transform: [{ scale: checkScale }] }}>
+              <MaterialCommunityIcons name="check" size={28} color="#07090F" />
+            </Animated.View>
+          ) : loading ? (
+            <Animated.View
+              style={[
+                styles.spinner,
+                {
+                  borderColor: cfg.color,
+                  borderTopColor: 'transparent',
+                  transform: [{ rotate: spinRotation }],
+                },
+              ]}
+            />
+          ) : (
+            <Animated.View style={{ transform: [{ scale: iconScale }] }}>
+              {stage === 0 ? (
+                <MaterialCommunityIcons name="heart-pulse" size={36} color={cfg.color} />
+              ) : (
+                <MaterialCommunityIcons name={iconName} size={iconSize} color={cfg.color} />
+              )}
+            </Animated.View>
+          )}
+        </TouchableOpacity>
+      </View>
 
       {/* Label */}
       <View style={styles.labelContainer}>
@@ -263,6 +310,9 @@ export function HeartbeatButton({
 
 const styles = StyleSheet.create({
   container: {
+    alignItems: 'center',
+  },
+  pulseArea: {
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -282,7 +332,7 @@ const styles = StyleSheet.create({
   },
   labelContainer: {
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 0,
   },
   label: {
     fontSize: 13,

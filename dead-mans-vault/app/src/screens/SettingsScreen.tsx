@@ -7,25 +7,30 @@ import {
   ScrollView,
   Animated,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import * as ExpoClipboard from 'expo-clipboard';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useWallet } from '../hooks/useWallet';
 import { useDemoStore } from '../store/useDemoStore';
 import { useVaultStore } from '../store/useVaultStore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
+import { useAuthStore } from '../store/useAuthStore';
 import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG } from '../utils/constants';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
 
 export function SettingsScreen() {
-  const { publicKey, connected, connect, disconnect } = useWallet();
+  const { publicKey, connected, connect, disconnect, signTransaction } = useWallet();
   const { isDemoMode, setDemoMode, incrementTap } = useDemoStore();
   const { beneficiaries, vaultConfig } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
   const escalationStage = useEscalationStore((s) => s.state.stage);
+  const { isAuthEnabled, setAuthEnabled } = useAuthStore();
   const [copied, setCopied] = useState(false);
+  const [isRevoking, setIsRevoking] = useState(false);
 
   const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
 
@@ -37,22 +42,78 @@ export function SettingsScreen() {
     }
   }, [publicKey]);
 
-  const handleReset = useCallback(() => {
+  const handleRevoke = useCallback(async () => {
+    if (!publicKey) return;
+
     Alert.alert(
-      'Reset Vault?',
-      'This will clear all local vault data including beneficiaries and settings. On-chain state is unaffected.',
+      'Revoke Vault?',
+      'This will deactivate your vault on-chain and clear all local data. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset',
+          text: 'Revoke',
           style: 'destructive',
-          onPress: () => {
-            useVaultStore.getState().reset?.();
+          onPress: async () => {
+            setIsRevoking(true);
+            try {
+              const { VaultTransactionService } = require('../services/VaultTransactionService');
+              const txService = new VaultTransactionService();
+              const vault = await txService.fetchVaultConfig(publicKey);
+
+              if (vault && vault.active && !vault.executed) {
+                // Active vault — revoke on-chain
+                const tx = await txService.buildRevokeVaultTx(publicKey);
+                tx.feePayer = publicKey;
+                const connection = txService.getConnection();
+                const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+                tx.recentBlockhash = blockhash;
+
+                const signedTx = await signTransaction(tx);
+                const txSig = await connection.sendRawTransaction(signedTx.serialize(), {
+                  skipPreflight: false,
+                  preflightCommitment: 'confirmed',
+                });
+                await connection.confirmTransaction(
+                  { signature: txSig, blockhash, lastValidBlockHeight },
+                  'confirmed',
+                );
+
+                Alert.alert('Success', `Vault revoked on-chain.\n\nTx: ${txSig.slice(0, 16)}...`);
+              } else if (vault?.executed) {
+                Alert.alert('Info', 'Vault already executed. Clearing local data.');
+              } else {
+                // No vault on-chain
+              }
+
+              // Clear local state
+              useVaultStore.getState().reset?.();
+            } catch (err: any) {
+              const msg = err.message || String(err);
+              if (msg.includes('CancellationException') || msg.includes('cancelled')) {
+                Alert.alert('Cancelled', 'Wallet signing was cancelled.');
+              } else {
+                Alert.alert('Error', msg);
+              }
+            } finally {
+              setIsRevoking(false);
+            }
           },
         },
       ],
     );
-  }, []);
+  }, [publicKey, signTransaction]);
+
+  const handleAuthToggle = useCallback(async (enabled: boolean) => {
+    if (enabled) {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!hasHardware || !isEnrolled) {
+        Alert.alert('Not Available', 'Biometric authentication is not set up on this device.');
+        return;
+      }
+    }
+    setAuthEnabled(enabled);
+  }, [setAuthEnabled]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -65,7 +126,7 @@ export function SettingsScreen() {
           <View style={styles.card}>
             <View style={[styles.statusRow, { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }]}>
               <View style={[styles.statusDot, { backgroundColor: stageCfg.color }]} />
-              <Text style={[styles.statusLabel, { color: stageCfg.color }]}>{stageCfg.label}</Text>
+              <Text style={[styles.statusLabelText, { color: stageCfg.color }]}>{stageCfg.label}</Text>
               <Text style={styles.statusStageBadge}>{'\u00B7'} Stage {escalationStage}</Text>
             </View>
             <View style={styles.statusGrid}>
@@ -89,6 +150,21 @@ export function SettingsScreen() {
           </View>
         </View>
       )}
+
+      {/* Security */}
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionLabel}>SECURITY</Text>
+        <View style={styles.card}>
+          <ToggleRow
+            icon="fingerprint"
+            iconColor={COLORS.accent}
+            label="App Lock"
+            description="Require biometric or PIN to open"
+            value={isAuthEnabled}
+            onChange={handleAuthToggle}
+          />
+        </View>
+      </View>
 
       {/* Developer */}
       <View style={styles.sectionBlock}>
@@ -178,11 +254,18 @@ export function SettingsScreen() {
       <View style={styles.sectionBlock}>
         <Text style={[styles.sectionLabel, { color: 'rgba(239,68,68,0.4)' }]}>DANGER ZONE</Text>
         <View style={[styles.card, { borderColor: 'rgba(239,68,68,0.15)' }]}>
-          <TouchableOpacity style={styles.actionRow} onPress={handleReset}>
+          <TouchableOpacity style={styles.actionRow} onPress={handleRevoke} disabled={isRevoking}>
             <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
-              <MaterialCommunityIcons name="logout" size={15} color="#EF4444" />
+              {isRevoking ? (
+                <ActivityIndicator size="small" color="#EF4444" />
+              ) : (
+                <MaterialCommunityIcons name="shield-off" size={15} color="#EF4444" />
+              )}
             </View>
-            <Text style={[styles.actionLabel, { color: '#EF4444' }]}>Reset Vault & Restart</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.actionLabel, { color: '#EF4444', flex: 0 }]}>Revoke Vault</Text>
+              <Text style={styles.actionDesc}>Deactivates on-chain and clears local data</Text>
+            </View>
             <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
           </TouchableOpacity>
         </View>
@@ -295,7 +378,7 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
-  statusLabel: {
+  statusLabelText: {
     fontSize: 13,
     fontWeight: '600',
     fontFamily: FONTS.primarySemiBold,
@@ -409,10 +492,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actionLabel: {
-    flex: 1,
     fontSize: 13,
     fontWeight: '500',
     fontFamily: FONTS.primaryMedium,
+  },
+  actionDesc: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: FONTS.primary,
+    marginTop: 1,
   },
   /* Setting rows */
   settingRow: {

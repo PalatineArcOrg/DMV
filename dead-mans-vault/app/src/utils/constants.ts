@@ -84,7 +84,7 @@ export const STAGE_CONFIG: Record<number, {
     label: 'Vault Active',
     sublabel: 'All systems normal',
     buttonLabel: 'Heartbeat Confirmed',
-    buttonActive: false,
+    buttonActive: true,
     icon: 'shield-check',
     urgency: 0,
   },

@@ -122,6 +122,9 @@ export function DashboardScreen() {
   const [isLoadingVault, setIsLoadingVault] = useState(false);
   const defiPositions = useVaultStore((s) => s.defiPositions);
 
+  // Wallet-switch detection
+  const prevPublicKey = useRef(publicKey?.toBase58() ?? '');
+
   const isVaultSetup = vaultData !== null;
 
   const {
@@ -173,6 +176,17 @@ export function DashboardScreen() {
       setIsLoadingVault(false);
     }
   }, [publicKey, fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA]);
+
+  // Detect wallet switch — reset vault state when wallet changes
+  useEffect(() => {
+    const currentKey = publicKey?.toBase58() ?? '';
+    if (prevPublicKey.current && currentKey && prevPublicKey.current !== currentKey) {
+      setVaultData(null);
+      setHeartbeatData(null);
+      useVaultStore.getState().reset?.();
+    }
+    prevPublicKey.current = currentKey;
+  }, [publicKey]);
 
   useEffect(() => {
     if (connected && publicKey) {
@@ -263,33 +277,7 @@ export function DashboardScreen() {
         </View>
       )}
 
-      {/* Portfolio Card */}
-      <View style={styles.portfolioCard}>
-        <Text style={styles.portfolioLabel}>TOTAL PORTFOLIO</Text>
-        {isLoading && balances.length === 0 ? (
-          <>
-            <SkeletonBar width={180} height={36} />
-            <SkeletonBar width={100} height={14} style={{ marginTop: 8 }} />
-          </>
-        ) : (
-          <>
-            <View style={styles.portfolioRow}>
-              <Text style={styles.portfolioValue}>{formatUsd(totalUsdValue)}</Text>
-              {totalUsdValue > 0 && (
-                <View style={styles.changeBadge}>
-                  <Text style={styles.changeArrow}>{'\u25B2'}</Text>
-                  <Text style={styles.changeText}>+2.8%</Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.portfolioSubtext}>
-              {formatTokenAmount(solBalance, 4)} SOL
-            </Text>
-          </>
-        )}
-      </View>
-
-      {/* Vault Status Card */}
+      {/* === VAULT STATUS CARD (MOVED TO TOP) === */}
       {isVaultSetup && !vaultData?.executed && (
         <View style={[styles.vaultCard, { borderColor: cfg.borderColor }]}>
           {/* Status Header */}
@@ -327,6 +315,13 @@ export function DashboardScreen() {
         </View>
       )}
 
+      {/* Escalation Banner */}
+      {escalationStage > 0 && escalationStage < 4 && (
+        <View style={{ marginHorizontal: 16, marginBottom: 12 }}>
+          <EscalationBanner stage={escalationStage} secondsRemaining={secondsRemaining} />
+        </View>
+      )}
+
       {/* Execution In Progress */}
       {escalationStage === 4 && (
         <TouchableOpacity style={styles.executionCard} onPress={() => navigation.navigate('ExecutionLog')}>
@@ -350,12 +345,30 @@ export function DashboardScreen() {
         </View>
       )}
 
-      {/* Token List */}
-      <View style={styles.tokenListHeader}>
-        <Text style={styles.tokenListLabel}>YOUR TOKENS</Text>
-        <Text style={styles.tokenListCount}>{balances.length} assets</Text>
-      </View>
-      <View style={styles.tokenListCard}>
+      {/* === PORTFOLIO + TOKENS MERGED === */}
+      <View style={styles.portfolioCard}>
+        <View style={styles.portfolioHeader}>
+          <Text style={styles.portfolioLabel}>YOUR PORTFOLIO</Text>
+          <Text style={styles.tokenListCount}>{balances.length} assets</Text>
+        </View>
+        {isLoading && balances.length === 0 ? (
+          <View style={styles.portfolioSummary}>
+            <SkeletonBar width={180} height={36} />
+            <SkeletonBar width={100} height={14} style={{ marginTop: 8 }} />
+          </View>
+        ) : (
+          <View style={styles.portfolioSummary}>
+            <Text style={styles.portfolioValue}>{formatUsd(totalUsdValue)}</Text>
+            <Text style={styles.portfolioSubtext}>
+              {formatTokenAmount(solBalance, 4)} SOL
+            </Text>
+          </View>
+        )}
+
+        {/* Divider */}
+        <View style={styles.portfolioDivider} />
+
+        {/* Token List */}
         {error && <Text style={styles.errorText}>{error}</Text>}
         {isLoading && balances.length === 0 ? (
           <>
@@ -393,6 +406,34 @@ export function DashboardScreen() {
         )}
       </View>
 
+      {/* DeFi Positions Summary — NOW TAPPABLE */}
+      {defiPositions.length > 0 && (
+        <TouchableOpacity
+          style={styles.card}
+          activeOpacity={0.7}
+          onPress={() => navigation.navigate('DeFiPositions')}
+        >
+          <View style={styles.defiHeader}>
+            <Text style={styles.sectionLabel}>DEFI POSITIONS ({defiPositions.length})</Text>
+            <View style={styles.defiViewAll}>
+              <Text style={styles.defiViewAllText}>View All</Text>
+              <MaterialCommunityIcons name="chevron-right" size={14} color={COLORS.accent} />
+            </View>
+          </View>
+          {defiPositions.slice(0, 3).map((pos: DeFiPosition, i: number) => (
+            <View key={i} style={styles.defiRow}>
+              <Text style={styles.defiLabel}>{pos.protocol.replace('_', ' ')}</Text>
+              <Text style={styles.defiValue}>
+                {pos.estimatedValueSol > 0 ? `~${pos.estimatedValueSol.toFixed(4)} SOL` : pos.type}
+              </Text>
+            </View>
+          ))}
+          {defiPositions.length > 3 && (
+            <Text style={styles.defiMore}>+{defiPositions.length - 3} more positions</Text>
+          )}
+        </TouchableOpacity>
+      )}
+
       {/* Setup CTA if no vault */}
       {!isVaultSetup && (
         <TouchableOpacity
@@ -408,24 +449,6 @@ export function DashboardScreen() {
           </View>
           <MaterialCommunityIcons name="chevron-right" size={16} color="rgba(153,69,255,0.6)" />
         </TouchableOpacity>
-      )}
-
-      {/* DeFi Positions Summary */}
-      {defiPositions.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>DEFI POSITIONS ({defiPositions.length})</Text>
-          {defiPositions.slice(0, 3).map((pos: DeFiPosition, i: number) => (
-            <View key={i} style={styles.defiRow}>
-              <Text style={styles.defiLabel}>{pos.protocol.replace('_', ' ')}</Text>
-              <Text style={styles.defiValue}>
-                {pos.estimatedValueSol > 0 ? `~${pos.estimatedValueSol.toFixed(4)} SOL` : pos.type}
-              </Text>
-            </View>
-          ))}
-          {defiPositions.length > 3 && (
-            <Text style={styles.defiMore}>+{defiPositions.length - 3} more positions</Text>
-          )}
-        </View>
       )}
 
       {/* Demo Controls */}
@@ -553,66 +576,6 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.primaryBold,
   },
 
-  // Portfolio Card
-  portfolioCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  portfolioLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 1.5,
-    marginBottom: 4,
-    fontFamily: FONTS.primaryMedium,
-  },
-  portfolioRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 12,
-  },
-  portfolioValue: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: -0.5,
-    fontFamily: FONTS.primaryBold,
-    lineHeight: 40,
-  },
-  changeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0,255,163,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,255,163,0.2)',
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginBottom: 4,
-  },
-  changeArrow: {
-    color: COLORS.accent,
-    fontSize: 8,
-  },
-  changeText: {
-    color: COLORS.accent,
-    fontSize: 11,
-    fontWeight: '600',
-    fontFamily: FONTS.primarySemiBold,
-  },
-  portfolioSubtext: {
-    color: 'rgba(255,255,255,0.25)',
-    fontSize: 11,
-    marginTop: 4,
-    fontFamily: FONTS.primary,
-  },
-
   // Vault Status Card
   vaultCard: {
     backgroundColor: COLORS.surface,
@@ -709,27 +672,8 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.primary,
   },
 
-  // Token list
-  tokenListHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginHorizontal: 16,
-    marginBottom: 8,
-  },
-  tokenListLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 1,
-    fontFamily: FONTS.primarySemiBold,
-  },
-  tokenListCount: {
-    color: 'rgba(255,255,255,0.2)',
-    fontSize: 10,
-    fontFamily: FONTS.primary,
-  },
-  tokenListCard: {
+  // Portfolio Card (merged with tokens)
+  portfolioCard: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,
     borderWidth: 1,
@@ -737,6 +681,49 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 12,
     overflow: 'hidden',
+  },
+  portfolioHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  portfolioLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 1.5,
+    fontFamily: FONTS.primaryMedium,
+  },
+  portfolioSummary: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  portfolioValue: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+    fontFamily: FONTS.primaryBold,
+    lineHeight: 40,
+  },
+  portfolioSubtext: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 11,
+    marginTop: 4,
+    fontFamily: FONTS.primary,
+  },
+  portfolioDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginHorizontal: 16,
+  },
+  tokenListCount: {
+    color: 'rgba(255,255,255,0.2)',
+    fontSize: 10,
+    fontFamily: FONTS.primary,
   },
   tokenRow: {
     flexDirection: 'row',
@@ -841,7 +828,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 1,
+    fontFamily: FONTS.primarySemiBold,
+  },
+  defiHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 8,
+  },
+  defiViewAll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  defiViewAllText: {
+    color: COLORS.accent,
+    fontSize: 11,
+    fontWeight: '600',
     fontFamily: FONTS.primarySemiBold,
   },
   defiRow: {

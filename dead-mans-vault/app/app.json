@@ -2,7 +2,7 @@
   "expo": {
     "name": "Dead Man's Vault",
     "slug": "dead-mans-vault",
-    "version": "1.0.3",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -20,11 +20,13 @@
         "backgroundColor": "#080A0F"
       },
       "package": "com.romulusol.deadmansvault",
-      "versionCode": 4,
+      "versionCode": 5,
       "permissions": [
         "POST_NOTIFICATIONS",
         "INTERNET",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
       ]
     },
     "plugins": [
@@ -36,7 +38,8 @@
           "color": "#00D4B4"
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-local-authentication"
     ],
     "extra": {
       "eas": {

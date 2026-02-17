@@ -38,6 +38,11 @@ function DashboardStackScreen() {
         component={ExecutionLogScreen}
         options={{ title: 'Execution Log' }}
       />
+      <DashboardStack.Screen
+        name="DeFiPositions"
+        component={DeFiPositionsScreen}
+        options={{ title: 'DeFi Positions' }}
+      />
     </DashboardStack.Navigator>
   );
 }

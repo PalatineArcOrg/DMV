@@ -14,10 +14,12 @@ import {
 import { ConnectionProvider } from './src/utils/ConnectionProvider';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { AuthScreen } from './src/screens/AuthScreen';
 import { initDatabase } from './src/db/database';
 import { NotificationService } from './src/notifications/NotificationService';
 import { useDemoStore } from './src/store/useDemoStore';
 import { useHeartbeatStore } from './src/store/useHeartbeatStore';
+import { useAuthStore } from './src/store/useAuthStore';
 import { getSetting } from './src/db/settingsRepo';
 import { COLORS, FONTS } from './src/utils/constants';
 
@@ -34,11 +36,15 @@ export default function App() {
     SpaceGrotesk_700Bold,
   });
 
+  const isAuthEnabled = useAuthStore((s) => s.isAuthEnabled);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
   useEffect(() => {
     initDatabase()
       .then(() => NotificationService.initialize())
       .then(async () => {
         await useDemoStore.getState().loadFromDb();
+        await useAuthStore.getState().loadFromDb();
         const savedHbConfig = await getSetting('heartbeat_config');
         if (savedHbConfig) {
           try {
@@ -66,6 +72,16 @@ export default function App() {
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
       </View>
+    );
+  }
+
+  // Auth gate: if auth is enabled but not authenticated, show auth screen
+  if (isAuthEnabled && !isAuthenticated) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
+        <AuthScreen />
+      </SafeAreaProvider>
     );
   }
 
