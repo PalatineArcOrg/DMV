@@ -225,10 +225,8 @@ export function DashboardScreen() {
           const sig = await txService.recordHeartbeatOnChain(keypair, publicKey, 'activeTap');
           lastOnChainTxRef.current = sig;
           setLastOnChainTx(sig);
-          console.log('On-chain heartbeat recorded:', sig);
         }
-      } catch (chainErr: any) {
-        console.warn('On-chain heartbeat failed (local still saved):', chainErr?.message || chainErr);
+      } catch {
       }
       await loadVaultState();
     } catch {

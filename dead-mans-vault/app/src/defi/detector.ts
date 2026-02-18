@@ -69,8 +69,6 @@ export class DeFiDetector {
       const result = results[i];
       if (result.status === 'fulfilled' && result.value) {
         allPositions.push(...result.value);
-      } else if (result.status === 'rejected') {
-        console.warn(`DeFi detector [${labels[i]}] failed:`, result.reason?.message || result.reason);
       }
     }
 
