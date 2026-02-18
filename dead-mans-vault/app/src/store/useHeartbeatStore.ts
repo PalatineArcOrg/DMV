@@ -6,7 +6,7 @@ interface HeartbeatStore {
   config: HeartbeatConfig | null;
   isLoading: boolean;
   setStatus: (status: HeartbeatStatus | null) => void;
-  setConfig: (config: HeartbeatConfig) => void;
+  setConfig: (config: HeartbeatConfig | null) => void;
   setLoading: (loading: boolean) => void;
   reset: () => void;
 }

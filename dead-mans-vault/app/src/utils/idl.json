@@ -550,6 +550,11 @@
       "code": 6014,
       "name": "AgentKeyUnchanged",
       "msg": "New agent pubkey is the same as the current agent"
+    },
+    {
+      "code": 6015,
+      "name": "VaultImmutable",
+      "msg": "Vault is immutable and cannot be revoked or updated"
     }
   ],
   "types": [
@@ -747,6 +752,10 @@
                 }
               }
             }
+          },
+          {
+            "name": "is_mutable",
+            "type": "bool"
           }
         ]
       }
@@ -896,6 +905,13 @@
               "Bump seed for PDA derivation"
             ],
             "type": "u8"
+          },
+          {
+            "name": "is_mutable",
+            "docs": [
+              "Whether the vault can be revoked/updated by the owner (false = immutable)"
+            ],
+            "type": "bool"
           }
         ]
       }

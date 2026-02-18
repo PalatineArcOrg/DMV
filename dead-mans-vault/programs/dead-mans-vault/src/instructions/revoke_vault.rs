@@ -11,6 +11,7 @@ pub struct RevokeVault<'info> {
         mut,
         has_one = owner @ VaultError::UnauthorizedOwner,
         constraint = !vault_config.executed @ VaultError::VaultAlreadyExecuted,
+        constraint = vault_config.is_mutable @ VaultError::VaultImmutable,
     )]
     pub vault_config: Account<'info, VaultConfig>,
 }

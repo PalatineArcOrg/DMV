@@ -556,6 +556,11 @@ export type DeadMansVault = {
       "code": 6014,
       "name": "agentKeyUnchanged",
       "msg": "New agent pubkey is the same as the current agent"
+    },
+    {
+      "code": 6015,
+      "name": "vaultImmutable",
+      "msg": "Vault is immutable and cannot be revoked or updated"
     }
   ],
   "types": [
@@ -753,6 +758,10 @@ export type DeadMansVault = {
                 }
               }
             }
+          },
+          {
+            "name": "isMutable",
+            "type": "bool"
           }
         ]
       }
@@ -902,6 +911,13 @@ export type DeadMansVault = {
               "Bump seed for PDA derivation"
             ],
             "type": "u8"
+          },
+          {
+            "name": "isMutable",
+            "docs": [
+              "Whether the vault can be revoked/updated by the owner (false = immutable)"
+            ],
+            "type": "bool"
           }
         ]
       }

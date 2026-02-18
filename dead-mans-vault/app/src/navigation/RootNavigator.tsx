@@ -11,11 +11,13 @@ import { HeartbeatConfigScreen } from '../screens/HeartbeatConfigScreen';
 import { BeneficiaryScreen } from '../screens/BeneficiaryScreen';
 import { DeFiPositionsScreen } from '../screens/DeFiPositionsScreen';
 import { EstateReviewScreen } from '../screens/EstateReviewScreen';
+import { AssetsScreen } from '../screens/AssetsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { COLORS, FONTS } from '../utils/constants';
 
 const Tab = createBottomTabNavigator();
 const DashboardStack = createNativeStackNavigator();
+const AssetsStack = createNativeStackNavigator();
 const SetupStack = createNativeStackNavigator();
 
 const STACK_SCREEN_OPTIONS = {
@@ -38,12 +40,19 @@ function DashboardStackScreen() {
         component={ExecutionLogScreen}
         options={{ title: 'Execution Log' }}
       />
-      <DashboardStack.Screen
-        name="DeFiPositions"
-        component={DeFiPositionsScreen}
-        options={{ title: 'DeFi Positions' }}
-      />
     </DashboardStack.Navigator>
+  );
+}
+
+function AssetsStackScreen() {
+  return (
+    <AssetsStack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
+      <AssetsStack.Screen
+        name="AssetsOverview"
+        component={AssetsScreen}
+        options={{ headerShown: false }}
+      />
+    </AssetsStack.Navigator>
   );
 }
 
@@ -84,10 +93,11 @@ function SetupStackScreen() {
   );
 }
 
-type TabIconName = 'view-dashboard' | 'text-box-outline' | 'cog';
+type TabIconName = 'view-dashboard' | 'wallet' | 'text-box-outline' | 'cog';
 
 const TAB_ICONS: Record<string, TabIconName> = {
   Status: 'view-dashboard',
+  Assets: 'wallet',
   Setup: 'text-box-outline',
   Settings: 'cog',
 };
@@ -133,6 +143,7 @@ export function RootNavigator() {
         })}
       >
         <Tab.Screen name="Status" component={DashboardStackScreen} />
+        <Tab.Screen name="Assets" component={AssetsStackScreen} />
         <Tab.Screen name="Setup" component={SetupStackScreen} />
         <Tab.Screen name="Settings" component={SettingsScreen} />
       </Tab.Navigator>

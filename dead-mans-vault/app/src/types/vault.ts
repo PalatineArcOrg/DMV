@@ -11,6 +11,7 @@ export interface VaultConfig {
   createdAt: number;
   updatedAt: number;
   bump: number;
+  isMutable: boolean;
 }
 
 export interface Beneficiary {

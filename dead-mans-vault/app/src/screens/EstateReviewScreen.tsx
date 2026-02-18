@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { PublicKey } from '@solana/web3.js';
@@ -27,6 +28,7 @@ export function EstateReviewScreen() {
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
 
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isMutable, setIsMutable] = useState(true);
 
   const gracePeriod =
     escalationConfig.stage1Duration +
@@ -77,7 +79,7 @@ export function EstateReviewScreen() {
       }));
 
       const tx = await txService.buildInitializeVaultTx(
-        publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries,
+        publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
       );
 
       tx.feePayer = publicKey;
@@ -95,7 +97,8 @@ export function EstateReviewScreen() {
         setSetupComplete(true);
       }
 
-      Alert.alert('Success', `Vault registered on-chain!\n\nTx: ${txSig}`, [
+      Alert.alert('Vault Activated', `Transaction confirmed on Solana devnet.\n\nTx: ${txSig.slice(0, 20)}...`, [
+        { text: 'View on Explorer', onPress: () => { Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`); navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },
         { text: 'OK', onPress: () => { navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },
       ]);
     } catch (err: any) {
@@ -113,14 +116,17 @@ export function EstateReviewScreen() {
         } catch { /* fallthrough */ }
       }
       if (msg.includes('CancellationException') || msg.includes('cancelled')) {
-        Alert.alert('Wallet Cancelled', 'The wallet signing was cancelled. Please try again.');
+        Alert.alert('Wallet Cancelled', 'The wallet signing was cancelled.', [
+          { text: 'OK', onPress: () => navigation.popToTop() },
+        ]);
+        return;
       } else {
         Alert.alert('Registration Failed', msg);
       }
     } finally {
       setIsRegistering(false);
     }
-  }, [publicKey, heartbeatConfig, beneficiaries, escalationConfig, gracePeriod, signTransaction, setSetupComplete, setVaultConfig, navigation]);
+  }, [publicKey, heartbeatConfig, beneficiaries, escalationConfig, gracePeriod, signTransaction, setSetupComplete, setVaultConfig, navigation, isMutable]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -193,10 +199,59 @@ export function EstateReviewScreen() {
         </View>
       </View>
 
+      {/* Vault Mutability */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <MaterialCommunityIcons name="lock-outline" size={14} color="rgba(255,255,255,0.4)" />
+          <Text style={styles.sectionLabel}>VAULT TYPE</Text>
+        </View>
+        <View style={styles.mutabilityBody}>
+          <TouchableOpacity
+            style={[styles.mutabilityOption, isMutable && styles.mutabilityOptionActive]}
+            onPress={() => setIsMutable(true)}
+          >
+            <View style={[styles.radioOuter, isMutable && styles.radioOuterActive]}>
+              {isMutable && <View style={styles.radioInner} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.mutabilityTitle, isMutable && { color: COLORS.accent }]}>Mutable</Text>
+              <Text style={styles.mutabilityDesc}>Can be revoked or updated after activation</Text>
+            </View>
+            <MaterialCommunityIcons name="shield-edit" size={18} color={isMutable ? COLORS.accent : 'rgba(255,255,255,0.2)'} />
+          </TouchableOpacity>
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+          <TouchableOpacity
+            style={[styles.mutabilityOption, !isMutable && styles.mutabilityOptionImmutable]}
+            onPress={() => {
+              Alert.alert(
+                'Make Vault Immutable?',
+                'An immutable vault CANNOT be revoked or updated after activation. The vault will execute when heartbeats cease, no matter what. This is permanent.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Make Immutable', style: 'destructive', onPress: () => setIsMutable(false) },
+                ],
+              );
+            }}
+          >
+            <View style={[styles.radioOuter, !isMutable && styles.radioOuterImmutable]}>
+              {!isMutable && <View style={[styles.radioInner, { backgroundColor: COLORS.critical }]} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.mutabilityTitle, !isMutable && { color: COLORS.critical }]}>Immutable</Text>
+              <Text style={styles.mutabilityDesc}>Cannot be revoked or updated. Permanent.</Text>
+            </View>
+            <MaterialCommunityIcons name="lock" size={18} color={!isMutable ? COLORS.critical : 'rgba(255,255,255,0.2)'} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Legal Warning */}
-      <View style={styles.legalBox}>
+      <View style={[styles.legalBox, !isMutable && { borderColor: 'rgba(239,68,68,0.3)', backgroundColor: 'rgba(239,68,68,0.1)' }]}>
         <Text style={styles.legalText}>
-          {'\u26A0\uFE0F'} This vault is irreversible once execution begins. Missed heartbeats will trigger the escalation process. Only the owner can revoke.
+          {!isMutable
+            ? '\u26A0\uFE0F IMMUTABLE: This vault cannot be cancelled once activated. It will execute when heartbeats cease. There is no undo.'
+            : '\u26A0\uFE0F This vault is irreversible once execution begins. Missed heartbeats will trigger the escalation process. Only the owner can revoke.'
+          }
         </Text>
       </View>
 
@@ -275,4 +330,14 @@ const styles = StyleSheet.create({
   activateBtn: { flex: 1, flexDirection: 'row', backgroundColor: COLORS.accent, borderRadius: 16, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', gap: 8 },
   activateBtnText: { color: COLORS.bg, fontSize: 15, fontWeight: '700', fontFamily: FONTS.primaryBold },
   activatingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  mutabilityBody: { overflow: 'hidden' },
+  mutabilityOption: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  mutabilityOptionActive: { backgroundColor: 'rgba(0,212,180,0.05)' },
+  mutabilityOptionImmutable: { backgroundColor: 'rgba(239,68,68,0.05)' },
+  mutabilityTitle: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.6)', fontFamily: FONTS.primarySemiBold },
+  mutabilityDesc: { fontSize: 11, color: 'rgba(255,255,255,0.35)', fontFamily: FONTS.primary, marginTop: 1 },
+  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
+  radioOuterActive: { borderColor: COLORS.accent },
+  radioOuterImmutable: { borderColor: COLORS.critical },
+  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.accent },
 });

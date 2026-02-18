@@ -12,6 +12,7 @@ pub struct UpdateVault<'info> {
         has_one = owner @ VaultError::UnauthorizedOwner,
         constraint = vault_config.active @ VaultError::VaultInactive,
         constraint = !vault_config.executed @ VaultError::VaultAlreadyExecuted,
+        constraint = vault_config.is_mutable @ VaultError::VaultImmutable,
     )]
     pub vault_config: Account<'info, VaultConfig>,
 }

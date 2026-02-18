@@ -7,6 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   Animated,
+  Linking,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -24,6 +25,8 @@ import { EscalationBanner } from '../components/EscalationBanner';
 import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
 import { EscalationStage } from '../types';
+import { KeyManager } from '../tee/KeyManager';
+import { VaultTransactionService } from '../services/VaultTransactionService';
 
 // --- Helpers ---
 
@@ -207,14 +210,31 @@ export function DashboardScreen() {
     await Promise.all([refresh(), loadVaultState()]);
   }, [refresh, loadVaultState]);
 
+  const lastOnChainTxRef = useRef<string | null>(null);
+  const [lastOnChainTx, setLastOnChainTx] = useState<string | null>(null);
+
   const handleHeartbeat = useCallback(async () => {
     try {
       await confirmHeartbeat('active_tap');
+      // Also record on-chain via agent key (best-effort)
+      try {
+        const keyManager = KeyManager.getInstance();
+        const keypair = await keyManager.getKeypair();
+        if (keypair && publicKey) {
+          const txService = new VaultTransactionService();
+          const sig = await txService.recordHeartbeatOnChain(keypair, publicKey, 'activeTap');
+          lastOnChainTxRef.current = sig;
+          setLastOnChainTx(sig);
+          console.log('On-chain heartbeat recorded:', sig);
+        }
+      } catch (chainErr: any) {
+        console.warn('On-chain heartbeat failed (local still saved):', chainErr?.message || chainErr);
+      }
       await loadVaultState();
     } catch {
       // Error handling
     }
-  }, [confirmHeartbeat, loadVaultState]);
+  }, [confirmHeartbeat, loadVaultState, publicKey]);
 
   // Heartbeat stats
   const lastBeatLabel = heartbeatData
@@ -312,6 +332,19 @@ export function DashboardScreen() {
               <Text style={styles.statLabel}>Beneficiaries</Text>
             </View>
           </View>
+
+          {/* Last on-chain tx */}
+          {lastOnChainTx && (
+            <TouchableOpacity
+              style={styles.onChainTxRow}
+              onPress={() => Linking.openURL(`https://explorer.solana.com/tx/${lastOnChainTx}?cluster=devnet`)}
+            >
+              <MaterialCommunityIcons name="open-in-new" size={10} color={COLORS.accent} />
+              <Text style={styles.onChainTxText}>
+                Last tx: {lastOnChainTx.slice(0, 8)}...{lastOnChainTx.slice(-4)}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -411,7 +444,7 @@ export function DashboardScreen() {
         <TouchableOpacity
           style={styles.card}
           activeOpacity={0.7}
-          onPress={() => navigation.navigate('DeFiPositions')}
+          onPress={() => navigation.getParent()?.navigate('Assets')}
         >
           <View style={styles.defiHeader}>
             <Text style={styles.sectionLabel}>DEFI POSITIONS ({defiPositions.length})</Text>
@@ -607,6 +640,20 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderRightWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
+  },
+  onChainTxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  onChainTxText: {
+    fontSize: 10,
+    color: COLORS.accent,
+    fontFamily: FONTS.mono,
   },
   statValue: {
     color: '#FFFFFF',

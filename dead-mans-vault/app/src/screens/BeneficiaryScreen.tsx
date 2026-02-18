@@ -138,30 +138,32 @@ export function BeneficiaryScreen() {
         </View>
       ))}
 
-      {/* Add form */}
-      <View style={styles.formCard}>
-        <Text style={styles.formTitle}>{editingWallet ? 'Edit Beneficiary' : 'Add Beneficiary'}</Text>
+      {/* Add/Edit form — hidden when 100% allocated unless editing */}
+      {(totalBps < 10000 || editingWallet) && (
+        <View style={styles.formCard}>
+          <Text style={styles.formTitle}>{editingWallet ? 'Edit Beneficiary' : 'Add Beneficiary'}</Text>
 
-        <Text style={styles.inputLabel}>LABEL</Text>
-        <TextInput style={styles.input} placeholder="e.g. Spouse, Child" placeholderTextColor="rgba(255,255,255,0.2)" value={label} onChangeText={setLabel} />
+          <Text style={styles.inputLabel}>LABEL</Text>
+          <TextInput style={styles.input} placeholder="e.g. Spouse, Child" placeholderTextColor="rgba(255,255,255,0.2)" value={label} onChangeText={setLabel} />
 
-        <Text style={styles.inputLabel}>WALLET ADDRESS</Text>
-        <TextInput style={[styles.input, { fontFamily: FONTS.mono }]} placeholder="Solana public key" placeholderTextColor="rgba(255,255,255,0.2)" value={walletAddress} onChangeText={setWalletAddress} autoCapitalize="none" autoCorrect={false} />
+          <Text style={styles.inputLabel}>WALLET ADDRESS</Text>
+          <TextInput style={[styles.input, { fontFamily: FONTS.mono }]} placeholder="Solana public key" placeholderTextColor="rgba(255,255,255,0.2)" value={walletAddress} onChangeText={setWalletAddress} autoCapitalize="none" autoCorrect={false} />
 
-        <Text style={styles.inputLabel}>SHARE (%)</Text>
-        <TextInput style={styles.input} placeholder="e.g. 50" placeholderTextColor="rgba(255,255,255,0.2)" value={sharePercent} onChangeText={setSharePercent} keyboardType="decimal-pad" />
+          <Text style={styles.inputLabel}>SHARE (%)</Text>
+          <TextInput style={styles.input} placeholder="e.g. 50" placeholderTextColor="rgba(255,255,255,0.2)" value={sharePercent} onChangeText={setSharePercent} keyboardType="decimal-pad" />
 
-        <View style={styles.formActions}>
-          {editingWallet && (
-            <TouchableOpacity style={styles.cancelBtn} onPress={resetForm}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
+          <View style={styles.formActions}>
+            {editingWallet && (
+              <TouchableOpacity style={styles.cancelBtn} onPress={resetForm}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={[styles.saveBtn, editingWallet && { flex: 1 }]} onPress={handleSave}>
+              <Text style={styles.saveBtnText}>{editingWallet ? 'Save Changes' : 'Add Beneficiary'}</Text>
             </TouchableOpacity>
-          )}
-          <TouchableOpacity style={[styles.saveBtn, editingWallet && { flex: 1 }]} onPress={handleSave}>
-            <Text style={styles.saveBtnText}>{editingWallet ? 'Save Changes' : 'Add Beneficiary'}</Text>
-          </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      )}
 
       {/* Footer */}
       <View style={styles.footer}>

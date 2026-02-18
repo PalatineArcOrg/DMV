@@ -69,6 +69,7 @@ export class VaultTransactionService {
     heartbeatInterval: number,
     gracePeriod: number,
     beneficiaries: { wallet: PublicKey; shareBps: number; hasSpecificAssets: boolean }[],
+    isMutable: boolean = true,
   ): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
@@ -94,6 +95,7 @@ export class VaultTransactionService {
           shareBps: b.shareBps,
           hasSpecificAssets: b.hasSpecificAssets,
         })),
+        isMutable,
       })
       .accountsPartial({
         owner,
@@ -232,6 +234,47 @@ export class VaultTransactionService {
 
     const tx = await program.methods
       .revokeVault()
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+      })
+      .transaction();
+
+    return tx;
+  }
+
+  async buildUpdateVaultTx(
+    owner: PublicKey,
+    params: {
+      heartbeatInterval?: number;
+      gracePeriod?: number;
+      beneficiaries?: { wallet: PublicKey; shareBps: number; hasSpecificAssets: boolean }[];
+    },
+  ): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+
+    const readonlyWallet = {
+      publicKey: owner,
+      signTransaction: async (tx: Transaction) => tx,
+      signAllTransactions: async (txs: Transaction[]) => txs,
+    };
+    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+      commitment: 'confirmed',
+    });
+    const program = new Program<DeadMansVault>(idl as any, provider);
+
+    const tx = await program.methods
+      .updateVault({
+        heartbeatInterval: params.heartbeatInterval ? new BN(params.heartbeatInterval) : null,
+        gracePeriod: params.gracePeriod ? new BN(params.gracePeriod) : null,
+        beneficiaries: params.beneficiaries
+          ? params.beneficiaries.map((b) => ({
+              wallet: b.wallet,
+              shareBps: b.shareBps,
+              hasSpecificAssets: b.hasSpecificAssets,
+            }))
+          : null,
+      })
       .accountsPartial({
         owner,
         vaultConfig: vaultPda,

@@ -46,4 +46,7 @@ pub enum VaultError {
 
     #[msg("New agent pubkey is the same as the current agent")]
     AgentKeyUnchanged,
+
+    #[msg("Vault is immutable and cannot be revoked or updated")]
+    VaultImmutable,
 }

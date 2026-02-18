@@ -8,9 +8,11 @@ import {
   Animated,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import * as ExpoClipboard from 'expo-clipboard';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useWallet } from '../hooks/useWallet';
 import { useDemoStore } from '../store/useDemoStore';
@@ -23,6 +25,7 @@ import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
 
 export function SettingsScreen() {
+  const navigation = useNavigation<any>();
   const { publicKey, connected, connect, disconnect, signTransaction } = useWallet();
   const { isDemoMode, setDemoMode, incrementTap } = useDemoStore();
   const { beneficiaries, vaultConfig } = useVaultStore();
@@ -31,6 +34,7 @@ export function SettingsScreen() {
   const { isAuthEnabled, setAuthEnabled } = useAuthStore();
   const [copied, setCopied] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
 
@@ -61,6 +65,13 @@ export function SettingsScreen() {
               const vault = await txService.fetchVaultConfig(publicKey);
 
               if (vault && vault.active && !vault.executed) {
+                // Check immutability — sync local state if stale
+                if (vault.isMutable === false) {
+                  useVaultStore.getState().setVaultConfig(vault);
+                  Alert.alert('Immutable Vault', 'This vault is immutable and cannot be revoked.');
+                  setIsRevoking(false);
+                  return;
+                }
                 // Active vault — revoke on-chain
                 const tx = await txService.buildRevokeVaultTx(publicKey);
                 tx.feePayer = publicKey;
@@ -78,7 +89,10 @@ export function SettingsScreen() {
                   'confirmed',
                 );
 
-                Alert.alert('Success', `Vault revoked on-chain.\n\nTx: ${txSig.slice(0, 16)}...`);
+                Alert.alert('Vault Revoked', `Vault deactivated on-chain.\n\nTx: ${txSig.slice(0, 20)}...`, [
+                  { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
+                  { text: 'OK' },
+                ]);
               } else if (vault?.executed) {
                 Alert.alert('Info', 'Vault already executed. Clearing local data.');
               } else {
@@ -102,6 +116,77 @@ export function SettingsScreen() {
       ],
     );
   }, [publicKey, signTransaction]);
+
+  const handleEditBeneficiaries = useCallback(() => {
+    navigation.getParent()?.navigate('Setup', { screen: 'Beneficiaries' });
+  }, [navigation]);
+
+  const handleUpdateVault = useCallback(async () => {
+    if (!publicKey || beneficiaries.length === 0) return;
+
+    Alert.alert(
+      'Update Vault On-Chain?',
+      `This will update your vault with ${beneficiaries.length} beneficiaries on-chain. You will need to sign the transaction.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Update',
+          onPress: async () => {
+            setIsUpdating(true);
+            try {
+              const { VaultTransactionService } = require('../services/VaultTransactionService');
+              const { PublicKey: PK } = require('@solana/web3.js');
+              const txService = new VaultTransactionService();
+              const connection = txService.getConnection();
+
+              const onChainBeneficiaries = beneficiaries.map((b: any) => ({
+                wallet: new PK(b.wallet.toBase58()),
+                shareBps: b.shareBps,
+                hasSpecificAssets: b.hasSpecificAssets,
+              }));
+
+              const tx = await txService.buildUpdateVaultTx(publicKey, {
+                beneficiaries: onChainBeneficiaries,
+              });
+              tx.feePayer = publicKey;
+              const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+              tx.recentBlockhash = blockhash;
+
+              const signedTx = await signTransaction(tx);
+              const txSig = await connection.sendRawTransaction(signedTx.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+              });
+              await connection.confirmTransaction(
+                { signature: txSig, blockhash, lastValidBlockHeight },
+                'confirmed',
+              );
+
+              // Refresh vault config
+              const updatedVault = await txService.fetchVaultConfig(publicKey);
+              if (updatedVault) {
+                useVaultStore.getState().setVaultConfig(updatedVault);
+              }
+
+              Alert.alert('Vault Updated', `Beneficiaries updated on-chain.\n\nTx: ${txSig.slice(0, 20)}...`, [
+                { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
+                { text: 'OK' },
+              ]);
+            } catch (err: any) {
+              const msg = err.message || String(err);
+              if (msg.includes('CancellationException') || msg.includes('cancelled')) {
+                Alert.alert('Cancelled', 'Wallet signing was cancelled.');
+              } else {
+                Alert.alert('Error', msg);
+              }
+            } finally {
+              setIsUpdating(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [publicKey, beneficiaries, signTransaction]);
 
   const handleAuthToggle = useCallback(async (enabled: boolean) => {
     if (enabled) {
@@ -234,7 +319,33 @@ export function SettingsScreen() {
           <View style={styles.rowDivider} />
           <SettingRow icon="clock-outline" iconColor={COLORS.blueAccent} label="Heartbeat Interval" value={heartbeatConfig ? formatDuration(heartbeatConfig.intervalSeconds) : 'Not set'} />
           <View style={styles.rowDivider} />
+          <SettingRow icon="lock-outline" iconColor={vaultConfig?.isMutable === false ? COLORS.critical : COLORS.accent} label="Vault Type" value={vaultConfig?.isMutable === false ? 'Immutable' : 'Mutable'} />
+          <View style={styles.rowDivider} />
           <SettingRow icon="web" iconColor="rgba(255,255,255,0.3)" label="Network" value="Devnet" />
+          {vaultConfig && vaultConfig.active && !vaultConfig.executed && vaultConfig.isMutable !== false && (
+            <>
+              <View style={styles.rowDivider} />
+              <TouchableOpacity style={styles.actionRow} onPress={handleEditBeneficiaries}>
+                <View style={[styles.actionIcon, { backgroundColor: 'rgba(153,69,255,0.12)', borderColor: 'rgba(153,69,255,0.25)' }]}>
+                  <MaterialCommunityIcons name="account-edit" size={15} color={COLORS.solanaPurple} />
+                </View>
+                <Text style={[styles.actionLabel, { color: COLORS.solanaPurple }]}>Edit Beneficiaries</Text>
+                <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
+              </TouchableOpacity>
+              <View style={styles.rowDivider} />
+              <TouchableOpacity style={styles.actionRow} onPress={handleUpdateVault} disabled={isUpdating}>
+                <View style={[styles.actionIcon, { backgroundColor: 'rgba(0,212,180,0.12)', borderColor: 'rgba(0,212,180,0.25)' }]}>
+                  {isUpdating ? (
+                    <ActivityIndicator size="small" color={COLORS.accent} />
+                  ) : (
+                    <MaterialCommunityIcons name="upload" size={15} color={COLORS.accent} />
+                  )}
+                </View>
+                <Text style={[styles.actionLabel, { color: COLORS.accent }]}>Update Vault On-Chain</Text>
+                <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
 
@@ -254,20 +365,32 @@ export function SettingsScreen() {
       <View style={styles.sectionBlock}>
         <Text style={[styles.sectionLabel, { color: 'rgba(239,68,68,0.4)' }]}>DANGER ZONE</Text>
         <View style={[styles.card, { borderColor: 'rgba(239,68,68,0.15)' }]}>
-          <TouchableOpacity style={styles.actionRow} onPress={handleRevoke} disabled={isRevoking}>
-            <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
-              {isRevoking ? (
-                <ActivityIndicator size="small" color="#EF4444" />
-              ) : (
-                <MaterialCommunityIcons name="shield-off" size={15} color="#EF4444" />
-              )}
+          {vaultConfig?.isMutable === false ? (
+            <View style={styles.actionRow}>
+              <View style={[styles.actionIcon, { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }]}>
+                <MaterialCommunityIcons name="lock" size={15} color="rgba(255,255,255,0.3)" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.actionLabel, { color: 'rgba(255,255,255,0.3)', flex: 0 }]}>Vault Immutable</Text>
+                <Text style={styles.actionDesc}>This vault cannot be revoked or updated</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.actionLabel, { color: '#EF4444', flex: 0 }]}>Revoke Vault</Text>
-              <Text style={styles.actionDesc}>Deactivates on-chain and clears local data</Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
-          </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.actionRow} onPress={handleRevoke} disabled={isRevoking}>
+              <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
+                {isRevoking ? (
+                  <ActivityIndicator size="small" color="#EF4444" />
+                ) : (
+                  <MaterialCommunityIcons name="shield-off" size={15} color="#EF4444" />
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.actionLabel, { color: '#EF4444', flex: 0 }]}>Revoke Vault</Text>
+                <Text style={styles.actionDesc}>Deactivates on-chain and clears local data</Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 

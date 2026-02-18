@@ -9,6 +9,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, FONTS, STAGE_CONFIG } from '../utils/constants';
 import { EscalationStage } from '../types';
+import { EcgLine } from './EcgLine';
 
 interface HeartbeatButtonProps {
   onPress: () => void;
@@ -77,53 +78,18 @@ export function HeartbeatButton({
   const pulseScales = [pulseScale0, pulseScale1, pulseScale2];
   const pulseOpacities = [pulseOpacity0, pulseOpacity1, pulseOpacity2];
 
-  // Pulse ring animation — branched by stage
+  // ECG line speeds by stage
+  const ecgSpeed = stage === 0 ? 4000 : stage === 1 ? 3000 : stage === 2 ? 2000 : stage === 3 ? 1200 : 0;
+  const showEcg = stage === 0 || stage === 4;
+  const showRingPulse = stage >= 1 && stage <= 3;
+
+  // Pulse ring animation — only stages 1-3
   useEffect(() => {
-    // Stage 4: no rings at all
-    if (stage === 4) {
+    // Stage 0 uses ECG, stage 4 uses flatline — no ring animation for either
+    if (!showRingPulse) {
       pulseScales.forEach(s => s.setValue(1));
       pulseOpacities.forEach((o, i) => o.setValue(0.4 - i * 0.1));
       return;
-    }
-
-    if (stage === 0) {
-      // Stage 0: Gentle breathing — rings scale 1 <-> 1.05, opacity cycles slowly
-      const animations = pulseScales.map((scale, i) => {
-        const opacity = pulseOpacities[i];
-        const delay = i * (pulseDuration / 3);
-        return Animated.loop(
-          Animated.sequence([
-            Animated.delay(delay),
-            Animated.parallel([
-              Animated.timing(scale, {
-                toValue: 1.05 + i * 0.02,
-                duration: pulseDuration / 2,
-                useNativeDriver: true,
-              }),
-              Animated.timing(opacity, {
-                toValue: 0.15,
-                duration: pulseDuration / 2,
-                useNativeDriver: true,
-              }),
-            ]),
-            Animated.parallel([
-              Animated.timing(scale, {
-                toValue: 1,
-                duration: pulseDuration / 2,
-                useNativeDriver: true,
-              }),
-              Animated.timing(opacity, {
-                toValue: 0.4 - i * 0.1,
-                duration: pulseDuration / 2,
-                useNativeDriver: true,
-              }),
-            ]),
-          ]),
-        );
-      });
-
-      animations.forEach(a => a.start());
-      return () => animations.forEach(a => a.stop());
     }
 
     // Stages 1-3: Existing expand-fade pulse — unchanged
@@ -216,8 +182,6 @@ export function HeartbeatButton({
   const displayLabel = label ?? cfg.buttonLabel;
   const iconName = ICON_MAP[cfg.icon] || 'shield-check';
   const iconSize = stage >= 3 ? 28 : 24;
-  const showRings = stage >= 0 && stage <= 3;
-
   const spinRotation = spinAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
@@ -225,10 +189,23 @@ export function HeartbeatButton({
 
   return (
     <View style={[styles.container, { width: containerSize, height: containerSize + 40 }]}>
-      {/* Pulse area — fixed square container for button + rings */}
+      {/* Pulse area — fixed square container for button + rings/ecg */}
       <View style={[styles.pulseArea, { width: containerSize, height: containerSize }]}>
-        {/* Pulse rings */}
-        {showRings && [0, 1, 2].map(i => (
+        {/* ECG line for stage 0 and flatline for stage 4 */}
+        {showEcg && (
+          <View style={[styles.ecgContainer, { width: containerSize - 10 }]}>
+            <EcgLine
+              width={containerSize - 10}
+              height={30}
+              color={cfg.color}
+              speed={ecgSpeed}
+              strokeWidth={1.5}
+            />
+          </View>
+        )}
+
+        {/* Pulse rings for stages 1-3 */}
+        {showRingPulse && [0, 1, 2].map(i => (
           <Animated.View
             key={i}
             style={[
@@ -315,6 +292,12 @@ const styles = StyleSheet.create({
   pulseArea: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  ecgContainer: {
+    position: 'absolute',
+    bottom: 5,
+    alignSelf: 'center',
+    opacity: 0.6,
   },
   pulseRing: {
     borderWidth: 1,

@@ -35,6 +35,7 @@ pub struct InitializeVaultParams {
     pub heartbeat_interval: i64,
     pub grace_period: i64,
     pub beneficiaries: Vec<Beneficiary>,
+    pub is_mutable: bool,
 }
 
 pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> Result<()> {
@@ -91,6 +92,7 @@ pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> 
     vault.created_at = clock.unix_timestamp;
     vault.updated_at = clock.unix_timestamp;
     vault.bump = ctx.bumps.vault_config;
+    vault.is_mutable = params.is_mutable;
 
     // Initialize heartbeat record with current time
     let heartbeat = &mut ctx.accounts.heartbeat_record;

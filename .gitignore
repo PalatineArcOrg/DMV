@@ -7,6 +7,11 @@ id.json
 CLAUDE.md
 IMPLEMENTATION.md
 DeadMansVault_Design_Spec.docx
+DEMO_SCRIPT.md
+SUBMISSION_CHECKLIST.md
+FIGMA_IMPLEMENTATION.md
+figma-reference/
+DMV.make
 
 # Tokens and secrets
 .github_token

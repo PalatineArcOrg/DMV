@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useWallet } from '../hooks/useWallet';
 import { useVaultStore } from '../store/useVaultStore';
@@ -20,6 +20,16 @@ export function SetupWizardScreen() {
   const heartbeatDone = heartbeatConfig !== null;
   const beneficiariesDone = validateBeneficiaryShares(
     beneficiaries.map((b) => b.shareBps),
+  );
+  const hasPartialState = beneficiaries.length > 0 || heartbeatDone;
+
+  // Reset Setup stack to wizard root when user tabs back (prevents stale screens)
+  useFocusEffect(
+    useCallback(() => {
+      if (!isSetupComplete) {
+        navigation.popToTop();
+      }
+    }, [isSetupComplete, navigation]),
   );
 
   // Auto-sync: check if on-chain vault exists for connected wallet
@@ -139,6 +149,11 @@ export function SetupWizardScreen() {
     );
   }
 
+  const handleStartOver = useCallback(() => {
+    useVaultStore.getState().setBeneficiaries([]);
+    useHeartbeatStore.getState().setConfig(null);
+  }, []);
+
   // Not setup — navigate to Welcome screen
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -170,6 +185,13 @@ export function SetupWizardScreen() {
         disabled={!heartbeatDone || !beneficiariesDone}
         onPress={() => navigation.navigate('EstateReview')}
       />
+
+      {hasPartialState && (
+        <TouchableOpacity style={styles.startOverBtn} onPress={handleStartOver}>
+          <MaterialCommunityIcons name="restart" size={14} color="rgba(255,255,255,0.4)" />
+          <Text style={styles.startOverText}>Start Over</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={{ height: SPACING.xxl }} />
     </ScrollView>
@@ -453,6 +475,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     marginTop: 2,
+    fontFamily: FONTS.primary,
+  },
+  startOverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  startOverText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
     fontFamily: FONTS.primary,
   },
 });

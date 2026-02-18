@@ -32,6 +32,9 @@ pub struct VaultConfig {
 
     /// Bump seed for PDA derivation
     pub bump: u8,
+
+    /// Whether the vault can be revoked/updated by the owner (false = immutable)
+    pub is_mutable: bool,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -58,5 +61,6 @@ impl VaultConfig {
         + 8     // created_at
         + 8     // updated_at
         + 1     // bump
-        + 64;   // padding for future fields
+        + 1     // is_mutable
+        + 63;   // padding for future fields
 }
