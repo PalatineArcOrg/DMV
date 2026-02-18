@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -13,9 +13,21 @@ import { COLORS, FONTS, SPACING, PROGRAM_ID, STAGE_CONFIG } from '../utils/const
 export function SetupWizardScreen() {
   const navigation = useNavigation<any>();
   const { publicKey } = useWallet();
-  const { beneficiaries, isSetupComplete, setSetupComplete, setVaultConfig } = useVaultStore();
+  const { beneficiaries, isSetupComplete, setSetupComplete, setVaultConfig, vaultConfig } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
   const escalationStage = useEscalationStore((s) => s.state.stage);
+
+  // Track if we just came from a revoke to prevent auto-sync from refetching stale data
+  const wasSetupComplete = useRef(isSetupComplete);
+  const skipNextSync = useRef(false);
+
+  useEffect(() => {
+    // If isSetupComplete just transitioned from true → false, skip the next auto-sync
+    if (wasSetupComplete.current && !isSetupComplete) {
+      skipNextSync.current = true;
+    }
+    wasSetupComplete.current = isSetupComplete;
+  }, [isSetupComplete]);
 
   const heartbeatDone = heartbeatConfig !== null;
   const beneficiariesDone = validateBeneficiaryShares(
@@ -35,12 +47,17 @@ export function SetupWizardScreen() {
   // Auto-sync: check if on-chain vault exists for connected wallet
   useEffect(() => {
     if (!isSetupComplete && publicKey) {
+      // Skip auto-sync if we just revoked — prevents refetching stale data
+      if (skipNextSync.current) {
+        skipNextSync.current = false;
+        return;
+      }
       (async () => {
         try {
           const { VaultTransactionService } = require('../services/VaultTransactionService');
           const txService = new VaultTransactionService();
           const vault = await txService.fetchVaultConfig(publicKey);
-          if (vault) {
+          if (vault && vault.active) {
             setVaultConfig(vault);
           }
         } catch {
@@ -150,8 +167,10 @@ export function SetupWizardScreen() {
   }
 
   const handleStartOver = useCallback(() => {
-    useVaultStore.getState().setBeneficiaries([]);
-    useHeartbeatStore.getState().setConfig(null);
+    skipNextSync.current = true;
+    useVaultStore.getState().reset();
+    useHeartbeatStore.getState().reset();
+    useEscalationStore.getState().reset();
   }, []);
 
   // Not setup — navigate to Welcome screen

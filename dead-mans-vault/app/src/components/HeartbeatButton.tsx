@@ -191,19 +191,6 @@ export function HeartbeatButton({
     <View style={[styles.container, { width: containerSize, height: containerSize + 40 }]}>
       {/* Pulse area — fixed square container for button + rings/ecg */}
       <View style={[styles.pulseArea, { width: containerSize, height: containerSize }]}>
-        {/* ECG line for stage 0 and flatline for stage 4 */}
-        {showEcg && (
-          <View style={[styles.ecgContainer, { width: containerSize - 10 }]}>
-            <EcgLine
-              width={containerSize - 10}
-              height={30}
-              color={cfg.color}
-              speed={ecgSpeed}
-              strokeWidth={1.5}
-            />
-          </View>
-        )}
-
         {/* Pulse rings for stages 1-3 */}
         {showRingPulse && [0, 1, 2].map(i => (
           <Animated.View
@@ -242,9 +229,23 @@ export function HeartbeatButton({
               shadowOpacity: stage >= 3 ? 0.8 : 0.4,
               shadowRadius: stage >= 3 ? 20 : 12,
               elevation: stage >= 3 ? 12 : 6,
+              overflow: 'hidden',
             },
           ]}
         >
+          {/* ECG line inside the circle — behind the icon */}
+          {showEcg && (
+            <View style={styles.ecgOverlay} pointerEvents="none">
+              <EcgLine
+                width={buttonSize}
+                height={buttonSize * 0.4}
+                color={cfg.color}
+                speed={ecgSpeed}
+                strokeWidth={1.5}
+              />
+            </View>
+          )}
+
           {confirmed ? (
             <Animated.View style={{ transform: [{ scale: checkScale }] }}>
               <MaterialCommunityIcons name="check" size={28} color="#07090F" />
@@ -293,11 +294,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ecgContainer: {
-    position: 'absolute',
-    bottom: 5,
-    alignSelf: 'center',
-    opacity: 0.6,
+  ecgOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.5,
   },
   pulseRing: {
     borderWidth: 1,

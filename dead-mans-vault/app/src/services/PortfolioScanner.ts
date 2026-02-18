@@ -252,8 +252,7 @@ export class PortfolioScanner {
       const tokenBalances = await this.getTokenBalances(wallet);
       const detector = new DeFiDetector(this.connection, this.heliusApiKey);
       return detector.detectAll(wallet, tokenBalances);
-    } catch (err) {
-      console.error('DeFi detection failed:', err);
+    } catch {
       return [];
     }
   }

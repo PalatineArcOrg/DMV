@@ -58,9 +58,7 @@ export class BackgroundAgent {
     if (ownerPubkey && beneficiaries && beneficiaries.length > 0) {
       this.escalationService.setExecutionCallback(() => {
         const executor = new ExecutionService(ownerPubkey, beneficiaries, defiPositions || []);
-        executor.execute().catch((err) => {
-          console.error('ExecutionService error:', err);
-        });
+        executor.execute().catch(() => {});
       });
     }
 

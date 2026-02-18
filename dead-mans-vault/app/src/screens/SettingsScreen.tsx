@@ -99,8 +99,10 @@ export function SettingsScreen() {
                 // No vault on-chain
               }
 
-              // Clear local state
-              useVaultStore.getState().reset?.();
+              // Clear all local state — full cascade reset
+              useVaultStore.getState().reset();
+              useHeartbeatStore.getState().reset();
+              useEscalationStore.getState().reset();
             } catch (err: any) {
               const msg = err.message || String(err);
               if (msg.includes('CancellationException') || msg.includes('cancelled')) {

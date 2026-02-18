@@ -71,6 +71,15 @@ export function AssetsScreen() {
     }
   }, [publicKey, defiLoading]);
 
+  // Auto-refresh tokens on screen focus if not yet loaded
+  useFocusEffect(
+    useCallback(() => {
+      if (connected && publicKey && balances.length === 0 && !portfolioLoading) {
+        refresh();
+      }
+    }, [connected, publicKey, balances.length, portfolioLoading, refresh]),
+  );
+
   // Auto-scan on focus when DeFi tab is active
   useFocusEffect(
     useCallback(() => {
