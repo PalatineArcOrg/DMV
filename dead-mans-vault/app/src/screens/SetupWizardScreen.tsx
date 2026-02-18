@@ -35,6 +35,13 @@ export function SetupWizardScreen() {
   );
   const hasPartialState = beneficiaries.length > 0 || heartbeatDone;
 
+  const handleStartOver = useCallback(() => {
+    skipNextSync.current = true;
+    useVaultStore.getState().reset();
+    useHeartbeatStore.getState().reset();
+    useEscalationStore.getState().reset();
+  }, []);
+
   // Reset Setup stack to wizard root when user tabs back (prevents stale screens)
   useFocusEffect(
     useCallback(() => {
@@ -165,13 +172,6 @@ export function SetupWizardScreen() {
       </ScrollView>
     );
   }
-
-  const handleStartOver = useCallback(() => {
-    skipNextSync.current = true;
-    useVaultStore.getState().reset();
-    useHeartbeatStore.getState().reset();
-    useEscalationStore.getState().reset();
-  }, []);
 
   // Not setup — navigate to Welcome screen
   return (
