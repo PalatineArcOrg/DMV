@@ -155,7 +155,6 @@ export function DashboardScreen() {
     try {
       let vault: any = await fetchVaultConfig(publicKey);
       if (!vault) {
-        const { VaultTransactionService } = require('../services/VaultTransactionService');
         const txService = new VaultTransactionService();
         const [vaultPda] = txService.getVaultPDA(publicKey);
         const rawAccount = await txService.getConnection().getAccountInfo(vaultPda);

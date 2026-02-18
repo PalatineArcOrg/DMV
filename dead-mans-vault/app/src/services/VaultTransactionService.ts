@@ -195,6 +195,12 @@ export class VaultTransactionService {
     return sig;
   }
 
+  /**
+   * Fetches the on-chain VaultConfig account.
+   * Returns Anchor-deserialized data where numeric fields (heartbeatInterval,
+   * gracePeriod, createdAt, updatedAt) are BN instances, and beneficiaries
+   * lack the client-side `label` field.
+   */
   async fetchVaultConfig(owner: PublicKey): Promise<any | null> {
     const readonlyWallet = {
       publicKey: owner,

@@ -65,7 +65,7 @@ export function SettingsScreen() {
               const vault = await txService.fetchVaultConfig(publicKey);
 
               if (vault && vault.active && !vault.executed) {
-                // Active vault — revoke on-chain (owner can always revoke, even immutable vaults)
+                // Active mutable vault — revoke on-chain
                 const tx = await txService.buildRevokeVaultTx(publicKey);
                 tx.feePayer = publicKey;
                 const connection = txService.getConnection();
