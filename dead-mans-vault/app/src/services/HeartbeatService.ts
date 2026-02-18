@@ -67,15 +67,40 @@ export class HeartbeatService {
       try {
         const signatures = await connection.getSignaturesForAddress(
           ownerPubkey,
-          { limit: 1 },
+          { limit: 5 },
         );
         if (signatures.length === 0) return;
 
-        const latestTx = signatures[0];
-        if (!latestTx.blockTime) return;
+        // Filter to transactions where the owner was a signer (not just a participant).
+        // getSignaturesForAddress returns all txs involving the address, including
+        // incoming transfers. We need to verify the owner actually signed the tx.
+        let ownerSignedTx: { blockTime: number } | null = null;
+        for (const sig of signatures) {
+          if (!sig.blockTime || sig.err) continue;
+          try {
+            const tx = await connection.getTransaction(sig.signature, {
+              maxSupportedTransactionVersion: 0,
+            });
+            if (!tx?.transaction?.message) continue;
+            const accountKeys = tx.transaction.message.staticAccountKeys
+              ?? (tx.transaction.message as any).accountKeys ?? [];
+            const signerCount = tx.transaction.message.header?.numRequiredSignatures
+              ?? (tx.transaction.message as any).numRequiredSignatures ?? 1;
+            // Signers are the first N accounts in the account keys list
+            const signers = accountKeys.slice(0, signerCount).map((k: any) => k.toString());
+            if (signers.includes(ownerPubkey.toString())) {
+              ownerSignedTx = { blockTime: sig.blockTime };
+              break;
+            }
+          } catch {
+            // Skip this tx if we can't fetch details
+          }
+        }
+
+        if (!ownerSignedTx) return;
 
         const last = await getLastHeartbeat();
-        if (!last || latestTx.blockTime > last.timestamp) {
+        if (!last || ownerSignedTx.blockTime > last.timestamp) {
           await this.confirmHeartbeat('on_chain_activity');
         }
       } catch {

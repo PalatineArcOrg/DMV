@@ -15,6 +15,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVaultStore } from '../store/useVaultStore';
 import { useWallet } from '../hooks/useWallet';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
+import { useDemoStore } from '../store/useDemoStore';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
 import { truncateAddress, formatDuration } from '../utils/formatting';
@@ -42,6 +43,16 @@ export function EstateReviewScreen() {
     }
     if (beneficiaries.length === 0) {
       Alert.alert('Error', 'At least one beneficiary is required.');
+      return;
+    }
+
+    // Block vault activation in demo mode on production builds
+    const isDemoMode = useDemoStore.getState().isDemoMode;
+    if (isDemoMode && !__DEV__) {
+      Alert.alert(
+        'Demo Mode Active',
+        'Disable demo mode in Settings before activating a real vault. Demo mode uses 30-second escalation timers which could trigger unintended execution.',
+      );
       return;
     }
 

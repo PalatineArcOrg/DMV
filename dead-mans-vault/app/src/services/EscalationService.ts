@@ -133,6 +133,9 @@ export class EscalationService {
         break;
       }
       case 4:
+        // Stop the evaluation loop — Stage 4 is terminal, no further evaluation needed.
+        // This prevents re-firing the execution callback if the app restarts mid-execution.
+        this.stop();
         NotificationService.sendExecutionStarted();
         store.recordNotification();
         if (this.executionCallback) {

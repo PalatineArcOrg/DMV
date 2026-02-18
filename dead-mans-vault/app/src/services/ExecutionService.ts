@@ -44,9 +44,20 @@ export class ExecutionService {
         }
       }
 
+      // Track whether any distribution step failed
+      let hasDistributionFailure = false;
+
       // Execute sequentially, skip completed steps
       for (const step of steps) {
         if (step.order <= lastCompleted) continue;
+
+        // If a distribution failed, skip record_execution and self_terminate
+        // to preserve the agent key for manual recovery
+        if (hasDistributionFailure && (step.type === 'record_execution_log' || step.type === 'self_terminate')) {
+          await updateStepStatus(step.id, 'failed', undefined,
+            'Skipped: prior distribution step failed. Agent key preserved for recovery.');
+          continue;
+        }
 
         await updateStepStatus(step.id, 'in_progress');
 
@@ -55,7 +66,9 @@ export class ExecutionService {
           await updateStepStatus(step.id, 'completed', txSig);
         } catch (err: any) {
           await updateStepStatus(step.id, 'failed', undefined, err.message);
-          // Continue to next step — don't halt the entire execution for a single failure
+          if (step.type === 'distribute_percentage' || step.type === 'close_defi_position') {
+            hasDistributionFailure = true;
+          }
         }
       }
     } finally {

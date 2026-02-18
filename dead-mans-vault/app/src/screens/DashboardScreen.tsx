@@ -295,6 +295,16 @@ export function DashboardScreen() {
         </View>
       )}
 
+      {/* Demo mode + active vault warning */}
+      {isDemoMode && isVaultSetup && vaultData?.active && !vaultData?.executed && (
+        <View style={styles.demoWarningBanner}>
+          <MaterialCommunityIcons name="alert" size={16} color={COLORS.warning} />
+          <Text style={styles.demoWarningText}>
+            Demo mode is active with a real vault. Escalation timers are 30 seconds instead of days. Disable demo mode in Settings to use production timers.
+          </Text>
+        </View>
+      )}
+
       {/* === VAULT STATUS CARD (MOVED TO TOP) === */}
       {isVaultSetup && !vaultData?.executed && (
         <View style={[styles.vaultCard, { borderColor: cfg.borderColor }]}>
@@ -605,6 +615,25 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.5,
     fontFamily: FONTS.primaryBold,
+  },
+  demoWarningBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.3)',
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  demoWarningText: {
+    flex: 1,
+    color: COLORS.warning,
+    fontSize: 11,
+    fontFamily: FONTS.primary,
+    lineHeight: 16,
   },
 
   // Vault Status Card
