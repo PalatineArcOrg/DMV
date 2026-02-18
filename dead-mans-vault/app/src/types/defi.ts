@@ -7,6 +7,7 @@ export interface TokenBalance {
   decimals: number;
   usdValue: number;
   change24h?: number | null;
+  logoUri?: string | null;
 }
 
 export type DeFiProtocol =

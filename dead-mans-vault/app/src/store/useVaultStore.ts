@@ -46,7 +46,7 @@ export const useVaultStore = create<VaultStore>((set) => ({
   setVaultConfig: (config) =>
     set({
       vaultConfig: config,
-      isSetupComplete: config !== null,
+      isSetupComplete: config !== null && config.active === true && config.executed !== true,
       beneficiaries: config?.beneficiaries ?? [],
     }),
   setInitialized: (initialized) => set({ isInitialized: initialized }),

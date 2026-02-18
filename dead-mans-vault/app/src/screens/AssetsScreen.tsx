@@ -7,15 +7,15 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useVaultStore } from '../store/useVaultStore';
-import { PortfolioScanner } from '../services/PortfolioScanner';
-import { DeFiPosition, DeFiPositionAction, ClosureStrategy } from '../types/defi';
-import { RPC_URL, HELIUS_API_KEY, COLORS, SPACING, FONTS, TOKEN_COLORS } from '../utils/constants';
+import { DeFiPosition, DeFiPositionAction } from '../types/defi';
+import { COLORS, SPACING, FONTS, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount } from '../utils/formatting';
 
 type Tab = 'tokens' | 'defi';
@@ -35,8 +35,15 @@ const PROTOCOL_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMa
 
 const ACTIONS: DeFiPositionAction[] = ['close', 'transfer', 'ignore'];
 
-function TokenIcon({ symbol }: { symbol: string }) {
+function TokenIcon({ symbol, logoUri }: { symbol: string; logoUri?: string | null }) {
   const color = TOKEN_COLORS[symbol] || COLORS.accent;
+  if (logoUri) {
+    return (
+      <View style={[styles.tokenIcon, { backgroundColor: color + '22', borderColor: color + '44' }]}>
+        <Image source={{ uri: logoUri }} style={styles.tokenIconImage} />
+      </View>
+    );
+  }
   return (
     <View style={[styles.tokenIcon, { backgroundColor: color + '22', borderColor: color + '44' }]}>
       <Text style={[styles.tokenIconText, { color }]}>{symbol.slice(0, 3)}</Text>
@@ -46,32 +53,20 @@ function TokenIcon({ symbol }: { symbol: string }) {
 
 export function AssetsScreen() {
   const { publicKey, connected } = useWallet();
-  const { balances, totalUsdValue, isLoading: portfolioLoading, refresh } = usePortfolio();
+  const { balances, defiPositions: portfolioDefiPositions, totalUsdValue, isLoading: portfolioLoading, refresh } = usePortfolio();
   const isSetupComplete = useVaultStore((s) => s.isSetupComplete);
 
   const [activeTab, setActiveTab] = useState<Tab>('tokens');
   const [positions, setPositions] = useState<DeFiPosition[]>([]);
-  const [defiLoading, setDefiLoading] = useState(false);
-  const [defiScanned, setDefiScanned] = useState(false);
 
-  // Scan DeFi on tab switch or focus
-  const scanDefi = useCallback(async () => {
-    if (!publicKey || defiLoading) return;
-    setDefiLoading(true);
-    try {
-      const scanner = new PortfolioScanner(RPC_URL, HELIUS_API_KEY);
-      const detected = await scanner.detectDeFiPositions(publicKey);
-      setPositions(detected);
-      useVaultStore.getState().setDefiPositions(detected);
-    } catch {
-      // Non-fatal
-    } finally {
-      setDefiLoading(false);
-      setDefiScanned(true);
+  // Sync DeFi positions from usePortfolio
+  useEffect(() => {
+    if (portfolioDefiPositions.length > 0) {
+      setPositions(portfolioDefiPositions);
     }
-  }, [publicKey, defiLoading]);
+  }, [portfolioDefiPositions]);
 
-  // Auto-refresh tokens on screen focus if not yet loaded
+  // Auto-refresh tokens + DeFi on screen focus if not yet loaded
   useFocusEffect(
     useCallback(() => {
       if (connected && publicKey && balances.length === 0 && !portfolioLoading) {
@@ -79,21 +74,6 @@ export function AssetsScreen() {
       }
     }, [connected, publicKey, balances.length, portfolioLoading, refresh]),
   );
-
-  // Auto-scan on focus when DeFi tab is active
-  useFocusEffect(
-    useCallback(() => {
-      if (activeTab === 'defi' && !defiScanned) {
-        scanDefi();
-      }
-    }, [activeTab, defiScanned, scanDefi]),
-  );
-
-  useEffect(() => {
-    if (activeTab === 'defi' && !defiScanned) {
-      scanDefi();
-    }
-  }, [activeTab]);
 
   const updateAction = useCallback((index: number, action: DeFiPositionAction) => {
     setPositions((prev) => {
@@ -105,11 +85,7 @@ export function AssetsScreen() {
 
   const onRefresh = useCallback(async () => {
     await refresh();
-    if (activeTab === 'defi') {
-      setDefiScanned(false);
-      await scanDefi();
-    }
-  }, [refresh, activeTab, scanDefi]);
+  }, [refresh]);
 
   if (!connected) {
     return (
@@ -193,7 +169,7 @@ export function AssetsScreen() {
           ) : (
             balances.map((token, i) => (
               <View key={i} style={[styles.tokenRow, i < balances.length - 1 && styles.tokenRowBorder]}>
-                <TokenIcon symbol={token.symbol} />
+                <TokenIcon symbol={token.symbol} logoUri={token.logoUri} />
                 <View style={styles.tokenInfo}>
                   <View style={styles.tokenNameRow}>
                     <Text style={styles.tokenSymbol}>{token.symbol}</Text>
@@ -224,7 +200,7 @@ export function AssetsScreen() {
       {/* DeFi View */}
       {activeTab === 'defi' && (
         <View>
-          {defiLoading ? (
+          {portfolioLoading && positions.length === 0 ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={COLORS.accent} />
               <Text style={styles.loadingText}>Scanning DeFi positions...</Text>
@@ -333,6 +309,7 @@ const styles = StyleSheet.create({
   tokenRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
   tokenRowBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   tokenIcon: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  tokenIconImage: { width: 28, height: 28, borderRadius: 14 },
   tokenIconText: { fontSize: 10, fontWeight: '700', fontFamily: FONTS.primaryBold },
   tokenInfo: { flex: 1, minWidth: 0 },
   tokenNameRow: { flexDirection: 'row', alignItems: 'center' },

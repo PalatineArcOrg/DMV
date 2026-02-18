@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Animated,
   Linking,
+  Image,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -30,8 +31,15 @@ import { VaultTransactionService } from '../services/VaultTransactionService';
 
 // --- Helpers ---
 
-function TokenIcon({ symbol }: { symbol: string }) {
+function TokenIcon({ symbol, logoUri }: { symbol: string; logoUri?: string | null }) {
   const color = TOKEN_COLORS[symbol] || COLORS.accent;
+  if (logoUri) {
+    return (
+      <View style={[styles.tokenIcon, { backgroundColor: color + '22', borderColor: color + '44' }]}>
+        <Image source={{ uri: logoUri }} style={styles.tokenIconImage} />
+      </View>
+    );
+  }
   return (
     <View style={[styles.tokenIcon, { backgroundColor: color + '22', borderColor: color + '44' }]}>
       <Text style={[styles.tokenIconText, { color }]}>{symbol.slice(0, 3)}</Text>
@@ -117,13 +125,14 @@ function SkeletonTokenRow() {
 export function DashboardScreen() {
   const navigation = useNavigation<any>();
   const { publicKey, connected, connect } = useWallet();
-  const { balances, totalUsdValue, solBalance, isLoading, error, refresh } = usePortfolio();
+  const { balances, defiPositions: portfolioDefi, totalUsdValue, solBalance, isLoading, error, refresh } = usePortfolio();
   const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } = useVaultProgram();
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
   const [vaultData, setVaultData] = useState<any>(null);
   const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
-  const defiPositions = useVaultStore((s) => s.defiPositions);
+  const storeDefiPositions = useVaultStore((s) => s.defiPositions);
+  const defiPositions = portfolioDefi.length > 0 ? portfolioDefi : storeDefiPositions;
 
   // Wallet-switch detection
   const prevPublicKey = useRef(publicKey?.toBase58() ?? '');
@@ -168,7 +177,9 @@ export function DashboardScreen() {
       }
       setVaultData(vault);
       if (vault) {
-        useVaultStore.getState().setSetupComplete(true);
+        if (vault.active && !vault.executed) {
+          useVaultStore.getState().setSetupComplete(true);
+        }
         const [vaultPda] = getVaultPDA(publicKey);
         const hb = await fetchHeartbeatRecord(vaultPda);
         setHeartbeatData(hb);
@@ -390,7 +401,7 @@ export function DashboardScreen() {
       <View style={styles.portfolioCard}>
         <View style={styles.portfolioHeader}>
           <Text style={styles.portfolioLabel}>YOUR PORTFOLIO</Text>
-          <Text style={styles.tokenListCount}>{balances.length} assets</Text>
+          <Text style={styles.tokenListCount}>{balances.length + defiPositions.length} assets</Text>
         </View>
         {isLoading && balances.length === 0 ? (
           <View style={styles.portfolioSummary}>
@@ -425,7 +436,7 @@ export function DashboardScreen() {
               key={i}
               style={[styles.tokenRow, i < balances.length - 1 && styles.tokenRowBorder]}
             >
-              <TokenIcon symbol={token.symbol} />
+              <TokenIcon symbol={token.symbol} logoUri={token.logoUri} />
               <View style={styles.tokenLeft}>
                 <Text style={styles.tokenSymbol}>{token.symbol}</Text>
                 <Text style={styles.tokenAmount}>
@@ -445,35 +456,45 @@ export function DashboardScreen() {
             </View>
           ))
         )}
-      </View>
 
-      {/* DeFi Positions Summary — NOW TAPPABLE */}
-      {defiPositions.length > 0 && (
-        <TouchableOpacity
-          style={styles.card}
-          activeOpacity={0.7}
-          onPress={() => navigation.getParent()?.navigate('Assets')}
-        >
-          <View style={styles.defiHeader}>
-            <Text style={styles.sectionLabel}>DEFI POSITIONS ({defiPositions.length})</Text>
-            <View style={styles.defiViewAll}>
-              <Text style={styles.defiViewAllText}>View All</Text>
-              <MaterialCommunityIcons name="chevron-right" size={14} color={COLORS.accent} />
+        {/* DeFi Positions — inline in portfolio card */}
+        {defiPositions.length > 0 && (
+          <>
+            <View style={styles.defiDivider}>
+              <Text style={styles.defiInlineLabel}>DEFI POSITIONS</Text>
+              <TouchableOpacity
+                style={styles.defiViewAll}
+                onPress={() => navigation.getParent()?.navigate('Assets')}
+              >
+                <Text style={styles.defiViewAllText}>View All</Text>
+                <MaterialCommunityIcons name="chevron-right" size={14} color={COLORS.accent} />
+              </TouchableOpacity>
             </View>
-          </View>
-          {defiPositions.slice(0, 3).map((pos: DeFiPosition, i: number) => (
-            <View key={i} style={styles.defiRow}>
-              <Text style={styles.defiLabel}>{pos.protocol.replace('_', ' ')}</Text>
-              <Text style={styles.defiValue}>
-                {pos.estimatedValueSol > 0 ? `~${pos.estimatedValueSol.toFixed(4)} SOL` : pos.type}
-              </Text>
-            </View>
-          ))}
-          {defiPositions.length > 3 && (
-            <Text style={styles.defiMore}>+{defiPositions.length - 3} more positions</Text>
-          )}
-        </TouchableOpacity>
-      )}
+            {defiPositions.slice(0, 3).map((pos: DeFiPosition, i: number) => (
+              <View key={`defi-${i}`} style={[styles.tokenRow, i < Math.min(defiPositions.length, 3) - 1 && styles.tokenRowBorder]}>
+                <View style={[styles.tokenIcon, { backgroundColor: COLORS.accent + '22', borderColor: COLORS.accent + '44' }]}>
+                  <MaterialCommunityIcons name="bank" size={16} color={COLORS.accent} />
+                </View>
+                <View style={styles.tokenLeft}>
+                  <Text style={styles.tokenSymbol}>{pos.protocol.replace('_', ' ')}</Text>
+                  <Text style={styles.tokenAmount}>{pos.type.replace('_', ' ')}</Text>
+                </View>
+                <View style={styles.tokenRight}>
+                  {pos.estimatedValueUsd > 0 && (
+                    <Text style={styles.tokenUsd}>{formatUsd(pos.estimatedValueUsd)}</Text>
+                  )}
+                  {pos.estimatedValueSol > 0 && (
+                    <Text style={styles.tokenChange}>~{pos.estimatedValueSol.toFixed(4)} SOL</Text>
+                  )}
+                </View>
+              </View>
+            ))}
+            {defiPositions.length > 3 && (
+              <Text style={styles.defiMore}>+{defiPositions.length - 3} more positions</Text>
+            )}
+          </>
+        )}
+      </View>
 
       {/* Setup CTA if no vault */}
       {!isVaultSetup && (
@@ -823,6 +844,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontFamily: FONTS.primaryBold,
   },
+  tokenIconImage: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
   tokenLeft: {
     flex: 1,
     minWidth: 0,
@@ -887,28 +913,23 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.primary,
   },
 
-  // Card
-  card: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  sectionLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 1,
-    fontFamily: FONTS.primarySemiBold,
-  },
-  defiHeader: {
+  // DeFi inline section
+  defiDivider: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    marginTop: 4,
+  },
+  defiInlineLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 1,
+    fontFamily: FONTS.primarySemiBold,
   },
   defiViewAll: {
     flexDirection: 'row',
@@ -921,26 +942,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: FONTS.primarySemiBold,
   },
-  defiRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  defiLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontFamily: FONTS.primary,
-  },
-  defiValue: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    fontWeight: '500',
-    fontFamily: FONTS.primaryMedium,
-  },
   defiMore: {
     color: COLORS.textMuted,
     fontSize: 11,
-    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     fontFamily: FONTS.primary,
   },
 

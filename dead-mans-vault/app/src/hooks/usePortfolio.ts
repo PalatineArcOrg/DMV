@@ -18,10 +18,15 @@ export function usePortfolio() {
     [],
   );
 
-  const totalUsdValue = useMemo(
-    () => balances.reduce((sum, b) => sum + b.usdValue, 0),
-    [balances],
-  );
+  const totalUsdValue = useMemo(() => {
+    const tokenTotal = balances.reduce((sum, b) => sum + b.usdValue, 0);
+    // Add DeFi positions that don't have corresponding SPL tokens already in balances
+    // (positions with tokens.length > 0 are LSTs like mSOL/jitoSOL already counted in token balances)
+    const defiTotal = defiPositions
+      .filter((p) => p.tokens.length === 0 && p.estimatedValueUsd > 0)
+      .reduce((sum, p) => sum + p.estimatedValueUsd, 0);
+    return tokenTotal + defiTotal;
+  }, [balances, defiPositions]);
 
   const solBalance = useMemo(
     () => balances.find((b) => b.symbol === 'SOL')?.amount ?? 0,
@@ -60,9 +65,22 @@ export function usePortfolio() {
       );
 
       setBalances(enrichedTokens);
-      setDefiPositions(positions);
+
+      // Enrich DeFi positions with USD values using SOL price
+      const solToken = enrichedTokens.find((t) => t.symbol === 'SOL');
+      const solPrice = solToken && solToken.amount > 0
+        ? solToken.usdValue / solToken.amount
+        : 0;
+      const enrichedPositions = positions.map((pos) => {
+        if (pos.estimatedValueUsd === 0 && pos.estimatedValueSol > 0 && solPrice > 0) {
+          return { ...pos, estimatedValueUsd: pos.estimatedValueSol * solPrice };
+        }
+        return pos;
+      });
+
+      setDefiPositions(enrichedPositions);
       // Also persist to Zustand store so Dashboard can display them
-      useVaultStore.getState().setDefiPositions(positions);
+      useVaultStore.getState().setDefiPositions(enrichedPositions);
     } catch (err: any) {
       setError(err.message || 'Failed to scan portfolio');
     } finally {

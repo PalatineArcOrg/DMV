@@ -1,6 +1,6 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { TokenBalance, DeFiPosition } from '../types';
-import { HELIUS_API_BASE } from '../utils/constants';
+import { HELIUS_API_BASE, KNOWN_TOKEN_LOGOS } from '../utils/constants';
 import { DeFiDetector } from '../defi/detector';
 import { KNOWN_TOKEN_SYMBOLS } from '../defi/registry';
 
@@ -89,6 +89,16 @@ export class PortfolioScanner {
     }
 
     await this.enrichWithPrices(balances);
+
+    // Attach logo URIs from known token registry
+    for (const balance of balances) {
+      const mintStr = balance.mint.toString();
+      const logo = KNOWN_TOKEN_LOGOS[mintStr];
+      if (logo) {
+        balance.logoUri = logo;
+      }
+    }
+
     return balances;
   }
 
