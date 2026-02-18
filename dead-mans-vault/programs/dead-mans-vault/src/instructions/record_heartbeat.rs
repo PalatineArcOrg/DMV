@@ -29,10 +29,9 @@ pub fn handler(ctx: Context<RecordHeartbeat>, method: HeartbeatMethod) -> Result
 
     heartbeat.last_heartbeat = clock.unix_timestamp;
     heartbeat.last_method = method;
-    heartbeat.total_heartbeats += 1;
-
-    msg!("Heartbeat recorded at: {}", heartbeat.last_heartbeat);
-    msg!("Total heartbeats: {}", heartbeat.total_heartbeats);
+    heartbeat.total_heartbeats = heartbeat.total_heartbeats
+        .checked_add(1)
+        .ok_or(error!(VaultError::HeartbeatIntervalTooShort))?;
 
     Ok(())
 }

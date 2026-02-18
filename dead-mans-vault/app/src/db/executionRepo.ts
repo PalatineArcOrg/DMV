@@ -61,6 +61,29 @@ export async function getLastCompletedStep(): Promise<number> {
   return row?.step_order ?? -1;
 }
 
+export async function getDistributableSnapshot(): Promise<number | null> {
+  const db = getDb();
+  const row = await db.getFirstAsync<{ value: string }>(
+    `SELECT value FROM settings WHERE key = 'distributable_snapshot'`,
+  );
+  return row ? Number(row.value) : null;
+}
+
+export async function saveDistributableSnapshot(amount: number): Promise<void> {
+  const db = getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO settings (key, value) VALUES ('distributable_snapshot', ?)`,
+    [String(amount)],
+  );
+}
+
+export async function clearDistributableSnapshot(): Promise<void> {
+  const db = getDb();
+  await db.runAsync(
+    `DELETE FROM settings WHERE key = 'distributable_snapshot'`,
+  );
+}
+
 export async function updateStepStatus(
   id: string,
   status: ExecutionStepStatus,

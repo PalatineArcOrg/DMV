@@ -4,12 +4,10 @@ import {
   Keypair,
   Transaction,
   SystemProgram,
-  LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
 import { PROGRAM_ID, RPC_URL } from '../utils/constants';
-import { Beneficiary } from '../types/vault';
 
 const programId = new PublicKey(PROGRAM_ID);
 
@@ -114,31 +112,26 @@ export class VaultTransactionService {
     beneficiaryWallet: PublicKey,
     amountLamports: number,
   ): Promise<string> {
-    // MVP: Direct SOL transfer via system program signed by agent
-    // The agent must have been funded to pay for fees + the transfer
-    // In practice, the vault owner's SOL is held in owner's account;
-    // for MVP we demonstrate the flow with agent-signed system transfers
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: agentKeypair.publicKey,
-        toPubkey: beneficiaryWallet,
-        lamports: amountLamports,
-      }),
-    );
+    // On-chain enforced SOL distribution from vault PDA to beneficiary.
+    // The program verifies: vault active, not executed, agent authorized,
+    // grace period elapsed, and beneficiary is in the whitelist.
+    const program = this.getProgram(agentKeypair);
+    const [vaultPda] = this.getVaultPDA(ownerPubkey);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
 
-    tx.feePayer = agentKeypair.publicKey;
-    tx.recentBlockhash = (
-      await this.connection.getLatestBlockhash()
-    ).blockhash;
-    tx.partialSign(agentKeypair);
+    // accountsPartial() is used because Anchor's generated ResolvedAccounts
+    // type requires every account including PDAs that are auto-derived.
+    // accountsPartial() allows specifying only the accounts we pass explicitly.
+    const sig = await program.methods
+      .executeSolDistribution(new BN(amountLamports))
+      .accountsPartial({
+        agent: agentKeypair.publicKey,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+        beneficiary: beneficiaryWallet,
+      })
+      .rpc();
 
-    // Note: In production, the owner would pre-delegate via token approvals.
-    // For MVP hackathon demo, the agent key needs to hold the SOL being distributed.
-    // We send from the agent's own balance to demonstrate the execution flow.
-    const sig = await this.connection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: false,
-    });
-    await this.connection.confirmTransaction(sig, 'confirmed');
     return sig;
   }
 
@@ -155,6 +148,7 @@ export class VaultTransactionService {
   ): Promise<string> {
     const program = this.getProgram(agentKeypair);
     const [vaultPda] = this.getVaultPDA(ownerPubkey);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
     const [executionPda] = this.getExecutionPDA(vaultPda);
 
     const sig = await program.methods
@@ -169,6 +163,7 @@ export class VaultTransactionService {
         agent: agentKeypair.publicKey,
         payer: agentKeypair.publicKey,
         vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
         executionLog: executionPda,
         systemProgram: SystemProgram.programId,
       })
@@ -281,6 +276,21 @@ export class VaultTransactionService {
       })
       .transaction();
 
+    return tx;
+  }
+
+  async buildFundVaultTx(
+    owner: PublicKey,
+    amountLamports: number,
+  ): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: owner,
+        toPubkey: vaultPda,
+        lamports: amountLamports,
+      }),
+    );
     return tx;
   }
 

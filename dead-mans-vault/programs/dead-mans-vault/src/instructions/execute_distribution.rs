@@ -10,6 +10,8 @@ pub struct ExecuteDistribution<'info> {
 
     #[account(
         mut,
+        seeds = [b"vault", vault_config.owner.as_ref()],
+        bump = vault_config.bump,
         constraint = vault_config.active @ VaultError::VaultInactive,
         constraint = !vault_config.executed @ VaultError::VaultAlreadyExecuted,
         constraint = vault_config.agent_pubkey == agent.key() @ VaultError::UnauthorizedAgent,
@@ -31,7 +33,9 @@ pub struct ExecuteDistribution<'info> {
     pub destination_token_account: Account<'info, TokenAccount>,
 
     /// Vault PDA as delegate authority
-    /// CHECK: PDA verification done via seeds
+    /// CHECK: This is the vault PDA derived from ["vault", owner].
+    /// Verified by seeds + bump constraint. Used as signing authority for
+    /// token transfers. No data deserialization needed — only PDA signature.
     #[account(
         seeds = [b"vault", vault_config.owner.as_ref()],
         bump = vault_config.bump,
@@ -85,8 +89,6 @@ pub fn handler(
     );
 
     token::transfer(transfer_ctx, amount)?;
-
-    msg!("Distributed {} tokens to beneficiary", amount);
 
     Ok(())
 }

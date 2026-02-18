@@ -10,6 +10,7 @@ pub struct RevokeVault<'info> {
     #[account(
         mut,
         has_one = owner @ VaultError::UnauthorizedOwner,
+        constraint = vault_config.active @ VaultError::VaultInactive,
         constraint = !vault_config.executed @ VaultError::VaultAlreadyExecuted,
         constraint = vault_config.is_mutable @ VaultError::VaultImmutable,
     )]
@@ -20,6 +21,5 @@ pub fn handler(ctx: Context<RevokeVault>) -> Result<()> {
     let vault = &mut ctx.accounts.vault_config;
     vault.active = false;
 
-    msg!("Vault revoked by owner. Agent authority removed.");
     Ok(())
 }

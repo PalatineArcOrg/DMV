@@ -5,6 +5,9 @@ import {
   saveExecutionStep,
   getLastCompletedStep,
   updateStepStatus,
+  getDistributableSnapshot,
+  saveDistributableSnapshot,
+  clearDistributableSnapshot,
 } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepType } from '../types/execution';
 import { Beneficiary } from '../types/vault';
@@ -19,6 +22,16 @@ export class ExecutionService {
   private defiPositions: DeFiPosition[];
   private isExecuting = false;
 
+  // Shared instances lifted from per-step creation (P1 fix)
+  private txService: VaultTransactionService;
+  private keyManager: KeyManager;
+
+  // Snapshot of distributable balance taken once before any distributions (S4 fix)
+  private distributableSnapshot: number = 0;
+
+  // Accumulated total SOL distributed for record_execution (B3 fix)
+  private totalSolDistributed: number = 0;
+
   constructor(
     ownerPubkey: PublicKey,
     beneficiaries: Beneficiary[],
@@ -27,6 +40,8 @@ export class ExecutionService {
     this.ownerPubkey = ownerPubkey;
     this.beneficiaries = beneficiaries;
     this.defiPositions = defiPositions;
+    this.txService = new VaultTransactionService();
+    this.keyManager = KeyManager.getInstance();
   }
 
   async execute(): Promise<void> {
@@ -43,6 +58,20 @@ export class ExecutionService {
           await saveExecutionStep(step);
         }
       }
+
+      // Recover persisted snapshot if resuming after crash, or compute fresh.
+      // This ensures each beneficiary gets their exact entitled percentage
+      // even across crash/recovery cycles (S4 + crash recovery fix).
+      const savedSnapshot = await getDistributableSnapshot();
+      if (savedSnapshot !== null && lastCompleted >= 0) {
+        this.distributableSnapshot = savedSnapshot;
+      } else {
+        const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
+        const balance = await this.txService.getConnection().getBalance(vaultPda);
+        this.distributableSnapshot = Math.max(0, balance - SOL_RESERVE);
+        await saveDistributableSnapshot(this.distributableSnapshot);
+      }
+      this.totalSolDistributed = 0;
 
       // Track whether any distribution step failed
       let hasDistributionFailure = false;
@@ -186,9 +215,7 @@ export class ExecutionService {
     const strategy = step.metadata?.closureStrategy as string;
     if (strategy === 'unsupported') return undefined;
 
-    const keyManager = KeyManager.getInstance();
-    const agentKeypair = await keyManager.getKeypair();
-    const txService = new VaultTransactionService();
+    const agentKeypair = await this.keyManager.getKeypair();
 
     // Reconstruct a minimal position from step metadata
     const position: DeFiPosition = {
@@ -206,7 +233,7 @@ export class ExecutionService {
       tokenDecimals: step.metadata?.tokenDecimals as number | undefined,
     };
 
-    const closureService = new DeFiClosureService(txService.getConnection());
+    const closureService = new DeFiClosureService(this.txService.getConnection());
     const result = await closureService.closePosition(position, agentKeypair);
 
     if (!result.success) {
@@ -217,46 +244,48 @@ export class ExecutionService {
   }
 
   private async executeDistributePercentage(step: ExecutionStep): Promise<string> {
-    const keyManager = KeyManager.getInstance();
-    const agentKeypair = await keyManager.getKeypair();
-    const txService = new VaultTransactionService();
+    const agentKeypair = await this.keyManager.getKeypair();
 
     const beneficiaryWallet = new PublicKey(step.metadata?.wallet as string);
     const shareBps = step.metadata?.shareBps as number;
 
-    // Get agent's SOL balance (MVP: distributing from agent's balance)
-    const balance = await txService.getConnection().getBalance(agentKeypair.publicKey);
-    const distributable = Math.max(0, balance - SOL_RESERVE);
-
-    if (distributable <= 0) {
-      throw new Error('Insufficient SOL balance for distribution');
+    // Use the frozen distributableSnapshot instead of re-reading balance.
+    // This ensures each beneficiary gets their exact entitled share
+    // regardless of execution order (S4 fix).
+    if (this.distributableSnapshot <= 0) {
+      throw new Error('Insufficient SOL in vault for distribution');
     }
 
-    const amountLamports = Math.floor((distributable * shareBps) / 10000);
+    const amountLamports = Math.floor((this.distributableSnapshot * shareBps) / 10000);
 
     if (amountLamports <= 0) {
       throw new Error('Distribution amount too small');
     }
 
-    return txService.executeDistribution(
+    // On-chain enforced: program verifies grace period, beneficiary whitelist,
+    // vault state, and agent authorization before transferring from vault PDA
+    const sig = await this.txService.executeDistribution(
       agentKeypair,
       this.ownerPubkey,
       beneficiaryWallet,
       amountLamports,
     );
+
+    // Accumulate for record_execution (B3 fix)
+    this.totalSolDistributed += amountLamports;
+
+    return sig;
   }
 
   private async executeRecordExecution(): Promise<string> {
-    const keyManager = KeyManager.getInstance();
-    const agentKeypair = await keyManager.getKeypair();
-    const txService = new VaultTransactionService();
+    const agentKeypair = await this.keyManager.getKeypair();
 
     // Zero attestation hash for MVP
     const attestationHash = new Array(32).fill(0);
 
-    return txService.recordExecution(agentKeypair, this.ownerPubkey, {
+    return this.txService.recordExecution(agentKeypair, this.ownerPubkey, {
       transferCount: this.beneficiaries.length,
-      totalSolDistributed: 0, // Will be updated with actual amounts in future
+      totalSolDistributed: this.totalSolDistributed,
       tokenTypesDistributed: 0,
       attestationHash,
       completed: true,
@@ -264,7 +293,7 @@ export class ExecutionService {
   }
 
   private async executeSelfTerminate(): Promise<void> {
-    const keyManager = KeyManager.getInstance();
-    await keyManager.destroyKey();
+    await clearDistributableSnapshot();
+    await this.keyManager.destroyKey();
   }
 }

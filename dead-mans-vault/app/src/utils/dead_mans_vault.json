@@ -29,7 +29,26 @@
         },
         {
           "name": "vault_config",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "VaultConfig"
+              }
+            ]
+          }
         },
         {
           "name": "heartbeat_record",
@@ -144,7 +163,26 @@
             "The vault PDA holds both config data AND deposited SOL.",
             "Lamports above rent-exemption are available for distribution."
           ],
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "VaultConfig"
+              }
+            ]
+          }
         },
         {
           "name": "heartbeat_record",
@@ -292,7 +330,26 @@
         },
         {
           "name": "vault_config",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "VaultConfig"
+              }
+            ]
+          }
         },
         {
           "name": "heartbeat_record",
@@ -482,7 +539,29 @@
         },
         {
           "name": "heartbeat_record",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config"
+              }
+            ]
+          }
         }
       ],
       "args": [

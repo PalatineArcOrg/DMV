@@ -1,14 +1,20 @@
-{
+/**
+ * Program IDL in camelCase format in order to be used in JS/TS.
+ *
+ * Note that this is only a type helper and is not the actual IDL. The original
+ * IDL can be found at `target/idl/dead_mans_vault.json`.
+ */
+export type DeadMansVault = {
   "address": "GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb",
   "metadata": {
-    "name": "dead_mans_vault",
+    "name": "deadMansVault",
     "version": "0.1.0",
     "spec": "0.1.0",
     "description": "Created with Anchor"
   },
   "instructions": [
     {
-      "name": "execute_distribution",
+      "name": "executeDistribution",
       "discriminator": [
         163,
         217,
@@ -28,11 +34,30 @@
           "signer": true
         },
         {
-          "name": "vault_config",
-          "writable": true
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
         },
         {
-          "name": "heartbeat_record",
+          "name": "heartbeatRecord",
           "pda": {
             "seeds": [
               {
@@ -51,27 +76,27 @@
               },
               {
                 "kind": "account",
-                "path": "vault_config"
+                "path": "vaultConfig"
               }
             ]
           }
         },
         {
-          "name": "source_token_account",
+          "name": "sourceTokenAccount",
           "docs": [
             "Owner's token account to transfer FROM"
           ],
           "writable": true
         },
         {
-          "name": "destination_token_account",
+          "name": "destinationTokenAccount",
           "docs": [
             "Beneficiary's token account to transfer TO"
           ],
           "writable": true
         },
         {
-          "name": "vault_authority",
+          "name": "vaultAuthority",
           "docs": [
             "Vault PDA as delegate authority",
             "Verified by seeds + bump constraint. Used as signing authority for",
@@ -92,13 +117,13 @@
               {
                 "kind": "account",
                 "path": "vault_config.owner",
-                "account": "VaultConfig"
+                "account": "vaultConfig"
               }
             ]
           }
         },
         {
-          "name": "token_program",
+          "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
@@ -108,7 +133,7 @@
           "type": "u64"
         },
         {
-          "name": "attestation_hash",
+          "name": "attestationHash",
           "type": {
             "array": [
               "u8",
@@ -119,7 +144,7 @@
       ]
     },
     {
-      "name": "execute_sol_distribution",
+      "name": "executeSolDistribution",
       "discriminator": [
         245,
         140,
@@ -139,15 +164,34 @@
           "signer": true
         },
         {
-          "name": "vault_config",
+          "name": "vaultConfig",
           "docs": [
             "The vault PDA holds both config data AND deposited SOL.",
             "Lamports above rent-exemption are available for distribution."
           ],
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
         },
         {
-          "name": "heartbeat_record",
+          "name": "heartbeatRecord",
           "pda": {
             "seeds": [
               {
@@ -166,7 +210,7 @@
               },
               {
                 "kind": "account",
-                "path": "vault_config"
+                "path": "vaultConfig"
               }
             ]
           }
@@ -187,7 +231,7 @@
       ]
     },
     {
-      "name": "initialize_vault",
+      "name": "initializeVault",
       "discriminator": [
         48,
         191,
@@ -205,7 +249,7 @@
           "signer": true
         },
         {
-          "name": "vault_config",
+          "name": "vaultConfig",
           "writable": true,
           "pda": {
             "seeds": [
@@ -227,7 +271,7 @@
           }
         },
         {
-          "name": "heartbeat_record",
+          "name": "heartbeatRecord",
           "writable": true,
           "pda": {
             "seeds": [
@@ -247,13 +291,13 @@
               },
               {
                 "kind": "account",
-                "path": "vault_config"
+                "path": "vaultConfig"
               }
             ]
           }
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
@@ -262,14 +306,14 @@
           "name": "params",
           "type": {
             "defined": {
-              "name": "InitializeVaultParams"
+              "name": "initializeVaultParams"
             }
           }
         }
       ]
     },
     {
-      "name": "record_execution",
+      "name": "recordExecution",
       "discriminator": [
         231,
         245,
@@ -291,11 +335,30 @@
           "signer": true
         },
         {
-          "name": "vault_config",
-          "writable": true
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
         },
         {
-          "name": "heartbeat_record",
+          "name": "heartbeatRecord",
           "pda": {
             "seeds": [
               {
@@ -314,13 +377,13 @@
               },
               {
                 "kind": "account",
-                "path": "vault_config"
+                "path": "vaultConfig"
               }
             ]
           }
         },
         {
-          "name": "execution_log",
+          "name": "executionLog",
           "writable": true,
           "pda": {
             "seeds": [
@@ -340,13 +403,13 @@
               },
               {
                 "kind": "account",
-                "path": "vault_config"
+                "path": "vaultConfig"
               }
             ]
           }
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
@@ -355,14 +418,14 @@
           "name": "params",
           "type": {
             "defined": {
-              "name": "RecordExecutionParams"
+              "name": "recordExecutionParams"
             }
           }
         }
       ]
     },
     {
-      "name": "record_heartbeat",
+      "name": "recordHeartbeat",
       "discriminator": [
         109,
         43,
@@ -382,10 +445,10 @@
           "signer": true
         },
         {
-          "name": "vault_config"
+          "name": "vaultConfig"
         },
         {
-          "name": "heartbeat_record",
+          "name": "heartbeatRecord",
           "writable": true,
           "pda": {
             "seeds": [
@@ -405,7 +468,7 @@
               },
               {
                 "kind": "account",
-                "path": "vault_config"
+                "path": "vaultConfig"
               }
             ]
           }
@@ -416,14 +479,14 @@
           "name": "method",
           "type": {
             "defined": {
-              "name": "HeartbeatMethod"
+              "name": "heartbeatMethod"
             }
           }
         }
       ]
     },
     {
-      "name": "revoke_vault",
+      "name": "revokeVault",
       "discriminator": [
         199,
         172,
@@ -442,18 +505,18 @@
           ],
           "signer": true,
           "relations": [
-            "vault_config"
+            "vaultConfig"
           ]
         },
         {
-          "name": "vault_config",
+          "name": "vaultConfig",
           "writable": true
         }
       ],
       "args": []
     },
     {
-      "name": "rotate_agent",
+      "name": "rotateAgent",
       "discriminator": [
         182,
         91,
@@ -473,27 +536,49 @@
           ],
           "signer": true,
           "relations": [
-            "vault_config"
+            "vaultConfig"
           ]
         },
         {
-          "name": "vault_config",
+          "name": "vaultConfig",
           "writable": true
         },
         {
-          "name": "heartbeat_record",
-          "writable": true
+          "name": "heartbeatRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
         }
       ],
       "args": [
         {
-          "name": "new_agent_pubkey",
+          "name": "newAgentPubkey",
           "type": "pubkey"
         }
       ]
     },
     {
-      "name": "update_vault",
+      "name": "updateVault",
       "discriminator": [
         67,
         229,
@@ -509,11 +594,11 @@
           "name": "owner",
           "signer": true,
           "relations": [
-            "vault_config"
+            "vaultConfig"
           ]
         },
         {
-          "name": "vault_config",
+          "name": "vaultConfig",
           "writable": true
         }
       ],
@@ -522,7 +607,7 @@
           "name": "params",
           "type": {
             "defined": {
-              "name": "UpdateVaultParams"
+              "name": "updateVaultParams"
             }
           }
         }
@@ -531,7 +616,7 @@
   ],
   "accounts": [
     {
-      "name": "ExecutionLog",
+      "name": "executionLog",
       "discriminator": [
         115,
         151,
@@ -544,7 +629,7 @@
       ]
     },
     {
-      "name": "HeartbeatRecord",
+      "name": "heartbeatRecord",
       "discriminator": [
         29,
         4,
@@ -557,7 +642,7 @@
       ]
     },
     {
-      "name": "VaultConfig",
+      "name": "vaultConfig",
       "discriminator": [
         99,
         86,
@@ -573,93 +658,93 @@
   "errors": [
     {
       "code": 6000,
-      "name": "HeartbeatIntervalTooShort",
+      "name": "heartbeatIntervalTooShort",
       "msg": "Heartbeat interval must be at least 86400 seconds (1 day)"
     },
     {
       "code": 6001,
-      "name": "GracePeriodTooShort",
+      "name": "gracePeriodTooShort",
       "msg": "Grace period must be at least 604800 seconds (7 days)"
     },
     {
       "code": 6002,
-      "name": "InvalidBeneficiaryCount",
+      "name": "invalidBeneficiaryCount",
       "msg": "Invalid beneficiary count (must be 1-20)"
     },
     {
       "code": 6003,
-      "name": "InvalidShareAllocation",
+      "name": "invalidShareAllocation",
       "msg": "Beneficiary shares must sum to 10000 basis points (100%)"
     },
     {
       "code": 6004,
-      "name": "OwnerCannotBeBeneficiary",
+      "name": "ownerCannotBeBeneficiary",
       "msg": "Owner cannot be a beneficiary"
     },
     {
       "code": 6005,
-      "name": "UnauthorizedAgent",
+      "name": "unauthorizedAgent",
       "msg": "Signer is not the registered agent"
     },
     {
       "code": 6006,
-      "name": "UnauthorizedOwner",
+      "name": "unauthorizedOwner",
       "msg": "Signer is not the vault owner"
     },
     {
       "code": 6007,
-      "name": "VaultInactive",
+      "name": "vaultInactive",
       "msg": "Vault is not active"
     },
     {
       "code": 6008,
-      "name": "VaultAlreadyExecuted",
+      "name": "vaultAlreadyExecuted",
       "msg": "Vault has already been executed"
     },
     {
       "code": 6009,
-      "name": "GracePeriodNotElapsed",
+      "name": "gracePeriodNotElapsed",
       "msg": "Grace period has not fully elapsed"
     },
     {
       "code": 6010,
-      "name": "UnregisteredBeneficiary",
+      "name": "unregisteredBeneficiary",
       "msg": "Destination wallet is not a registered beneficiary"
     },
     {
       "code": 6011,
-      "name": "HeartbeatVaultMismatch",
+      "name": "heartbeatVaultMismatch",
       "msg": "Heartbeat record does not match vault"
     },
     {
       "code": 6012,
-      "name": "InvalidAgentPubkey",
+      "name": "invalidAgentPubkey",
       "msg": "New agent pubkey cannot be the zero address"
     },
     {
       "code": 6013,
-      "name": "AgentCannotBeOwner",
+      "name": "agentCannotBeOwner",
       "msg": "Agent pubkey cannot be the same as the owner"
     },
     {
       "code": 6014,
-      "name": "AgentKeyUnchanged",
+      "name": "agentKeyUnchanged",
       "msg": "New agent pubkey is the same as the current agent"
     },
     {
       "code": 6015,
-      "name": "VaultImmutable",
+      "name": "vaultImmutable",
       "msg": "Vault is immutable and cannot be revoked or updated"
     },
     {
       "code": 6016,
-      "name": "InsufficientVaultBalance",
+      "name": "insufficientVaultBalance",
       "msg": "Insufficient SOL in vault for distribution"
     }
   ],
   "types": [
     {
-      "name": "Beneficiary",
+      "name": "beneficiary",
       "type": {
         "kind": "struct",
         "fields": [
@@ -671,14 +756,14 @@
             "type": "pubkey"
           },
           {
-            "name": "share_bps",
+            "name": "shareBps",
             "docs": [
               "Percentage share (basis points, 10000 = 100%)"
             ],
             "type": "u16"
           },
           {
-            "name": "has_specific_assets",
+            "name": "hasSpecificAssets",
             "docs": [
               "Whether this beneficiary has specific asset assignments"
             ],
@@ -688,7 +773,7 @@
       }
     },
     {
-      "name": "ExecutionLog",
+      "name": "executionLog",
       "type": {
         "kind": "struct",
         "fields": [
@@ -700,35 +785,35 @@
             "type": "pubkey"
           },
           {
-            "name": "executed_at",
+            "name": "executedAt",
             "docs": [
               "Timestamp of execution"
             ],
             "type": "i64"
           },
           {
-            "name": "transfer_count",
+            "name": "transferCount",
             "docs": [
               "Number of transfers executed"
             ],
             "type": "u32"
           },
           {
-            "name": "total_sol_distributed",
+            "name": "totalSolDistributed",
             "docs": [
               "Total SOL distributed (in lamports)"
             ],
             "type": "u64"
           },
           {
-            "name": "token_types_distributed",
+            "name": "tokenTypesDistributed",
             "docs": [
               "Total SPL token types distributed"
             ],
             "type": "u32"
           },
           {
-            "name": "attestation_hash",
+            "name": "attestationHash",
             "docs": [
               "TEE attestation data hash (32 bytes)"
             ],
@@ -757,30 +842,30 @@
       }
     },
     {
-      "name": "HeartbeatMethod",
+      "name": "heartbeatMethod",
       "type": {
         "kind": "enum",
         "variants": [
           {
-            "name": "ActiveTap"
+            "name": "activeTap"
           },
           {
-            "name": "BiometricConfirm"
+            "name": "biometricConfirm"
           },
           {
-            "name": "OnChainActivity"
+            "name": "onChainActivity"
           },
           {
-            "name": "PinChallenge"
+            "name": "pinChallenge"
           },
           {
-            "name": "HardwareSwitch"
+            "name": "hardwareSwitch"
           }
         ]
       }
     },
     {
-      "name": "HeartbeatRecord",
+      "name": "heartbeatRecord",
       "type": {
         "kind": "struct",
         "fields": [
@@ -792,25 +877,25 @@
             "type": "pubkey"
           },
           {
-            "name": "last_heartbeat",
+            "name": "lastHeartbeat",
             "docs": [
               "Timestamp of last confirmed heartbeat (Unix epoch)"
             ],
             "type": "i64"
           },
           {
-            "name": "last_method",
+            "name": "lastMethod",
             "docs": [
               "Method used for last heartbeat"
             ],
             "type": {
               "defined": {
-                "name": "HeartbeatMethod"
+                "name": "heartbeatMethod"
               }
             }
           },
           {
-            "name": "total_heartbeats",
+            "name": "totalHeartbeats",
             "docs": [
               "Total heartbeats recorded"
             ],
@@ -827,20 +912,20 @@
       }
     },
     {
-      "name": "InitializeVaultParams",
+      "name": "initializeVaultParams",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "agent_pubkey",
+            "name": "agentPubkey",
             "type": "pubkey"
           },
           {
-            "name": "heartbeat_interval",
+            "name": "heartbeatInterval",
             "type": "i64"
           },
           {
-            "name": "grace_period",
+            "name": "gracePeriod",
             "type": "i64"
           },
           {
@@ -848,37 +933,37 @@
             "type": {
               "vec": {
                 "defined": {
-                  "name": "Beneficiary"
+                  "name": "beneficiary"
                 }
               }
             }
           },
           {
-            "name": "is_mutable",
+            "name": "isMutable",
             "type": "bool"
           }
         ]
       }
     },
     {
-      "name": "RecordExecutionParams",
+      "name": "recordExecutionParams",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "transfer_count",
+            "name": "transferCount",
             "type": "u32"
           },
           {
-            "name": "total_sol_distributed",
+            "name": "totalSolDistributed",
             "type": "u64"
           },
           {
-            "name": "token_types_distributed",
+            "name": "tokenTypesDistributed",
             "type": "u32"
           },
           {
-            "name": "attestation_hash",
+            "name": "attestationHash",
             "type": {
               "array": [
                 "u8",
@@ -894,18 +979,18 @@
       }
     },
     {
-      "name": "UpdateVaultParams",
+      "name": "updateVaultParams",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "heartbeat_interval",
+            "name": "heartbeatInterval",
             "type": {
               "option": "i64"
             }
           },
           {
-            "name": "grace_period",
+            "name": "gracePeriod",
             "type": {
               "option": "i64"
             }
@@ -916,7 +1001,7 @@
               "option": {
                 "vec": {
                   "defined": {
-                    "name": "Beneficiary"
+                    "name": "beneficiary"
                   }
                 }
               }
@@ -926,7 +1011,7 @@
       }
     },
     {
-      "name": "VaultConfig",
+      "name": "vaultConfig",
       "type": {
         "kind": "struct",
         "fields": [
@@ -938,21 +1023,21 @@
             "type": "pubkey"
           },
           {
-            "name": "agent_pubkey",
+            "name": "agentPubkey",
             "docs": [
               "Agent's TEE-generated execution pubkey"
             ],
             "type": "pubkey"
           },
           {
-            "name": "heartbeat_interval",
+            "name": "heartbeatInterval",
             "docs": [
               "Heartbeat interval in seconds (e.g., 604800 = 7 days)"
             ],
             "type": "i64"
           },
           {
-            "name": "grace_period",
+            "name": "gracePeriod",
             "docs": [
               "Total grace period in seconds from first missed heartbeat to execution"
             ],
@@ -966,7 +1051,7 @@
             "type": {
               "vec": {
                 "defined": {
-                  "name": "Beneficiary"
+                  "name": "beneficiary"
                 }
               }
             }
@@ -986,14 +1071,14 @@
             "type": "bool"
           },
           {
-            "name": "created_at",
+            "name": "createdAt",
             "docs": [
               "Timestamp when vault was created"
             ],
             "type": "i64"
           },
           {
-            "name": "updated_at",
+            "name": "updatedAt",
             "docs": [
               "Timestamp when vault config was last updated"
             ],
@@ -1007,7 +1092,7 @@
             "type": "u8"
           },
           {
-            "name": "is_mutable",
+            "name": "isMutable",
             "docs": [
               "Whether the vault can be revoked/updated by the owner (false = immutable)"
             ],
@@ -1017,4 +1102,4 @@
       }
     }
   ]
-}
+};

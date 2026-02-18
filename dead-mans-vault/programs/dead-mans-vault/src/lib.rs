@@ -42,6 +42,13 @@ pub mod dead_mans_vault {
         instructions::execute_distribution::handler(ctx, amount, attestation_hash)
     }
 
+    pub fn execute_sol_distribution(
+        ctx: Context<ExecuteSolDistribution>,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::execute_sol_distribution::handler(ctx, amount)
+    }
+
     pub fn record_execution(
         ctx: Context<RecordExecution>,
         params: RecordExecutionParams,

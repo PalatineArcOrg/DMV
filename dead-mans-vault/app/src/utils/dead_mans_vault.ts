@@ -79,7 +79,9 @@ export type DeadMansVault = {
         {
           "name": "vaultAuthority",
           "docs": [
-            "Vault PDA as delegate authority"
+            "Vault PDA as delegate authority",
+            "Verified by seeds + bump constraint. Used as signing authority for",
+            "token transfers. No data deserialization needed — only PDA signature."
           ],
           "pda": {
             "seeds": [
@@ -119,6 +121,74 @@ export type DeadMansVault = {
               32
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "executeSolDistribution",
+      "discriminator": [
+        245,
+        140,
+        217,
+        121,
+        172,
+        75,
+        190,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "agent",
+          "docs": [
+            "Agent signs — must match vault_config.agent_pubkey"
+          ],
+          "signer": true
+        },
+        {
+          "name": "vaultConfig",
+          "docs": [
+            "The vault PDA holds both config data AND deposited SOL.",
+            "Lamports above rent-exemption are available for distribution."
+          ],
+          "writable": true
+        },
+        {
+          "name": "heartbeatRecord",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "docs": [
+            "Beneficiary wallet to receive SOL — must be in vault whitelist."
+          ],
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
         }
       ]
     },
@@ -229,6 +299,31 @@ export type DeadMansVault = {
         {
           "name": "vaultConfig",
           "writable": true
+        },
+        {
+          "name": "heartbeatRecord",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
         },
         {
           "name": "executionLog",
@@ -561,6 +656,11 @@ export type DeadMansVault = {
       "code": 6015,
       "name": "vaultImmutable",
       "msg": "Vault is immutable and cannot be revoked or updated"
+    },
+    {
+      "code": 6016,
+      "name": "insufficientVaultBalance",
+      "msg": "Insufficient SOL in vault for distribution"
     }
   ],
   "types": [

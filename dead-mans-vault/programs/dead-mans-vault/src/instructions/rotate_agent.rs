@@ -18,6 +18,8 @@ pub struct RotateAgent<'info> {
 
     #[account(
         mut,
+        seeds = [b"heartbeat", vault_config.key().as_ref()],
+        bump = heartbeat_record.bump,
         constraint = heartbeat_record.vault == vault_config.key() @ VaultError::HeartbeatVaultMismatch,
     )]
     pub heartbeat_record: Account<'info, HeartbeatRecord>,

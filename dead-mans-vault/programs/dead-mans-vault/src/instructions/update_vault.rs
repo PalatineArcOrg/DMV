@@ -62,6 +62,5 @@ pub fn handler(ctx: Context<UpdateVault>, params: UpdateVaultParams) -> Result<(
 
     vault.updated_at = clock.unix_timestamp;
 
-    msg!("Vault config updated.");
     Ok(())
 }

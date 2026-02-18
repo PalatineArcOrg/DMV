@@ -49,4 +49,7 @@ pub enum VaultError {
 
     #[msg("Vault is immutable and cannot be revoked or updated")]
     VaultImmutable,
+
+    #[msg("Insufficient SOL in vault for distribution")]
+    InsufficientVaultBalance,
 }

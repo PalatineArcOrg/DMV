@@ -102,9 +102,5 @@ pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> 
     heartbeat.total_heartbeats = 1;
     heartbeat.bump = ctx.bumps.heartbeat_record;
 
-    msg!("Vault initialized for owner: {}", vault.owner);
-    msg!("Agent pubkey: {}", vault.agent_pubkey);
-    msg!("Beneficiaries: {}", vault.beneficiaries.len());
-
     Ok(())
 }

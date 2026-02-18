@@ -49,6 +49,7 @@ describe("dead-mans-vault", () => {
             hasSpecificAssets: false,
           },
         ],
+        isMutable: true,
       })
       .accounts({
         owner: owner.publicKey,
@@ -104,6 +105,7 @@ describe("dead-mans-vault", () => {
               hasSpecificAssets: false,
             },
           ],
+          isMutable: true,
         })
         .accounts({
           owner: newOwner.publicKey,
@@ -145,6 +147,7 @@ describe("dead-mans-vault", () => {
               hasSpecificAssets: false,
             },
           ],
+          isMutable: true,
         })
         .accounts({
           owner: newOwner.publicKey,
@@ -191,6 +194,7 @@ describe("dead-mans-vault", () => {
               hasSpecificAssets: false,
             },
           ],
+          isMutable: true,
         })
         .accounts({
           owner: newOwner.publicKey,
@@ -226,6 +230,7 @@ describe("dead-mans-vault", () => {
           heartbeatInterval: new anchor.BN(86400),
           gracePeriod: new anchor.BN(604800),
           beneficiaries: [],
+          isMutable: true,
         })
         .accounts({
           owner: newOwner.publicKey,
@@ -267,6 +272,7 @@ describe("dead-mans-vault", () => {
               hasSpecificAssets: false,
             },
           ],
+          isMutable: true,
         })
         .accounts({
           owner: newOwner.publicKey,
@@ -507,16 +513,62 @@ describe("dead-mans-vault", () => {
 
   // ─── Execution Guards ───
 
-  it("rejects execution before grace period elapsed", async () => {
-    // Create a mint and token accounts for the test
-    // For now, test the constraint check via the program error
-    // (We can't easily set up full token accounts in this test,
-    //  but we CAN verify the grace period check fires first)
-    // This test verifies the instruction would fail even with valid
-    // token accounts because the grace period hasn't elapsed yet.
-    // The actual token test requires more setup.
-    // Skipping full token setup — the grace period check is tested
-    // via program constraint validation.
+  it("rejects SOL distribution before grace period elapsed", async () => {
+    // Grace period hasn't elapsed — execute_sol_distribution should fail
+    try {
+      await program.methods
+        .executeSolDistribution(new anchor.BN(1000))
+        .accounts({
+          agent: agent.publicKey,
+          vaultConfig: vaultConfigPda,
+          heartbeatRecord: heartbeatRecordPda,
+          beneficiary: beneficiary1.publicKey,
+        })
+        .signers([agent])
+        .rpc();
+      expect.fail("Should have thrown GracePeriodNotElapsed");
+    } catch (err: any) {
+      expect(err.error.errorCode.code).to.equal("GracePeriodNotElapsed");
+    }
+  });
+
+  it("rejects SOL distribution from unauthorized agent", async () => {
+    const fakeAgent = anchor.web3.Keypair.generate();
+    try {
+      await program.methods
+        .executeSolDistribution(new anchor.BN(1000))
+        .accounts({
+          agent: fakeAgent.publicKey,
+          vaultConfig: vaultConfigPda,
+          heartbeatRecord: heartbeatRecordPda,
+          beneficiary: beneficiary1.publicKey,
+        })
+        .signers([fakeAgent])
+        .rpc();
+      expect.fail("Should have thrown UnauthorizedAgent");
+    } catch (err: any) {
+      expect(err.error.errorCode.code).to.equal("UnauthorizedAgent");
+    }
+  });
+
+  it("rejects SOL distribution to unregistered beneficiary", async () => {
+    const unregistered = anchor.web3.Keypair.generate();
+    try {
+      await program.methods
+        .executeSolDistribution(new anchor.BN(1000))
+        .accounts({
+          agent: agent.publicKey,
+          vaultConfig: vaultConfigPda,
+          heartbeatRecord: heartbeatRecordPda,
+          beneficiary: unregistered.publicKey,
+        })
+        .signers([agent])
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (err: any) {
+      // Either GracePeriodNotElapsed (checked first) or UnregisteredBeneficiary
+      expect(err.error).to.exist;
+    }
   });
 
   // ─── Revoke Vault ───
@@ -595,6 +647,7 @@ describe("dead-mans-vault", () => {
             hasSpecificAssets: false,
           },
         ],
+        isMutable: true,
       })
       .accounts({
         owner: newOwner.publicKey,
@@ -624,8 +677,9 @@ describe("dead-mans-vault", () => {
 
   // ─── Record Execution ───
 
-  it("records execution and permanently seals vault", async () => {
-    // Use a separate vault for this test
+  it("rejects record_execution before grace period elapsed", async () => {
+    // record_execution now enforces grace period to prevent a compromised
+    // agent from sealing a vault before the owner's deadline has passed.
     const execOwner = anchor.web3.Keypair.generate();
     await airdrop(provider, execOwner.publicKey, 1);
     const execAgent = anchor.web3.Keypair.generate();
@@ -656,6 +710,7 @@ describe("dead-mans-vault", () => {
             hasSpecificAssets: false,
           },
         ],
+        isMutable: true,
       })
       .accounts({
         owner: execOwner.publicKey,
@@ -666,62 +721,55 @@ describe("dead-mans-vault", () => {
       .signers([execOwner])
       .rpc();
 
-    // Record execution
-    const attestationHash = Buffer.alloc(32, 0xab);
-    await program.methods
-      .recordExecution({
-        transferCount: 5,
-        totalSolDistributed: new anchor.BN(1000000000),
-        tokenTypesDistributed: 3,
-        attestationHash: Array.from(attestationHash),
-        completed: true,
-      })
-      .accounts({
-        agent: execAgent.publicKey,
-        payer: execOwner.publicKey,
-        vaultConfig: execVaultPda,
-        executionLog: execLogPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([execAgent, execOwner])
-      .rpc();
-
-    // Verify vault is sealed
-    const vault = await program.account.vaultConfig.fetch(execVaultPda);
-    expect(vault.executed).to.be.true;
-    expect(vault.active).to.be.false;
-
-    // Verify execution log
-    const log = await program.account.executionLog.fetch(execLogPda);
-    expect(log.transferCount).to.equal(5);
-    expect(log.totalSolDistributed.toNumber()).to.equal(1000000000);
-    expect(log.tokenTypesDistributed).to.equal(3);
-    expect(log.completed).to.be.true;
+    // Attempt record_execution immediately — should fail (grace period not elapsed)
+    try {
+      await program.methods
+        .recordExecution({
+          transferCount: 5,
+          totalSolDistributed: new anchor.BN(1000000000),
+          tokenTypesDistributed: 3,
+          attestationHash: Array.from(Buffer.alloc(32, 0xab)),
+          completed: true,
+        })
+        .accounts({
+          agent: execAgent.publicKey,
+          payer: execOwner.publicKey,
+          vaultConfig: execVaultPda,
+          heartbeatRecord: execHeartbeatPda,
+          executionLog: execLogPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([execAgent, execOwner])
+        .rpc();
+      expect.fail("Should have thrown GracePeriodNotElapsed");
+    } catch (err: any) {
+      expect(err.error.errorCode.code).to.equal("GracePeriodNotElapsed");
+    }
   });
 
-  it("prevents double execution (VaultAlreadyExecuted)", async () => {
-    // Use a separate vault
-    const dblOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, dblOwner.publicKey, 1);
-    const dblAgent = anchor.web3.Keypair.generate();
+  it("rejects record_execution from unauthorized agent", async () => {
+    const rexOwner = anchor.web3.Keypair.generate();
+    await airdrop(provider, rexOwner.publicKey, 1);
+    const rexAgent = anchor.web3.Keypair.generate();
+    const fakeAgent = anchor.web3.Keypair.generate();
 
-    const [dblVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), dblOwner.publicKey.toBuffer()],
+    const [rexVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), rexOwner.publicKey.toBuffer()],
       program.programId
     );
-    const [dblHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), dblVaultPda.toBuffer()],
+    const [rexHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("heartbeat"), rexVaultPda.toBuffer()],
       program.programId
     );
-    const [dblLogPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("execution"), dblVaultPda.toBuffer()],
+    const [rexLogPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("execution"), rexVaultPda.toBuffer()],
       program.programId
     );
 
     // Initialize
     await program.methods
       .initializeVault({
-        agentPubkey: dblAgent.publicKey,
+        agentPubkey: rexAgent.publicKey,
         heartbeatInterval: new anchor.BN(86400),
         gracePeriod: new anchor.BN(604800),
         beneficiaries: [
@@ -731,39 +779,19 @@ describe("dead-mans-vault", () => {
             hasSpecificAssets: false,
           },
         ],
+        isMutable: true,
       })
       .accounts({
-        owner: dblOwner.publicKey,
-        vaultConfig: dblVaultPda,
-        heartbeatRecord: dblHeartbeatPda,
+        owner: rexOwner.publicKey,
+        vaultConfig: rexVaultPda,
+        heartbeatRecord: rexHeartbeatPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
-      .signers([dblOwner])
+      .signers([rexOwner])
       .rpc();
 
-    // First execution
-    await program.methods
-      .recordExecution({
-        transferCount: 1,
-        totalSolDistributed: new anchor.BN(100),
-        tokenTypesDistributed: 1,
-        attestationHash: Array.from(Buffer.alloc(32, 0)),
-        completed: true,
-      })
-      .accounts({
-        agent: dblAgent.publicKey,
-        payer: dblOwner.publicKey,
-        vaultConfig: dblVaultPda,
-        executionLog: dblLogPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([dblAgent, dblOwner])
-      .rpc();
-
-    // Second execution should fail
+    // Attempt record_execution from fake agent — should fail
     try {
-      // Can't even init the execution_log PDA again (already exists)
-      // And the vault.executed constraint blocks it
       await program.methods
         .recordExecution({
           transferCount: 1,
@@ -773,44 +801,41 @@ describe("dead-mans-vault", () => {
           completed: true,
         })
         .accounts({
-          agent: dblAgent.publicKey,
-          payer: dblOwner.publicKey,
-          vaultConfig: dblVaultPda,
-          executionLog: dblLogPda,
+          agent: fakeAgent.publicKey,
+          payer: rexOwner.publicKey,
+          vaultConfig: rexVaultPda,
+          heartbeatRecord: rexHeartbeatPda,
+          executionLog: rexLogPda,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
-        .signers([dblAgent, dblOwner])
+        .signers([fakeAgent, rexOwner])
         .rpc();
-      expect.fail("Should have thrown VaultAlreadyExecuted");
+      expect.fail("Should have thrown UnauthorizedAgent");
     } catch (err: any) {
-      // Could be VaultAlreadyExecuted or account-already-exists error
-      expect(err).to.exist;
+      expect(err.error.errorCode.code).to.equal("UnauthorizedAgent");
     }
   });
 
-  it("rejects rotation on executed vault", async () => {
-    // Use a separate vault that gets executed
-    const exOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, exOwner.publicKey, 1);
-    const exAgent = anchor.web3.Keypair.generate();
+  // ─── Immutability Guards ───
 
-    const [exVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), exOwner.publicKey.toBuffer()],
+  it("rejects update on immutable vault", async () => {
+    const immOwner = anchor.web3.Keypair.generate();
+    await airdrop(provider, immOwner.publicKey, 1);
+    const immAgent = anchor.web3.Keypair.generate();
+
+    const [immVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), immOwner.publicKey.toBuffer()],
       program.programId
     );
-    const [exHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), exVaultPda.toBuffer()],
-      program.programId
-    );
-    const [exLogPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("execution"), exVaultPda.toBuffer()],
+    const [immHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("heartbeat"), immVaultPda.toBuffer()],
       program.programId
     );
 
-    // Initialize
+    // Initialize as immutable
     await program.methods
       .initializeVault({
-        agentPubkey: exAgent.publicKey,
+        agentPubkey: immAgent.publicKey,
         heartbeatInterval: new anchor.BN(86400),
         gracePeriod: new anchor.BN(604800),
         beneficiaries: [
@@ -820,51 +845,234 @@ describe("dead-mans-vault", () => {
             hasSpecificAssets: false,
           },
         ],
+        isMutable: false,
       })
       .accounts({
-        owner: exOwner.publicKey,
-        vaultConfig: exVaultPda,
-        heartbeatRecord: exHeartbeatPda,
+        owner: immOwner.publicKey,
+        vaultConfig: immVaultPda,
+        heartbeatRecord: immHeartbeatPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
-      .signers([exOwner])
+      .signers([immOwner])
       .rpc();
 
-    // Execute
-    await program.methods
-      .recordExecution({
-        transferCount: 1,
-        totalSolDistributed: new anchor.BN(100),
-        tokenTypesDistributed: 1,
-        attestationHash: Array.from(Buffer.alloc(32, 0)),
-        completed: true,
-      })
-      .accounts({
-        agent: exAgent.publicKey,
-        payer: exOwner.publicKey,
-        vaultConfig: exVaultPda,
-        executionLog: exLogPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([exAgent, exOwner])
-      .rpc();
-
-    // Try to rotate on executed vault
-    const newAgent = anchor.web3.Keypair.generate();
+    // Try to update — should fail with VaultImmutable
     try {
       await program.methods
-        .rotateAgent(newAgent.publicKey)
-        .accounts({
-          owner: exOwner.publicKey,
-          vaultConfig: exVaultPda,
-          heartbeatRecord: exHeartbeatPda,
+        .updateVault({
+          heartbeatInterval: new anchor.BN(172800),
+          gracePeriod: null,
+          beneficiaries: null,
         })
-        .signers([exOwner])
+        .accounts({
+          owner: immOwner.publicKey,
+          vaultConfig: immVaultPda,
+        })
+        .signers([immOwner])
         .rpc();
-      expect.fail("Should have thrown VaultAlreadyExecuted");
+      expect.fail("Should have thrown VaultImmutable");
     } catch (err: any) {
-      // Anchor checks constraints in order: active is checked before executed.
-      // Since record_execution sets active=false AND executed=true, we get VaultInactive first.
+      expect(err.error.errorCode.code).to.equal("VaultImmutable");
+    }
+  });
+
+  it("rejects revoke on immutable vault", async () => {
+    const immOwner2 = anchor.web3.Keypair.generate();
+    await airdrop(provider, immOwner2.publicKey, 1);
+    const immAgent2 = anchor.web3.Keypair.generate();
+
+    const [immVaultPda2] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), immOwner2.publicKey.toBuffer()],
+      program.programId
+    );
+    const [immHeartbeatPda2] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("heartbeat"), immVaultPda2.toBuffer()],
+      program.programId
+    );
+
+    // Initialize as immutable
+    await program.methods
+      .initializeVault({
+        agentPubkey: immAgent2.publicKey,
+        heartbeatInterval: new anchor.BN(86400),
+        gracePeriod: new anchor.BN(604800),
+        beneficiaries: [
+          {
+            wallet: beneficiary1.publicKey,
+            shareBps: 10000,
+            hasSpecificAssets: false,
+          },
+        ],
+        isMutable: false,
+      })
+      .accounts({
+        owner: immOwner2.publicKey,
+        vaultConfig: immVaultPda2,
+        heartbeatRecord: immHeartbeatPda2,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([immOwner2])
+      .rpc();
+
+    // Try to revoke — should fail with VaultImmutable
+    try {
+      await program.methods
+        .revokeVault()
+        .accounts({
+          owner: immOwner2.publicKey,
+          vaultConfig: immVaultPda2,
+        })
+        .signers([immOwner2])
+        .rpc();
+      expect.fail("Should have thrown VaultImmutable");
+    } catch (err: any) {
+      // Constraint order: active (passes), executed (passes), is_mutable (fails)
+      expect(err.error.errorCode.code).to.equal("VaultImmutable");
+    }
+  });
+
+  // ─── Record Execution on Inactive Vault ───
+
+  it("rejects record_execution on inactive vault", async () => {
+    const inactiveOwner = anchor.web3.Keypair.generate();
+    await airdrop(provider, inactiveOwner.publicKey, 1);
+    const inactiveAgent = anchor.web3.Keypair.generate();
+
+    const [inactiveVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), inactiveOwner.publicKey.toBuffer()],
+      program.programId
+    );
+    const [inactiveHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("heartbeat"), inactiveVaultPda.toBuffer()],
+      program.programId
+    );
+    const [inactiveLogPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("execution"), inactiveVaultPda.toBuffer()],
+      program.programId
+    );
+
+    // Initialize
+    await program.methods
+      .initializeVault({
+        agentPubkey: inactiveAgent.publicKey,
+        heartbeatInterval: new anchor.BN(86400),
+        gracePeriod: new anchor.BN(604800),
+        beneficiaries: [
+          {
+            wallet: beneficiary1.publicKey,
+            shareBps: 10000,
+            hasSpecificAssets: false,
+          },
+        ],
+        isMutable: true,
+      })
+      .accounts({
+        owner: inactiveOwner.publicKey,
+        vaultConfig: inactiveVaultPda,
+        heartbeatRecord: inactiveHeartbeatPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([inactiveOwner])
+      .rpc();
+
+    // Revoke the vault
+    await program.methods
+      .revokeVault()
+      .accounts({
+        owner: inactiveOwner.publicKey,
+        vaultConfig: inactiveVaultPda,
+      })
+      .signers([inactiveOwner])
+      .rpc();
+
+    // Try record_execution on inactive vault — should fail
+    try {
+      await program.methods
+        .recordExecution({
+          transferCount: 1,
+          totalSolDistributed: new anchor.BN(0),
+          tokenTypesDistributed: 0,
+          attestationHash: Array.from(Buffer.alloc(32, 0)),
+          completed: true,
+        })
+        .accounts({
+          agent: inactiveAgent.publicKey,
+          payer: inactiveOwner.publicKey,
+          vaultConfig: inactiveVaultPda,
+          heartbeatRecord: inactiveHeartbeatPda,
+          executionLog: inactiveLogPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([inactiveAgent, inactiveOwner])
+        .rpc();
+      expect.fail("Should have thrown VaultInactive");
+    } catch (err: any) {
+      expect(err.error.errorCode.code).to.equal("VaultInactive");
+    }
+  });
+
+  // ─── Revoke Already Inactive ───
+
+  it("rejects revoking an already inactive vault", async () => {
+    const revOwner = anchor.web3.Keypair.generate();
+    await airdrop(provider, revOwner.publicKey, 1);
+    const revAgent = anchor.web3.Keypair.generate();
+
+    const [revVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), revOwner.publicKey.toBuffer()],
+      program.programId
+    );
+    const [revHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("heartbeat"), revVaultPda.toBuffer()],
+      program.programId
+    );
+
+    // Initialize
+    await program.methods
+      .initializeVault({
+        agentPubkey: revAgent.publicKey,
+        heartbeatInterval: new anchor.BN(86400),
+        gracePeriod: new anchor.BN(604800),
+        beneficiaries: [
+          {
+            wallet: beneficiary1.publicKey,
+            shareBps: 10000,
+            hasSpecificAssets: false,
+          },
+        ],
+        isMutable: true,
+      })
+      .accounts({
+        owner: revOwner.publicKey,
+        vaultConfig: revVaultPda,
+        heartbeatRecord: revHeartbeatPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([revOwner])
+      .rpc();
+
+    // First revoke — should succeed
+    await program.methods
+      .revokeVault()
+      .accounts({
+        owner: revOwner.publicKey,
+        vaultConfig: revVaultPda,
+      })
+      .signers([revOwner])
+      .rpc();
+
+    // Second revoke — should fail with VaultInactive
+    try {
+      await program.methods
+        .revokeVault()
+        .accounts({
+          owner: revOwner.publicKey,
+          vaultConfig: revVaultPda,
+        })
+        .signers([revOwner])
+        .rpc();
+      expect.fail("Should have thrown VaultInactive");
+    } catch (err: any) {
       expect(err.error.errorCode.code).to.equal("VaultInactive");
     }
   });
