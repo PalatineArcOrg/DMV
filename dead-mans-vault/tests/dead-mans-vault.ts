@@ -914,7 +914,6 @@ describe("dead-mans-vault", () => {
       .signers([immOwner2])
       .rpc();
 
-    // Try to revoke — should fail with VaultImmutable
     try {
       await program.methods
         .revokeVault()
@@ -926,7 +925,6 @@ describe("dead-mans-vault", () => {
         .rpc();
       expect.fail("Should have thrown VaultImmutable");
     } catch (err: any) {
-      // Constraint order: active (passes), executed (passes), is_mutable (fails)
       expect(err.error.errorCode.code).to.equal("VaultImmutable");
     }
   });

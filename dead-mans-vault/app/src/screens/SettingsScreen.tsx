@@ -65,14 +65,7 @@ export function SettingsScreen() {
               const vault = await txService.fetchVaultConfig(publicKey);
 
               if (vault && vault.active && !vault.executed) {
-                // Check immutability — sync local state if stale
-                if (vault.isMutable === false) {
-                  useVaultStore.getState().setVaultConfig(vault);
-                  Alert.alert('Immutable Vault', 'This vault is immutable and cannot be revoked.');
-                  setIsRevoking(false);
-                  return;
-                }
-                // Active vault — revoke on-chain
+                // Active vault — revoke on-chain (owner can always revoke, even immutable vaults)
                 const tx = await txService.buildRevokeVaultTx(publicKey);
                 tx.feePayer = publicKey;
                 const connection = txService.getConnection();
@@ -120,7 +113,10 @@ export function SettingsScreen() {
   }, [publicKey, signTransaction]);
 
   const handleEditBeneficiaries = useCallback(() => {
-    navigation.getParent()?.navigate('Setup', { screen: 'Beneficiaries' });
+    navigation.getParent()?.navigate('Setup', {
+      screen: 'Beneficiaries',
+      params: { fromSettings: true },
+    });
   }, [navigation]);
 
   const handleUpdateVault = useCallback(async () => {
@@ -374,7 +370,7 @@ export function SettingsScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.actionLabel, { color: 'rgba(255,255,255,0.3)', flex: 0 }]}>Vault Immutable</Text>
-                <Text style={styles.actionDesc}>This vault cannot be revoked or updated</Text>
+                <Text style={styles.actionDesc}>This vault cannot be revoked or modified</Text>
               </View>
             </View>
           ) : (

@@ -9,6 +9,8 @@ pub struct RevokeVault<'info> {
 
     #[account(
         mut,
+        seeds = [b"vault", owner.key().as_ref()],
+        bump = vault_config.bump,
         has_one = owner @ VaultError::UnauthorizedOwner,
         constraint = vault_config.active @ VaultError::VaultInactive,
         constraint = !vault_config.executed @ VaultError::VaultAlreadyExecuted,

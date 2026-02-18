@@ -1,49 +1,38 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useMemo } from 'react';
 import { PortfolioScanner } from '../services/PortfolioScanner';
-import { TokenBalance, DeFiPosition } from '../types';
+import { TokenBalance } from '../types';
 import { useWallet } from './useWallet';
 import { useVaultStore } from '../store/useVaultStore';
+import { usePortfolioStore } from '../store/usePortfolioStore';
 import { HELIUS_API_KEY, RPC_URL } from '../utils/constants';
 import { saveDailyPrice, getPreviousPrice } from '../db/priceHistoryRepo';
 
+const REFRESH_INTERVAL_MS = 30_000;
+
 export function usePortfolio() {
   const { publicKey } = useWallet();
-  const [balances, setBalances] = useState<TokenBalance[]>([]);
-  const [defiPositions, setDefiPositions] = useState<DeFiPosition[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { balances, defiPositions, totalUsdValue, solBalance, isLoading, error } =
+    usePortfolioStore();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isRefreshing = useRef(false);
 
   const scanner = useMemo(
     () => new PortfolioScanner(RPC_URL, HELIUS_API_KEY),
     [],
   );
 
-  const totalUsdValue = useMemo(() => {
-    const tokenTotal = balances.reduce((sum, b) => sum + b.usdValue, 0);
-    // Add DeFi positions that don't have corresponding SPL tokens already in balances
-    // (positions with tokens.length > 0 are LSTs like mSOL/jitoSOL already counted in token balances)
-    const defiTotal = defiPositions
-      .filter((p) => p.tokens.length === 0 && p.estimatedValueUsd > 0)
-      .reduce((sum, p) => sum + p.estimatedValueUsd, 0);
-    return tokenTotal + defiTotal;
-  }, [balances, defiPositions]);
-
-  const solBalance = useMemo(
-    () => balances.find((b) => b.symbol === 'SOL')?.amount ?? 0,
-    [balances],
-  );
-
   const refresh = useCallback(async () => {
-    if (!publicKey) return;
-    setIsLoading(true);
-    setError(null);
+    if (!publicKey || isRefreshing.current) return;
+    isRefreshing.current = true;
+    const store = usePortfolioStore.getState();
+    store.setLoading(true);
+    store.setError(null);
     try {
       const [tokens, positions] = await Promise.all([
         scanner.getTokenBalances(publicKey),
         scanner.detectDeFiPositions(publicKey),
       ]);
 
-      // Save daily prices and compute 24h changes
       const enrichedTokens: TokenBalance[] = await Promise.all(
         tokens.map(async (token) => {
           const mintStr = token.mint.toString();
@@ -51,9 +40,7 @@ export function usePortfolio() {
 
           if (token.usdValue > 0 && token.amount > 0) {
             const pricePerToken = token.usdValue / token.amount;
-            // Save first fetch of the day
             await saveDailyPrice(mintStr, pricePerToken).catch(() => {});
-            // Get yesterday's price
             const prevPrice = await getPreviousPrice(mintStr).catch(() => null);
             if (prevPrice && prevPrice > 0) {
               change24h = ((pricePerToken - prevPrice) / prevPrice) * 100;
@@ -64,9 +51,8 @@ export function usePortfolio() {
         }),
       );
 
-      setBalances(enrichedTokens);
+      usePortfolioStore.getState().setBalances(enrichedTokens);
 
-      // Enrich DeFi positions with USD values using SOL price
       const solToken = enrichedTokens.find((t) => t.symbol === 'SOL');
       const solPrice = solToken && solToken.amount > 0
         ? solToken.usdValue / solToken.amount
@@ -78,15 +64,38 @@ export function usePortfolio() {
         return pos;
       });
 
-      setDefiPositions(enrichedPositions);
-      // Also persist to Zustand store so Dashboard can display them
+      usePortfolioStore.getState().setDefiPositions(enrichedPositions);
       useVaultStore.getState().setDefiPositions(enrichedPositions);
     } catch (err: any) {
-      setError(err.message || 'Failed to scan portfolio');
+      usePortfolioStore.getState().setError(err.message || 'Failed to scan portfolio');
     } finally {
-      setIsLoading(false);
+      usePortfolioStore.getState().setLoading(false);
+      isRefreshing.current = false;
     }
   }, [publicKey, scanner]);
+
+  useEffect(() => {
+    if (!publicKey) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
+    if (usePortfolioStore.getState().balances.length === 0) {
+      refresh();
+    }
+
+    intervalRef.current = setInterval(refresh, REFRESH_INTERVAL_MS);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [publicKey, refresh]);
 
   return {
     balances,

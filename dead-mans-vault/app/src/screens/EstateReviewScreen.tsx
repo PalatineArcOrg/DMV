@@ -73,6 +73,7 @@ export function EstateReviewScreen() {
       if (existingAccount && existingAccount.data.length > 0) {
         const existingVault = await txService.fetchVaultConfig(publicKey);
         if (existingVault) {
+          useVaultStore.getState().setRevoked(false);
           setVaultConfig(existingVault);
         } else {
           setSetupComplete(true);
@@ -103,6 +104,7 @@ export function EstateReviewScreen() {
 
       const vaultConfig = await txService.fetchVaultConfig(publicKey);
       if (vaultConfig) {
+        useVaultStore.getState().setRevoked(false);
         setVaultConfig(vaultConfig);
       } else {
         setSetupComplete(true);
@@ -118,7 +120,10 @@ export function EstateReviewScreen() {
         try {
           const recoveryService = new VaultTransactionService();
           const vault = await recoveryService.fetchVaultConfig(publicKey);
-          if (vault) setVaultConfig(vault);
+          if (vault) {
+            useVaultStore.getState().setRevoked(false);
+            setVaultConfig(vault);
+          }
           setSetupComplete(true);
           Alert.alert('Success', 'Vault already active on-chain! Synced to device.', [
             { text: 'OK', onPress: () => { navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },

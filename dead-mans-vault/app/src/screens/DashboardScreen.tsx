@@ -177,9 +177,7 @@ export function DashboardScreen() {
       }
       setVaultData(vault);
       if (vault) {
-        if (vault.active && !vault.executed) {
-          useVaultStore.getState().setSetupComplete(true);
-        }
+        useVaultStore.getState().setVaultConfig(vault);
         const [vaultPda] = getVaultPDA(publicKey);
         const hb = await fetchHeartbeatRecord(vaultPda);
         setHeartbeatData(hb);
@@ -204,7 +202,6 @@ export function DashboardScreen() {
 
   useEffect(() => {
     if (connected && publicKey) {
-      refresh();
       loadVaultState();
     }
   }, [connected, publicKey]);

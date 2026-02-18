@@ -510,7 +510,25 @@ export type DeadMansVault = {
         },
         {
           "name": "vaultConfig",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
         }
       ],
       "args": []

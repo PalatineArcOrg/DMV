@@ -10,7 +10,7 @@ import {
   Image,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useVaultStore } from '../store/useVaultStore';
@@ -66,14 +66,6 @@ export function AssetsScreen() {
     }
   }, [portfolioDefiPositions]);
 
-  // Auto-refresh tokens + DeFi on screen focus if not yet loaded
-  useFocusEffect(
-    useCallback(() => {
-      if (connected && publicKey && balances.length === 0 && !portfolioLoading) {
-        refresh();
-      }
-    }, [connected, publicKey, balances.length, portfolioLoading, refresh]),
-  );
 
   const updateAction = useCallback((index: number, action: DeFiPositionAction) => {
     setPositions((prev) => {

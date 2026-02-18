@@ -10,6 +10,7 @@ import { ESCALATION_DEFAULTS } from '../utils/constants';
 
 interface VaultStore {
   isInitialized: boolean;
+  isRevoked: boolean;
   vaultConfig: VaultConfig | null;
   isSetupComplete: boolean;
   beneficiaries: Beneficiary[];
@@ -17,6 +18,7 @@ interface VaultStore {
   escalationConfig: EscalationConfig;
 
   setVaultConfig: (config: VaultConfig | null) => void;
+  setRevoked: (revoked: boolean) => void;
   setInitialized: (initialized: boolean) => void;
   setSetupComplete: (complete: boolean) => void;
   addBeneficiary: (b: Beneficiary) => void;
@@ -37,6 +39,7 @@ const initialEscalationConfig: EscalationConfig = {
 
 export const useVaultStore = create<VaultStore>((set) => ({
   isInitialized: false,
+  isRevoked: false,
   vaultConfig: null,
   isSetupComplete: false,
   beneficiaries: [],
@@ -44,11 +47,15 @@ export const useVaultStore = create<VaultStore>((set) => ({
   escalationConfig: initialEscalationConfig,
 
   setVaultConfig: (config) =>
-    set({
-      vaultConfig: config,
-      isSetupComplete: config !== null && config.active === true && config.executed !== true,
-      beneficiaries: config?.beneficiaries ?? [],
+    set((state) => {
+      if (state.isRevoked) return {};
+      return {
+        vaultConfig: config,
+        isSetupComplete: config !== null && config.active === true && config.executed !== true,
+        beneficiaries: config?.beneficiaries ?? [],
+      };
     }),
+  setRevoked: (revoked) => set({ isRevoked: revoked }),
   setInitialized: (initialized) => set({ isInitialized: initialized }),
   setSetupComplete: (complete) => set({ isSetupComplete: complete }),
   addBeneficiary: (b) =>
@@ -71,6 +78,7 @@ export const useVaultStore = create<VaultStore>((set) => ({
   reset: () =>
     set({
       isInitialized: false,
+      isRevoked: true,
       vaultConfig: null,
       isSetupComplete: false,
       beneficiaries: [],

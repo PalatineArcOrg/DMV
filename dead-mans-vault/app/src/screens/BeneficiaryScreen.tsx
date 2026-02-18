@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { PublicKey } from '@solana/web3.js';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVaultStore } from '../store/useVaultStore';
@@ -21,6 +21,8 @@ import { StepIndicator } from '../components/StepIndicator';
 
 export function BeneficiaryScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const fromSettings = route.params?.fromSettings ?? false;
   const { publicKey } = useWallet();
   const { beneficiaries, addBeneficiary, removeBeneficiary, updateBeneficiary } = useVaultStore();
 
@@ -87,8 +89,12 @@ export function BeneficiaryScreen() {
 
   const handleContinue = useCallback(() => {
     if (!isValid) { Alert.alert('Error', 'Shares must sum to exactly 100%.'); return; }
-    navigation.navigate('HeartbeatConfig');
-  }, [isValid, navigation]);
+    if (fromSettings) {
+      navigation.goBack();
+    } else {
+      navigation.navigate('HeartbeatConfig');
+    }
+  }, [isValid, navigation, fromSettings]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>

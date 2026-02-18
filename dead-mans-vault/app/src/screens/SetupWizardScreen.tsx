@@ -48,7 +48,7 @@ export function SetupWizardScreen() {
   useEffect(() => {
     if (!isSetupComplete && publicKey) {
       // Skip auto-sync if we just revoked — prevents refetching stale data
-      if (skipNextSync.current) {
+      if (skipNextSync.current || useVaultStore.getState().isRevoked) {
         skipNextSync.current = false;
         return;
       }
