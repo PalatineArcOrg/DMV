@@ -43,10 +43,16 @@ export class MigrationService {
     const tx = await txService.buildRotateAgentTx(ownerPubkey, newAgentPk);
 
     tx.feePayer = ownerPubkey;
-    const { blockhash } = await txService.getConnection().getLatestBlockhash();
+    const connection = txService.getConnection();
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
     tx.recentBlockhash = blockhash;
 
     const txSig = await signAndSendTransaction(tx);
+
+    await connection.confirmTransaction(
+      { signature: txSig, blockhash, lastValidBlockHeight },
+      'confirmed',
+    );
 
     return { newPubkey, txSig };
   }

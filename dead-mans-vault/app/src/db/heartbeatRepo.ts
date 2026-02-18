@@ -32,6 +32,14 @@ export async function getLastHeartbeat(): Promise<{
   return row ?? null;
 }
 
+export async function getHeartbeatCount(): Promise<number> {
+  const db = getDb();
+  const row = await db.getFirstAsync<{ count: number }>(
+    'SELECT COUNT(*) as count FROM heartbeat_history',
+  );
+  return row?.count ?? 0;
+}
+
 export async function getHeartbeatHistory(
   limit: number = 50,
 ): Promise<HeartbeatHistoryEntry[]> {

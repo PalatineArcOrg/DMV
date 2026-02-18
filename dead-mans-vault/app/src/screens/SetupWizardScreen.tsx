@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,7 +8,7 @@ import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { validateBeneficiaryShares } from '../utils/validation';
 import { truncateAddress, formatDuration } from '../utils/formatting';
-import { COLORS, FONTS, SPACING, PROGRAM_ID, STAGE_CONFIG } from '../utils/constants';
+import { COLORS, FONTS, SPACING, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
 
 export function SetupWizardScreen() {
   const navigation = useNavigation<any>();
@@ -20,6 +20,26 @@ export function SetupWizardScreen() {
   // Track if we just came from a revoke to prevent auto-sync from refetching stale data
   const wasSetupComplete = useRef(isSetupComplete);
   const skipNextSync = useRef(false);
+  const prevPkRef = useRef(publicKey?.toBase58() ?? '');
+
+  // Detect wallet switch — reset stale vault state
+  useEffect(() => {
+    const currentKey = publicKey?.toBase58() ?? '';
+    if (prevPkRef.current && currentKey && prevPkRef.current !== currentKey) {
+      useVaultStore.getState().resetForWalletSwitch();
+      useHeartbeatStore.getState().reset();
+      useEscalationStore.getState().reset();
+    }
+    prevPkRef.current = currentKey;
+  }, [publicKey]);
+
+  // Ownership check: only show post-setup view if vault belongs to current wallet
+  const isActuallySetup = useMemo(() => {
+    if (!isSetupComplete) return false;
+    if (!vaultConfig || !publicKey) return false;
+    if (!vaultConfig.owner) return false;
+    return vaultConfig.owner.toBase58() === publicKey.toBase58();
+  }, [isSetupComplete, vaultConfig, publicKey]);
 
   useEffect(() => {
     // If isSetupComplete just transitioned from true → false, skip the next auto-sync
@@ -45,15 +65,15 @@ export function SetupWizardScreen() {
   // Reset Setup stack to wizard root when user tabs back (prevents stale screens)
   useFocusEffect(
     useCallback(() => {
-      if (!isSetupComplete) {
+      if (!isActuallySetup) {
         navigation.popToTop();
       }
-    }, [isSetupComplete, navigation]),
+    }, [isActuallySetup, navigation]),
   );
 
   // Auto-sync: check if on-chain vault exists for connected wallet
   useEffect(() => {
-    if (!isSetupComplete && publicKey) {
+    if (!isActuallySetup && publicKey) {
       // Skip auto-sync if we just revoked — prevents refetching stale data
       if (skipNextSync.current || useVaultStore.getState().isRevoked) {
         skipNextSync.current = false;
@@ -72,13 +92,11 @@ export function SetupWizardScreen() {
         }
       })();
     }
-  }, [publicKey, isSetupComplete]);
+  }, [publicKey, isActuallySetup]);
 
-  if (isSetupComplete) {
+  if (isActuallySetup) {
     const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
-    const gracePeriod = heartbeatConfig
-      ? Math.round(heartbeatConfig.intervalSeconds * 3)
-      : 0;
+    const gracePeriod = ESCALATION_DEFAULTS.stage1 + ESCALATION_DEFAULTS.stage2 + ESCALATION_DEFAULTS.stage3;
 
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>

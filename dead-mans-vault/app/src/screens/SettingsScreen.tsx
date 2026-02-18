@@ -12,14 +12,14 @@ import {
 } from 'react-native';
 import * as ExpoClipboard from 'expo-clipboard';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useWallet } from '../hooks/useWallet';
 import { useDemoStore } from '../store/useDemoStore';
 import { useVaultStore } from '../store/useVaultStore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG } from '../utils/constants';
+import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
@@ -39,6 +39,24 @@ export function SettingsScreen() {
   const isOwner = vaultConfig?.owner && publicKey
     ? vaultConfig.owner.toBase58() === publicKey.toBase58()
     : false;
+
+  // Load vault config from on-chain when screen gains focus (ensures isOwner is accurate)
+  useFocusEffect(
+    useCallback(() => {
+      if (connected && publicKey && !vaultConfig) {
+        (async () => {
+          try {
+            const { VaultTransactionService } = require('../services/VaultTransactionService');
+            const txService = new VaultTransactionService();
+            const vault = await txService.fetchVaultConfig(publicKey);
+            if (vault) {
+              useVaultStore.getState().setVaultConfig(vault);
+            }
+          } catch {}
+        })();
+      }
+    }, [connected, publicKey, vaultConfig]),
+  );
 
   const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
 
@@ -101,7 +119,7 @@ export function SettingsScreen() {
                 ]);
               } else if (vault?.executed) {
                 Alert.alert('Info', 'Vault already executed. Clearing local data.');
-                useVaultStore.getState().reset();
+                useVaultStore.getState().resetForWalletSwitch();
                 useHeartbeatStore.getState().reset();
                 useEscalationStore.getState().reset();
               } else {
@@ -243,7 +261,7 @@ export function SettingsScreen() {
               <View style={[styles.statusGridCell, styles.statusGridCellBorder]}>
                 <Text style={styles.statusGridLabel}>Grace</Text>
                 <Text style={styles.statusGridValue}>
-                  {heartbeatConfig ? `${Math.round(heartbeatConfig.intervalSeconds / 86400 * 3)}d` : '-'}
+                  {heartbeatConfig ? `${Math.round((ESCALATION_DEFAULTS.stage1 + ESCALATION_DEFAULTS.stage2 + ESCALATION_DEFAULTS.stage3) / 86400)}d` : '-'}
                 </Text>
               </View>
               <View style={styles.statusGridCell}>

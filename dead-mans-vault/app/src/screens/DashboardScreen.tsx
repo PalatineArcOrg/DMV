@@ -132,6 +132,7 @@ export function DashboardScreen() {
   const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
   const storeDefiPositions = useVaultStore((s) => s.defiPositions);
+  const storeBeneficiaryCount = useVaultStore((s) => s.beneficiaries.length);
   const defiPositions = portfolioDefi.length > 0 ? portfolioDefi : storeDefiPositions;
 
   // Wallet-switch detection
@@ -252,7 +253,7 @@ export function DashboardScreen() {
     ? (heartbeatStatus?.nextDue ? timeAgo(heartbeatStatus.nextDue).replace(' ago', '') : 'N/A')
     : 'Overdue';
 
-  const beneficiaryCount = vaultData?.beneficiaries?.length ?? useVaultStore.getState().beneficiaries.length;
+  const beneficiaryCount = vaultData?.beneficiaries?.length ?? storeBeneficiaryCount;
 
   // Not connected state
   if (!connected) {

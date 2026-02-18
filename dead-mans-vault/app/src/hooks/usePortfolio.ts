@@ -74,6 +74,8 @@ export function usePortfolio() {
     }
   }, [publicKey, scanner]);
 
+  const prevPublicKeyRef = useRef(publicKey?.toBase58() ?? '');
+
   useEffect(() => {
     if (!publicKey) {
       if (intervalRef.current) {
@@ -83,9 +85,17 @@ export function usePortfolio() {
       return;
     }
 
-    if (usePortfolioStore.getState().balances.length === 0) {
-      refresh();
+    // Detect wallet switch — reset stale portfolio data
+    const currentKey = publicKey.toBase58();
+    const isSwitch = prevPublicKeyRef.current !== '' && prevPublicKeyRef.current !== currentKey;
+    prevPublicKeyRef.current = currentKey;
+
+    if (isSwitch) {
+      usePortfolioStore.getState().reset();
     }
+
+    // Always refresh on mount or wallet switch
+    refresh();
 
     intervalRef.current = setInterval(refresh, REFRESH_INTERVAL_MS);
 

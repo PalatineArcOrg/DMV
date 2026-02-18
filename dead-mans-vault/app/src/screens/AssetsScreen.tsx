@@ -59,11 +59,9 @@ export function AssetsScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('tokens');
   const [positions, setPositions] = useState<DeFiPosition[]>([]);
 
-  // Sync DeFi positions from usePortfolio
+  // Sync DeFi positions from usePortfolio (handles both new data and wallet-switch clear)
   useEffect(() => {
-    if (portfolioDefiPositions.length > 0) {
-      setPositions(portfolioDefiPositions);
-    }
+    setPositions(portfolioDefiPositions);
   }, [portfolioDefiPositions]);
 
 

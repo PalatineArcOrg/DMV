@@ -171,6 +171,6 @@ export function useAuthorization() {
       selectedAccount: authorization?.selectedAccount ?? null,
       isLoading,
     }),
-    [authorization, authorizeSession, deauthorizeSession]
+    [authorization, authorizeSession, authorizeSessionWithSignIn, deauthorizeSession]
   );
 }

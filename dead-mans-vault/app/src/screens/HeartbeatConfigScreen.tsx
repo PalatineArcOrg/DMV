@@ -2,12 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, FONTS, HEARTBEAT_INTERVALS } from '../utils/constants';
+import { COLORS, FONTS, HEARTBEAT_INTERVALS, ESCALATION_DEFAULTS } from '../utils/constants';
 import { formatDuration } from '../utils/formatting';
 import { HeartbeatConfig } from '../types';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { setSetting, getSetting } from '../db/settingsRepo';
 import { StepIndicator } from '../components/StepIndicator';
+
+const ACTUAL_GRACE_DAYS = Math.round(
+  (ESCALATION_DEFAULTS.stage1 + ESCALATION_DEFAULTS.stage2 + ESCALATION_DEFAULTS.stage3) / 86400,
+);
 
 const PRESETS = [
   {
@@ -15,7 +19,7 @@ const PRESETS = [
     label: 'Weekly',
     description: 'Check in every 7 days',
     seconds: HEARTBEAT_INTERVALS.weekly,
-    graceDays: 21,
+    graceDays: ACTUAL_GRACE_DAYS,
     icon: 'clock-outline' as const,
     color: '#00FFA3',
     recommended: true,
@@ -25,7 +29,7 @@ const PRESETS = [
     label: 'Bi-Weekly',
     description: 'Check in every 14 days',
     seconds: HEARTBEAT_INTERVALS.biweekly,
-    graceDays: 42,
+    graceDays: ACTUAL_GRACE_DAYS,
     icon: 'calendar' as const,
     color: '#4DA6FF',
     recommended: false,
@@ -35,7 +39,7 @@ const PRESETS = [
     label: 'Monthly',
     description: 'Check in every 30 days',
     seconds: HEARTBEAT_INTERVALS.monthly,
-    graceDays: 90,
+    graceDays: ACTUAL_GRACE_DAYS,
     icon: 'shield' as const,
     color: '#9945FF',
     recommended: false,

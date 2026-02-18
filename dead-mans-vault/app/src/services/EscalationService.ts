@@ -100,15 +100,6 @@ export class EscalationService {
 
     store.setStage(newStage);
 
-    if (newStage === 4) {
-      // Calculate and store execution deadline
-      const totalGrace =
-        this.config.stage1Duration +
-        this.config.stage2Duration +
-        this.config.stage3Duration;
-      store.setExecutionDeadline(Math.floor(Date.now() / 1000));
-    }
-
     // Fire stage-entry notification
     switch (newStage) {
       case 0:

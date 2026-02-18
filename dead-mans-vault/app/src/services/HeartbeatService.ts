@@ -3,7 +3,7 @@ import { HeartbeatMethod, HeartbeatConfig, HeartbeatStatus } from '../types';
 import {
   recordHeartbeat,
   getLastHeartbeat,
-  getHeartbeatHistory,
+  getHeartbeatCount,
 } from '../db/heartbeatRepo';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 
@@ -27,8 +27,7 @@ export class HeartbeatService {
 
   async getStatus(): Promise<HeartbeatStatus> {
     const last = await getLastHeartbeat();
-    const history = await getHeartbeatHistory(1);
-    const totalCount = (await getHeartbeatHistory(10000)).length;
+    const totalCount = await getHeartbeatCount();
 
     if (!last) {
       return {
