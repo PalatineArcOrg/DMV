@@ -36,6 +36,10 @@ export function SettingsScreen() {
   const [isRevoking, setIsRevoking] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
+  const isOwner = vaultConfig?.owner && publicKey
+    ? vaultConfig.owner.toBase58() === publicKey.toBase58()
+    : false;
+
   const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
 
   const handleCopy = useCallback(() => {
@@ -64,6 +68,11 @@ export function SettingsScreen() {
               const txService = new VaultTransactionService();
               const vault = await txService.fetchVaultConfig(publicKey);
 
+              if (vault && vault.owner && vault.owner.toBase58() !== publicKey.toBase58()) {
+                Alert.alert('Not Owner', 'This vault belongs to a different wallet.');
+                return;
+              }
+
               if (vault && vault.active && !vault.executed) {
                 // Active mutable vault — revoke on-chain
                 const tx = await txService.buildRevokeVaultTx(publicKey);
@@ -82,20 +91,25 @@ export function SettingsScreen() {
                   'confirmed',
                 );
 
+                useVaultStore.getState().reset();
+                useHeartbeatStore.getState().reset();
+                useEscalationStore.getState().reset();
+
                 Alert.alert('Vault Revoked', `Vault deactivated on-chain.\n\nTx: ${txSig.slice(0, 20)}...`, [
                   { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
                   { text: 'OK' },
                 ]);
               } else if (vault?.executed) {
                 Alert.alert('Info', 'Vault already executed. Clearing local data.');
+                useVaultStore.getState().reset();
+                useHeartbeatStore.getState().reset();
+                useEscalationStore.getState().reset();
               } else {
-                // No vault on-chain
+                // No vault on-chain — clear stale local state only
+                useVaultStore.getState().resetForWalletSwitch();
+                useHeartbeatStore.getState().reset();
+                useEscalationStore.getState().reset();
               }
-
-              // Clear all local state — full cascade reset
-              useVaultStore.getState().reset();
-              useHeartbeatStore.getState().reset();
-              useEscalationStore.getState().reset();
             } catch (err: any) {
               const msg = err.message || String(err);
               if (msg.includes('CancellationException') || msg.includes('cancelled')) {
@@ -136,6 +150,13 @@ export function SettingsScreen() {
               const { PublicKey: PK } = require('@solana/web3.js');
               const txService = new VaultTransactionService();
               const connection = txService.getConnection();
+
+              const existingVault = await txService.fetchVaultConfig(publicKey);
+              if (existingVault && existingVault.owner && existingVault.owner.toBase58() !== publicKey.toBase58()) {
+                Alert.alert('Not Owner', 'This vault belongs to a different wallet.');
+                setIsUpdating(false);
+                return;
+              }
 
               const onChainBeneficiaries = beneficiaries.map((b: any) => ({
                 wallet: new PK(b.wallet.toBase58()),
@@ -203,7 +224,7 @@ export function SettingsScreen() {
       <Text style={styles.header}>Settings</Text>
 
       {/* Vault Status */}
-      {vaultConfig && (
+      {vaultConfig && isOwner && (
         <View style={styles.sectionBlock}>
           <Text style={styles.sectionLabel}>VAULT STATUS</Text>
           <View style={styles.card}>
@@ -320,7 +341,7 @@ export function SettingsScreen() {
           <SettingRow icon="lock-outline" iconColor={vaultConfig?.isMutable === false ? COLORS.critical : COLORS.accent} label="Vault Type" value={vaultConfig?.isMutable === false ? 'Immutable' : 'Mutable'} />
           <View style={styles.rowDivider} />
           <SettingRow icon="web" iconColor="rgba(255,255,255,0.3)" label="Network" value="Devnet" />
-          {vaultConfig && vaultConfig.active && !vaultConfig.executed && vaultConfig.isMutable !== false && (
+          {isOwner && vaultConfig && vaultConfig.active && !vaultConfig.executed && vaultConfig.isMutable !== false && (
             <>
               <View style={styles.rowDivider} />
               <TouchableOpacity style={styles.actionRow} onPress={handleEditBeneficiaries}>
@@ -360,37 +381,39 @@ export function SettingsScreen() {
       </View>
 
       {/* Danger Zone */}
-      <View style={styles.sectionBlock}>
-        <Text style={[styles.sectionLabel, { color: 'rgba(239,68,68,0.4)' }]}>DANGER ZONE</Text>
-        <View style={[styles.card, { borderColor: 'rgba(239,68,68,0.15)' }]}>
-          {vaultConfig?.isMutable === false ? (
-            <View style={styles.actionRow}>
-              <View style={[styles.actionIcon, { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }]}>
-                <MaterialCommunityIcons name="lock" size={15} color="rgba(255,255,255,0.3)" />
+      {isOwner && (
+        <View style={styles.sectionBlock}>
+          <Text style={[styles.sectionLabel, { color: 'rgba(239,68,68,0.4)' }]}>DANGER ZONE</Text>
+          <View style={[styles.card, { borderColor: 'rgba(239,68,68,0.15)' }]}>
+            {vaultConfig?.isMutable === false ? (
+              <View style={styles.actionRow}>
+                <View style={[styles.actionIcon, { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }]}>
+                  <MaterialCommunityIcons name="lock" size={15} color="rgba(255,255,255,0.3)" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.actionLabel, { color: 'rgba(255,255,255,0.3)', flex: 0 }]}>Vault Immutable</Text>
+                  <Text style={styles.actionDesc}>This vault cannot be revoked or modified</Text>
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.actionLabel, { color: 'rgba(255,255,255,0.3)', flex: 0 }]}>Vault Immutable</Text>
-                <Text style={styles.actionDesc}>This vault cannot be revoked or modified</Text>
-              </View>
-            </View>
-          ) : (
-            <TouchableOpacity style={styles.actionRow} onPress={handleRevoke} disabled={isRevoking}>
-              <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
-                {isRevoking ? (
-                  <ActivityIndicator size="small" color="#EF4444" />
-                ) : (
-                  <MaterialCommunityIcons name="shield-off" size={15} color="#EF4444" />
-                )}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.actionLabel, { color: '#EF4444', flex: 0 }]}>Revoke Vault</Text>
-                <Text style={styles.actionDesc}>Deactivates on-chain and clears local data</Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
-            </TouchableOpacity>
-          )}
+            ) : (
+              <TouchableOpacity style={styles.actionRow} onPress={handleRevoke} disabled={isRevoking}>
+                <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
+                  {isRevoking ? (
+                    <ActivityIndicator size="small" color="#EF4444" />
+                  ) : (
+                    <MaterialCommunityIcons name="shield-off" size={15} color="#EF4444" />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.actionLabel, { color: '#EF4444', flex: 0 }]}>Revoke Vault</Text>
+                  <Text style={styles.actionDesc}>Deactivates on-chain and clears local data</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
-      </View>
+      )}
 
       <View style={{ height: 48 }} />
     </ScrollView>

@@ -28,6 +28,7 @@ interface VaultStore {
   setDefiPositions: (positions: DeFiPosition[]) => void;
   setEscalationConfig: (config: EscalationConfig) => void;
   reset: () => void;
+  resetForWalletSwitch: () => void;
 }
 
 const initialEscalationConfig: EscalationConfig = {
@@ -79,6 +80,16 @@ export const useVaultStore = create<VaultStore>((set) => ({
     set({
       isInitialized: false,
       isRevoked: true,
+      vaultConfig: null,
+      isSetupComplete: false,
+      beneficiaries: [],
+      defiPositions: [],
+      escalationConfig: initialEscalationConfig,
+    }),
+  resetForWalletSwitch: () =>
+    set({
+      isInitialized: false,
+      isRevoked: false,
       vaultConfig: null,
       isSetupComplete: false,
       beneficiaries: [],

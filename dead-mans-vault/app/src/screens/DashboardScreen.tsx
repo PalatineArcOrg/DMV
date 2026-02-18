@@ -194,7 +194,7 @@ export function DashboardScreen() {
     if (prevPublicKey.current && currentKey && prevPublicKey.current !== currentKey) {
       setVaultData(null);
       setHeartbeatData(null);
-      useVaultStore.getState().reset?.();
+      useVaultStore.getState().resetForWalletSwitch();
     }
     prevPublicKey.current = currentKey;
   }, [publicKey]);

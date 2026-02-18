@@ -37,7 +37,7 @@ export function SetupWizardScreen() {
 
   const handleStartOver = useCallback(() => {
     skipNextSync.current = true;
-    useVaultStore.getState().reset();
+    useVaultStore.getState().resetForWalletSwitch();
     useHeartbeatStore.getState().reset();
     useEscalationStore.getState().reset();
   }, []);
