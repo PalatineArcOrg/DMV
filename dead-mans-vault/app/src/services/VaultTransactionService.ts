@@ -197,27 +197,73 @@ export class VaultTransactionService {
 
   /**
    * Fetches the on-chain VaultConfig account.
-   * Returns Anchor-deserialized data where numeric fields (heartbeatInterval,
-   * gracePeriod, createdAt, updatedAt) are BN instances, and beneficiaries
-   * lack the client-side `label` field.
+   * Tries Anchor deserialization first, falls back to raw byte parsing
+   * if Anchor fails (e.g. Hermes runtime compatibility issues).
    */
   async fetchVaultConfig(owner: PublicKey): Promise<any | null> {
-    const readonlyWallet = {
-      publicKey: owner,
-      signTransaction: async (tx: Transaction) => tx,
-      signAllTransactions: async (txs: Transaction[]) => txs,
-    };
-    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
-      commitment: 'confirmed',
-    });
-    const program = new Program<DeadMansVault>(idl as any, provider);
-
     const [pda] = this.getVaultPDA(owner);
+
+    // Try Anchor deserialization first
     try {
+      const readonlyWallet = {
+        publicKey: owner,
+        signTransaction: async (tx: Transaction) => tx,
+        signAllTransactions: async (txs: Transaction[]) => txs,
+      };
+      const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+        commitment: 'confirmed',
+      });
+      const program = new Program<DeadMansVault>(idl as any, provider);
       return await program.account.vaultConfig.fetch(pda);
+    } catch {
+      // Anchor deserialization failed — try raw fallback
+    }
+
+    // Raw byte parsing fallback
+    try {
+      const rawAccount = await this.connection.getAccountInfo(pda);
+      if (!rawAccount || rawAccount.data.length < 92) return null;
+      return VaultTransactionService.parseVaultConfigRaw(rawAccount.data);
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Parses VaultConfig from raw account bytes.
+   * Layout: 8 discriminator | 32 owner | 32 agent | 8 interval | 8 grace |
+   *         4 vec_len | N*(32+2+1) beneficiaries | 1 executed | 1 active |
+   *         8 created_at | 8 updated_at | 1 bump | 1 is_mutable
+   */
+  static parseVaultConfigRaw(data: Buffer): any {
+    let offset = 8; // skip discriminator
+
+    const owner = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
+    const agentPubkey = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
+    const heartbeatInterval = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
+    const gracePeriod = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
+
+    const beneficiaryCount = data.readUInt32LE(offset); offset += 4;
+    const beneficiaries: { wallet: PublicKey; shareBps: number; hasSpecificAssets: boolean }[] = [];
+    for (let i = 0; i < beneficiaryCount && i < 20; i++) {
+      const wallet = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
+      const shareBps = data.readUInt16LE(offset); offset += 2;
+      const hasSpecificAssets = data[offset] !== 0; offset += 1;
+      beneficiaries.push({ wallet, shareBps, hasSpecificAssets });
+    }
+
+    const executed = data[offset] !== 0; offset += 1;
+    const active = data[offset] !== 0; offset += 1;
+    const createdAt = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
+    const updatedAt = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
+    const bump = data[offset]; offset += 1;
+    const isMutable = data[offset] !== 0; offset += 1;
+
+    return {
+      owner, agentPubkey, heartbeatInterval, gracePeriod,
+      beneficiaries, executed, active, createdAt, updatedAt,
+      bump, isMutable,
+    };
   }
 
   async buildRevokeVaultTx(owner: PublicKey): Promise<Transaction> {

@@ -5,6 +5,7 @@ import { useConnection } from '../utils/ConnectionProvider';
 import { useWallet } from './useWallet';
 import { idl, DeadMansVault } from '../utils/idl';
 import { PROGRAM_ID } from '../utils/constants';
+import { VaultTransactionService } from '../services/VaultTransactionService';
 
 const programId = new PublicKey(PROGRAM_ID);
 
@@ -51,13 +52,21 @@ export function useVaultProgram() {
     async (owner: PublicKey) => {
       if (!program) return null;
       const [pda] = getVaultPDA(owner);
+      // Try Anchor deserialization first
       try {
         return await program.account.vaultConfig.fetch(pda);
+      } catch {
+        // Anchor failed — try raw byte parsing fallback
+      }
+      try {
+        const rawAccount = await connection.getAccountInfo(pda);
+        if (!rawAccount || rawAccount.data.length < 92) return null;
+        return VaultTransactionService.parseVaultConfigRaw(rawAccount.data);
       } catch {
         return null;
       }
     },
-    [program, getVaultPDA],
+    [program, connection, getVaultPDA],
   );
 
   const fetchHeartbeatRecord = useCallback(

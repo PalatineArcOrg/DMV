@@ -71,7 +71,12 @@ export function EstateReviewScreen() {
       const [vaultPda] = txService.getVaultPDA(publicKey);
       const existingAccount = await connection.getAccountInfo(vaultPda);
       if (existingAccount && existingAccount.data.length > 0) {
-        const existingVault = await txService.fetchVaultConfig(publicKey);
+        let existingVault = await txService.fetchVaultConfig(publicKey);
+        if (!existingVault && existingAccount.data.length >= 92) {
+          existingVault = VaultTransactionService.parseVaultConfigRaw(
+            Buffer.from(existingAccount.data),
+          );
+        }
         if (existingVault) {
           useVaultStore.getState().setRevoked(false);
           setVaultConfig(existingVault);

@@ -154,27 +154,7 @@ export function DashboardScreen() {
     if (!publicKey) return;
     setIsLoadingVault(true);
     try {
-      let vault: any = await fetchVaultConfig(publicKey);
-      if (!vault) {
-        const txService = new VaultTransactionService();
-        const [vaultPda] = txService.getVaultPDA(publicKey);
-        const rawAccount = await txService.getConnection().getAccountInfo(vaultPda);
-        if (rawAccount && rawAccount.data.length > 0) {
-          vault = await txService.fetchVaultConfig(publicKey);
-          if (!vault) {
-            const store = useVaultStore.getState();
-            vault = {
-              active: true,
-              executed: false,
-              beneficiaries: store.beneficiaries.map((b: any) => ({
-                wallet: b.wallet,
-                shareBps: b.shareBps,
-                hasSpecificAssets: b.hasSpecificAssets ?? false,
-              })),
-            };
-          }
-        }
-      }
+      const vault: any = await fetchVaultConfig(publicKey);
       setVaultData(vault);
       if (vault) {
         useVaultStore.getState().setVaultConfig(vault);
