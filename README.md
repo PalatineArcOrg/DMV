@@ -4,65 +4,111 @@ An autonomous crypto inheritance protocol for Solana Seeker.
 
 Dead Man's Vault monitors an owner's liveness through configurable heartbeat checks. When heartbeats stop, it escalates through a 4-stage warning system and then autonomously distributes assets to pre-configured beneficiaries — no backend server, no intermediaries.
 
-**Built for the Monolith — Solana Mobile Hackathon (Feb 2 – Mar 9, 2026)**
+**Built for the Monolith — Solana Mobile Hackathon (Feb 2 -- Mar 9, 2026)**
 
 ---
 
 ## How It Works
 
 ```
-Owner configures vault → Sets beneficiaries + heartbeat interval
-                           ↓
-Heartbeat monitoring   → Owner confirms liveness periodically
-                           ↓ (missed heartbeat)
-Stage 1: Reminder      → Notifications sent to owner
-                           ↓ (no response)
-Stage 2: Alert         → Emergency contacts notified
-                           ↓ (no response)
-Stage 3: Warning       → Final countdown, execution preview
-                           ↓ (no response)
-Stage 4: Execution     → Assets distributed to beneficiaries autonomously
+Owner configures vault --> Sets beneficiaries + heartbeat interval
+                           |
+Heartbeat monitoring   --> Owner confirms liveness periodically
+                           | (missed heartbeat)
+Stage 1: Reminder      --> Notifications sent to owner
+                           | (no response)
+Stage 2: Alert         --> Emergency contacts notified
+                           | (no response)
+Stage 3: Warning       --> Final countdown, execution preview
+                           | (no response)
+Stage 4: Execution     --> Assets distributed to beneficiaries autonomously
 ```
 
-Any heartbeat confirmation at Stages 1–3 resets the vault to normal. Stage 4 is irreversible.
+Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Stage 4 is irreversible.
 
 ---
 
 ## Features
 
-- **4-stage escalation system** — Graduated warnings (Reminder → Alert → Warning → Execution) with configurable durations
-- **On-chain heartbeat recording** — Every heartbeat confirmation is recorded on Solana devnet via the agent key
-- **Mutable or immutable vaults** — Choose whether your vault can be revoked/updated, or make it permanent
-- **Live portfolio tracking** — Token balances, USD values (via Jupiter), and 24h price changes
-- **DeFi position detection** — Scans 10 protocols (Marinade, Jito, Sanctum, Kamino, Jupiter, Raydium, Orca, Meteora, MarginFi, native stake)
-- **Heart monitor animation** — ECG-style EKG line that changes speed with escalation stage
-- **Explorer integration** — All on-chain transactions link directly to Solana Explorer
-- **Beneficiary management** — Add, edit, remove beneficiaries with percentage-based allocation
-- **On-chain vault updates** — Edit beneficiaries and push changes on-chain via `update_vault`
-- **Demo mode** — Fast escalation timers (30s stages) for testing on production builds
-- **App lock** — Biometric/PIN authentication for app access
-- **Autonomous execution** — Agent key (TEE-stored) handles distribution without user interaction at Stage 4
+### Core
+- **4-stage escalation system** -- Graduated warnings (Reminder -> Alert -> Warning -> Execution) with configurable durations
+- **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key
+- **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
+- **Autonomous execution** -- Agent key (TEE-stored) handles distribution without user interaction at Stage 4
+- **Idempotent crash recovery** -- Every execution step checkpointed to SQLite before proceeding
+
+### Portfolio & DeFi
+- **Live portfolio tracking** -- Token balances via Helius DAS API, USD prices via dual oracle (Pyth Hermes + Jupiter fallback), 24h price changes
+- **DeFi position detection** -- Scans 10 protocols across 3 detection layers (token mint matching, program account scanning, Helius Enhanced TX history)
+- **Supported protocols** -- Marinade, Jito, Sanctum (9 LST variants), Kamino, Jupiter, Raydium, Orca, Meteora, MarginFi, native stake
+
+### Security
+- **Biometric app lock** -- Optional biometric/PIN authentication for app access
+- **Wallet isolation** -- Automatic state reset on wallet change to prevent cross-wallet vault access
+- **Device migration** -- Detects missing agent key and triggers on-chain `rotate_agent` with 5 security guards
+
+### UX
+- **Heart monitor animation** -- ECG-style line that changes speed with escalation stage
+- **Explorer integration** -- All on-chain transactions link directly to Solana Explorer
+- **Beneficiary management** -- Add, edit, remove beneficiaries with percentage-based allocation
+- **Demo mode** -- Fast escalation timers (30s stages) for testing on production builds
 
 ---
 
 ## Architecture
 
-- **No backend server** — all logic runs on-device or on-chain
-- **TEE-first security** — agent signing key stored in hardware secure enclave
-- **Idempotent execution** — every step checkpointed to SQLite before proceeding
-- **Owner supremacy** — owner can always override or revoke agent authority (unless immutable)
-- **On-chain constraints** — program enforces rules even if the device is compromised
+- **No backend server** -- all logic runs on-device or on-chain
+- **TEE-first security** -- agent signing key stored in hardware secure enclave
+- **Idempotent execution** -- every step checkpointed to SQLite before proceeding
+- **Owner supremacy** -- owner can always override or revoke agent authority (unless immutable)
+- **On-chain constraints** -- program enforces rules even if the device is compromised
 
 ### Components
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| On-chain program | Anchor (Rust) | Enforces who can transfer, where, and when |
-| Mobile app | React Native (Expo) | Orchestrates scanning, escalation, and execution |
+| On-chain program | Anchor 0.32.1 (Rust) | Enforces who can transfer, where, and when |
+| Mobile app | React Native (Expo SDK 52) | Orchestrates scanning, escalation, and execution |
 | State management | Zustand + SQLite | Local persistence and crash recovery |
 | Wallet integration | Solana Mobile MWA | Owner authorization via Seed Vault |
 | Key management | Seeker TEE | Agent key for autonomous operations |
-| Portfolio data | Helius DAS + Jupiter | Token balances, prices, DeFi positions |
+| Portfolio data | Helius DAS API | Token balances and metadata |
+| Price oracles | Pyth Hermes + Jupiter | Dual-source USD pricing with 60s cache |
+| DeFi detection | Helius Enhanced TX + on-chain scanning | Protocol position discovery |
+| Transaction landing | Helius Priority Fee API | Dynamic fee estimation per instruction |
+
+---
+
+## External API Integrations
+
+### Helius
+
+| API | Usage |
+|-----|-------|
+| DAS `getAssetsByOwner` | Fetches all fungible token balances in a single paginated JSON-RPC call |
+| Enhanced Transactions | Discovers DeFi protocol interactions via transaction history (cursor-based pagination, up to 150 txs) |
+| `getPriorityFeeEstimate` | Dynamic priority fee estimation for reliable transaction landing |
+
+All Helius endpoints auto-derive devnet/mainnet prefix from the configured RPC URL — zero-config network switching.
+
+### Pyth Hermes
+
+| API | Usage |
+|-----|-------|
+| `/v2/price_feeds` | Resolves token symbols to Pyth feed IDs (cached in-memory per session) |
+| `/v2/updates/price/latest` | Batch price fetches with expo-based price parsing |
+
+60-second TTL price cache prevents redundant network calls. Symbols with no Pyth feed are tracked to avoid repeated lookups.
+
+### Jupiter
+
+| API | Usage |
+|-----|-------|
+| Price API v2 | Fallback USD pricing for tokens not covered by Pyth |
+
+### Retry & Rate Limiting
+
+All external API calls use exponential backoff with jitter on HTTP 429 (rate limit). `fetchWithRetry` for REST, `rpcWithRetry` for JSON-RPC 2.0.
 
 ---
 
@@ -77,10 +123,12 @@ Any heartbeat confirmation at Stages 1–3 resets the vault to normal. Stage 4 i
 | `initialize_vault` | Owner | Create vault with beneficiaries, intervals, agent key, and mutability flag |
 | `update_vault` | Owner | Modify estate plan (beneficiaries, intervals). Blocked on immutable vaults |
 | `record_heartbeat` | Agent | Record liveness confirmation on-chain |
-| `execute_distribution` | Agent | Transfer assets to a beneficiary |
-| `record_execution` | Agent | Create immutable execution log |
+| `execute_distribution` | Agent | Transfer SOL to a beneficiary (BN precision arithmetic) |
+| `record_execution` | Agent | Create immutable execution log, deactivate vault |
 | `rotate_agent` | Owner | Rotate agent key (device migration) with 5 security guards |
 | `revoke_vault` | Owner | Emergency deactivation. Blocked on immutable vaults |
+
+All transactions include per-instruction compute unit limits and dynamic priority fees for reliable landing.
 
 ### Account Structure
 
@@ -94,6 +142,10 @@ Any heartbeat confirmation at Stages 1–3 resets the vault to normal. Stage 4 i
 
 15 custom error codes covering: interval validation, share allocation, signer authorization, vault state guards, beneficiary whitelist enforcement, and immutability protection.
 
+### Tests
+
+23/23 tests passing -- covers happy paths, all error cases, rotate_agent security guards, execution flow, and double-execution prevention.
+
 ---
 
 ## Mobile App
@@ -103,22 +155,45 @@ Any heartbeat confirmation at Stages 1–3 resets the vault to normal. Stage 4 i
 | Tab | Screens | Purpose |
 |-----|---------|---------|
 | **Status** | Dashboard, Execution Log | Heartbeat button, portfolio overview, vault status, escalation banner |
-| **Assets** | Assets Overview | Token list with prices, DeFi positions with protocol detection |
-| **Setup** | Welcome, Beneficiaries, Heartbeat Config, DeFi Positions, Estate Review | 4-step vault creation wizard |
-| **Settings** | Settings | Wallet, vault contract info, edit/update vault, revoke, demo mode, app lock |
+| **Assets** | Assets Overview | Token list with live prices, DeFi positions grouped by protocol with closure strategies |
+| **Setup** | Welcome, Beneficiaries, Heartbeat Config, DeFi Positions, Estate Review | 4-step vault creation wizard with step indicator |
+| **Settings** | Settings | Wallet info, vault contract details, edit/update vault, revoke, demo mode, app lock |
+
+Authentication screen guards app access with biometric/PIN when enabled.
 
 ### Services
 
 | Service | Purpose |
 |---------|---------|
+| **BackgroundAgent** | Singleton orchestrator for heartbeat monitoring and escalation evaluation |
 | **HeartbeatService** | Records confirmations to SQLite, tracks overdue status, monitors on-chain wallet activity |
-| **EscalationService** | Autonomous state machine evaluating every 60s, transitions through 4 stages, triggers execution |
-| **ExecutionService** | 8-step idempotent execution engine with SQLite checkpointing and crash recovery |
-| **VaultTransactionService** | Builds and sends all on-chain transactions (init, heartbeat, update, revoke, execute, rotate) |
+| **EscalationService** | Autonomous state machine evaluating every 60s (10s in demo), transitions through 4 stages |
+| **ExecutionService** | 5-step idempotent execution engine with SQLite checkpointing (BN arithmetic end-to-end) |
+| **VaultTransactionService** | Builds and sends all on-chain transactions with priority fees and raw byte parsing fallback |
 | **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker) |
 | **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX) with frequency caps |
-| **PortfolioScanner** | Token balances via Helius DAS API, USD prices via Jupiter, DeFi position detection |
-| **MigrationService** | Detects device migration (on-chain vault exists but no local agent key) and triggers rotation |
+| **PortfolioScanner** | Token balances via Helius DAS, dual-oracle pricing (Pyth + Jupiter), DeFi detection |
+| **MigrationService** | Detects device migration and triggers on-chain agent rotation |
+
+### DeFi Detection (3 layers)
+
+| Layer | Method | Protocols |
+|-------|--------|-----------|
+| **Token mint matching** | Zero RPC calls, instant | Marinade, Jito, Sanctum (9 variants), Jupiter JLP, Kamino kSOL |
+| **Program account scanning** | RPC getProgramAccounts | Orca Whirlpools, Meteora DLMM, MarginFi V2, Kamino Lending, Raydium CLMM, Native Stake |
+| **Transaction history** | Helius Enhanced TX API | Any protocol with recent wallet activity |
+
+Positions are deduplicated by protocol+account. Real positions take priority over activity-detected hints.
+
+---
+
+## Hermes Engine Compatibility
+
+React Native's Hermes runtime requires several workarounds:
+
+- **Polyfills** -- `Buffer`, `crypto` (via expo-crypto), `structuredClone` (JSON-based)
+- **No BigInt** -- Anchor deserialization may silently fail; raw `getAccountInfo` fallback used
+- **Raw byte parsing** -- `VaultTransactionService.parseVaultConfigRaw()` decodes vault state directly from account bytes when Anchor's coder fails on Hermes
 
 ---
 
@@ -131,8 +206,8 @@ Any heartbeat confirmation at Stages 1–3 resets the vault to normal. Stage 4 i
 | Rust | 1.93.1 |
 | Expo SDK | 52 |
 | React Native | 0.76.9 |
-| @solana/web3.js | 1.78+ |
-| @coral-xyz/anchor | 0.30.1 |
+| @solana/web3.js | 1.x |
+| @coral-xyz/anchor | 0.32.1 |
 | TypeScript | 5.x |
 
 ---
@@ -141,25 +216,25 @@ Any heartbeat confirmation at Stages 1–3 resets the vault to normal. Stage 4 i
 
 ```
 dead-mans-vault/
-├── programs/dead-mans-vault/src/   # Anchor program (Rust)
-│   ├── instructions/               # 7 instruction handlers
-│   ├── state/                      # Account definitions (VaultConfig, HeartbeatRecord, ExecutionLog)
-│   ├── errors.rs                   # 15 error codes
-│   └── constants.rs                # On-chain constants
-├── tests/                          # Anchor program tests (23/23 passing)
-└── app/                            # React Native mobile app (Expo SDK 52)
-    └── src/
-        ├── services/               # HeartbeatService, EscalationService, ExecutionService, etc.
-        ├── notifications/          # NotificationService (3 Android channels)
-        ├── screens/                # Dashboard, Assets, Setup wizard (5 screens), Settings
-        ├── components/             # HeartbeatButton, EcgLine, StatusIndicator, StepIndicator, etc.
-        ├── hooks/                  # useWallet, useHeartbeat, usePortfolio, useVaultProgram
-        ├── store/                  # Zustand stores (vault, heartbeat, escalation, demo, auth)
-        ├── tee/                    # KeyManager (TEE agent key management)
-        ├── db/                     # SQLite database layer (4 tables + repos)
-        ├── defi/                   # DeFi protocol integrations
-        ├── types/                  # TypeScript type definitions
-        └── utils/                  # Constants, formatting, validation, IDL
++-- programs/dead-mans-vault/src/    # Anchor program (Rust)
+|   +-- instructions/                # 7 instruction handlers
+|   +-- state/                       # Account definitions
+|   +-- errors.rs                    # 15 error codes
+|   +-- constants.rs                 # On-chain constants
++-- tests/                           # Anchor program tests (23/23 passing)
++-- app/                             # React Native mobile app (Expo SDK 52)
+    +-- src/
+        +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.
+        +-- notifications/           # NotificationService (3 Android channels)
+        +-- screens/                 # Dashboard, Assets, Setup wizard (5 screens), Settings, Auth
+        +-- components/              # HeartbeatButton, EcgLine, StatusIndicator, StepIndicator, etc.
+        +-- hooks/                   # useWallet, useHeartbeat, usePortfolio, useVaultProgram
+        +-- store/                   # Zustand stores (vault, heartbeat, escalation, demo, auth)
+        +-- tee/                     # KeyManager (TEE agent key management)
+        +-- db/                      # SQLite database layer (4 tables + repos)
+        +-- defi/                    # DeFi protocol detectors + registry
+        +-- types/                   # TypeScript type definitions + API interfaces
+        +-- utils/                   # Constants, formatting, validation, IDL, fetchWithRetry
 ```
 
 ---
@@ -195,7 +270,7 @@ anchor test
 ```bash
 cd dead-mans-vault/app
 yarn install
-npx tsc --noEmit          # Type check
+npx tsc --noEmit          # Type check (0 errors expected)
 npx expo prebuild --platform android --clean
 cd android && ./gradlew assembleRelease
 ```
@@ -206,7 +281,7 @@ APK output: `android/app/build/outputs/apk/release/app-release.apk`
 
 ## Network
 
-Currently deployed to **Solana Devnet** for hackathon scope.
+Currently deployed to **Solana Devnet**. All endpoints auto-derive network prefix from the configured RPC URL for future mainnet migration.
 
 ---
 
