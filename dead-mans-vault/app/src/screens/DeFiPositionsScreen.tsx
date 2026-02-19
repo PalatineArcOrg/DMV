@@ -11,6 +11,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useWallet } from '../hooks/useWallet';
 import { useVaultStore } from '../store/useVaultStore';
+import { usePortfolioStore } from '../store/usePortfolioStore';
 import { PortfolioScanner } from '../services/PortfolioScanner';
 import { DeFiPosition, DeFiPositionAction, ClosureStrategy } from '../types/defi';
 import { RPC_URL, HELIUS_API_KEY, COLORS, SPACING, FONTS } from '../utils/constants';
@@ -55,6 +56,15 @@ export function DeFiPositionsScreen() {
   useEffect(() => {
     if (!publicKey) return;
 
+    // Read from Zustand store first (avoids duplicate 100-credit Enhanced TX call)
+    const storePositions = usePortfolioStore.getState().defiPositions;
+    if (storePositions.length > 0) {
+      setPositions(storePositions);
+      setIsLoading(false);
+      return;
+    }
+
+    // Only scan fresh if store is empty (first app launch / no prior refresh)
     const scanner = new PortfolioScanner(RPC_URL, HELIUS_API_KEY);
     scanner
       .detectDeFiPositions(publicKey)
@@ -408,7 +418,7 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   continueButtonText: {
-    color: COLORS.textPrimary,
+    color: COLORS.bg,
     fontSize: 16,
     fontWeight: '700',
   },

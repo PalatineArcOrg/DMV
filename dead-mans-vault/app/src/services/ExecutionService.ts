@@ -1,4 +1,5 @@
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from './VaultTransactionService';
 import {
@@ -14,7 +15,7 @@ import { Beneficiary } from '../types/vault';
 import { DeFiPosition } from '../types/defi';
 import { DeFiClosureService } from '../defi/closer';
 
-const SOL_RESERVE = 0.1 * LAMPORTS_PER_SOL; // 0.1 SOL reserve for fees
+const SOL_RESERVE_LAMPORTS = new BN(0.1 * LAMPORTS_PER_SOL); // 0.1 SOL reserve for fees
 
 export class ExecutionService {
   private ownerPubkey: PublicKey;
@@ -27,10 +28,11 @@ export class ExecutionService {
   private keyManager: KeyManager;
 
   // Snapshot of distributable balance taken once before any distributions (S4 fix)
-  private distributableSnapshot: number = 0;
+  // Uses BN for precision-safe arithmetic on large lamport values
+  private distributableSnapshot: BN = new BN(0);
 
   // Accumulated total SOL distributed for record_execution (B3 fix)
-  private totalSolDistributed: number = 0;
+  private totalSolDistributed: BN = new BN(0);
 
   constructor(
     ownerPubkey: PublicKey,
@@ -64,14 +66,17 @@ export class ExecutionService {
       // even across crash/recovery cycles (S4 + crash recovery fix).
       const savedSnapshot = await getDistributableSnapshot();
       if (savedSnapshot !== null && lastCompleted >= 0) {
-        this.distributableSnapshot = savedSnapshot;
+        this.distributableSnapshot = new BN(savedSnapshot);
       } else {
         const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
         const balance = await this.txService.getConnection().getBalance(vaultPda);
-        this.distributableSnapshot = Math.max(0, balance - SOL_RESERVE);
-        await saveDistributableSnapshot(this.distributableSnapshot);
+        const balanceBN = new BN(balance);
+        this.distributableSnapshot = balanceBN.gt(SOL_RESERVE_LAMPORTS)
+          ? balanceBN.sub(SOL_RESERVE_LAMPORTS)
+          : new BN(0);
+        await saveDistributableSnapshot(this.distributableSnapshot.toNumber());
       }
-      this.totalSolDistributed = 0;
+      this.totalSolDistributed = new BN(0);
 
       // Track whether any distribution step failed
       let hasDistributionFailure = false;
@@ -250,15 +255,15 @@ export class ExecutionService {
     const shareBps = step.metadata?.shareBps as number;
 
     // Use the frozen distributableSnapshot instead of re-reading balance.
-    // This ensures each beneficiary gets their exact entitled share
-    // regardless of execution order (S4 fix).
-    if (this.distributableSnapshot <= 0) {
+    // BN arithmetic prevents precision loss for vaults > 900k SOL.
+    if (this.distributableSnapshot.lte(new BN(0))) {
       throw new Error('Insufficient SOL in vault for distribution');
     }
 
-    const amountLamports = Math.floor((this.distributableSnapshot * shareBps) / 10000);
+    // BN: (distributableSnapshot * shareBps) / 10000
+    const amountLamports = this.distributableSnapshot.mul(new BN(shareBps)).div(new BN(10000));
 
-    if (amountLamports <= 0) {
+    if (amountLamports.lte(new BN(0))) {
       throw new Error('Distribution amount too small');
     }
 
@@ -272,7 +277,7 @@ export class ExecutionService {
     );
 
     // Accumulate for record_execution (B3 fix)
-    this.totalSolDistributed += amountLamports;
+    this.totalSolDistributed = this.totalSolDistributed.add(amountLamports);
 
     return sig;
   }

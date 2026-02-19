@@ -4,10 +4,14 @@ import {
   Keypair,
   Transaction,
   SystemProgram,
+  ComputeBudgetProgram,
+  sendAndConfirmTransaction,
 } from '@solana/web3.js';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
-import { PROGRAM_ID, RPC_URL } from '../utils/constants';
+import { PROGRAM_ID, RPC_URL, HELIUS_API_KEY } from '../utils/constants';
+import { rpcWithRetry } from '../utils/fetchWithRetry';
+import type { PriorityFeeEstimateResult } from '../types/api';
 
 const programId = new PublicKey(PROGRAM_ID);
 
@@ -61,6 +65,52 @@ export class VaultTransactionService {
     return new Program<DeadMansVault>(idl as any, provider);
   }
 
+  /**
+   * Estimate priority fee using Helius getPriorityFeeEstimate.
+   * Falls back to a safe default (1000 micro-lamports) if estimation fails.
+   */
+  private async estimatePriorityFee(accountKeys: PublicKey[]): Promise<number> {
+    // getPriorityFeeEstimate is Helius-only — skip retries when using standard RPC
+    if (!HELIUS_API_KEY) return 1000;
+
+    try {
+      const result = await rpcWithRetry<PriorityFeeEstimateResult>(
+        RPC_URL,
+        'getPriorityFeeEstimate',
+        [{
+          accountKeys: accountKeys.map((k) => k.toString()),
+          options: { recommended: true },
+        }],
+      );
+      return result?.priorityFeeEstimate ?? 1000;
+    } catch {
+      return 1000; // Safe default: 1000 micro-lamports
+    }
+  }
+
+  /**
+   * Prepend ComputeBudget instructions for priority fee to a transaction.
+   * CU limits tuned per instruction type to minimize fee cost.
+   */
+  private async addPriorityFee(
+    tx: Transaction,
+    accountKeys: PublicKey[],
+    cuLimit: number = 200_000,
+  ): Promise<Transaction> {
+    const fee = await this.estimatePriorityFee(accountKeys);
+
+    const priorityTx = new Transaction();
+    priorityTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: cuLimit }));
+    priorityTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: fee }));
+
+    // Append original instructions
+    for (const ix of tx.instructions) {
+      priorityTx.add(ix);
+    }
+
+    return priorityTx;
+  }
+
   async buildInitializeVaultTx(
     owner: PublicKey,
     agentPubkey: PublicKey,
@@ -103,34 +153,44 @@ export class VaultTransactionService {
       })
       .transaction();
 
-    return tx;
+    // Add priority fee for reliable landing (owner pays via MWA)
+    return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 250_000);
   }
 
   async executeDistribution(
     agentKeypair: Keypair,
     ownerPubkey: PublicKey,
     beneficiaryWallet: PublicKey,
-    amountLamports: number,
+    amountLamports: BN,
   ): Promise<string> {
-    // On-chain enforced SOL distribution from vault PDA to beneficiary.
-    // The program verifies: vault active, not executed, agent authorized,
-    // grace period elapsed, and beneficiary is in the whitelist.
     const program = this.getProgram(agentKeypair);
     const [vaultPda] = this.getVaultPDA(ownerPubkey);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
 
-    // accountsPartial() is used because Anchor's generated ResolvedAccounts
-    // type requires every account including PDAs that are auto-derived.
-    // accountsPartial() allows specifying only the accounts we pass explicitly.
-    const sig = await program.methods
-      .executeSolDistribution(new BN(amountLamports))
+    // Build transaction (don't send yet — need to add priority fee)
+    const tx = await program.methods
+      .executeSolDistribution(amountLamports)
       .accountsPartial({
         agent: agentKeypair.publicKey,
         vaultConfig: vaultPda,
         heartbeatRecord: heartbeatPda,
         beneficiary: beneficiaryWallet,
       })
-      .rpc();
+      .transaction();
+
+    // Add priority fee — 150k CU for SOL distribution
+    const priorityTx = await this.addPriorityFee(tx, [
+      vaultPda, heartbeatPda, agentKeypair.publicKey, beneficiaryWallet,
+    ], 150_000);
+
+    priorityTx.feePayer = agentKeypair.publicKey;
+    const { blockhash } = await this.connection.getLatestBlockhash();
+    priorityTx.recentBlockhash = blockhash;
+
+    const sig = await sendAndConfirmTransaction(this.connection, priorityTx, [agentKeypair], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    });
 
     return sig;
   }
@@ -140,7 +200,7 @@ export class VaultTransactionService {
     ownerPubkey: PublicKey,
     params: {
       transferCount: number;
-      totalSolDistributed: number;
+      totalSolDistributed: BN;
       tokenTypesDistributed: number;
       attestationHash: number[];
       completed: boolean;
@@ -151,10 +211,10 @@ export class VaultTransactionService {
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
     const [executionPda] = this.getExecutionPDA(vaultPda);
 
-    const sig = await program.methods
+    const tx = await program.methods
       .recordExecution({
         transferCount: params.transferCount,
-        totalSolDistributed: new BN(params.totalSolDistributed),
+        totalSolDistributed: params.totalSolDistributed,
         tokenTypesDistributed: params.tokenTypesDistributed,
         attestationHash: params.attestationHash,
         completed: params.completed,
@@ -167,7 +227,20 @@ export class VaultTransactionService {
         executionLog: executionPda,
         systemProgram: SystemProgram.programId,
       })
-      .rpc();
+      .transaction();
+
+    const priorityTx = await this.addPriorityFee(tx, [
+      vaultPda, heartbeatPda, executionPda, agentKeypair.publicKey,
+    ]);
+
+    priorityTx.feePayer = agentKeypair.publicKey;
+    const { blockhash } = await this.connection.getLatestBlockhash();
+    priorityTx.recentBlockhash = blockhash;
+
+    const sig = await sendAndConfirmTransaction(this.connection, priorityTx, [agentKeypair], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    });
 
     return sig;
   }
@@ -183,14 +256,28 @@ export class VaultTransactionService {
 
     const methodEnum = { [method]: {} };
 
-    const sig = await program.methods
+    const tx = await program.methods
       .recordHeartbeat(methodEnum as any)
       .accountsPartial({
         agent: agentKeypair.publicKey,
         vaultConfig: vaultPda,
         heartbeatRecord: heartbeatPda,
       })
-      .rpc();
+      .transaction();
+
+    // 80k CU for heartbeat (lightweight state update)
+    const priorityTx = await this.addPriorityFee(tx, [
+      vaultPda, heartbeatPda, agentKeypair.publicKey,
+    ], 80_000);
+
+    priorityTx.feePayer = agentKeypair.publicKey;
+    const { blockhash } = await this.connection.getLatestBlockhash();
+    priorityTx.recentBlockhash = blockhash;
+
+    const sig = await sendAndConfirmTransaction(this.connection, priorityTx, [agentKeypair], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    });
 
     return sig;
   }
@@ -287,7 +374,7 @@ export class VaultTransactionService {
       })
       .transaction();
 
-    return tx;
+    return this.addPriorityFee(tx, [owner, vaultPda], 80_000);
   }
 
   async buildUpdateVaultTx(
@@ -328,7 +415,7 @@ export class VaultTransactionService {
       })
       .transaction();
 
-    return tx;
+    return this.addPriorityFee(tx, [owner, vaultPda], 120_000);
   }
 
   async buildFundVaultTx(
@@ -343,7 +430,7 @@ export class VaultTransactionService {
         lamports: amountLamports,
       }),
     );
-    return tx;
+    return this.addPriorityFee(tx, [owner, vaultPda], 80_000);
   }
 
   async buildRotateAgentTx(
@@ -372,6 +459,6 @@ export class VaultTransactionService {
       })
       .transaction();
 
-    return tx;
+    return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 100_000);
   }
 }

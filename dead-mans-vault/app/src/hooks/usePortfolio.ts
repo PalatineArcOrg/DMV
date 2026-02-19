@@ -7,31 +7,31 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 import { HELIUS_API_KEY, RPC_URL } from '../utils/constants';
 import { saveDailyPrice, getPreviousPrice } from '../db/priceHistoryRepo';
 
-const REFRESH_INTERVAL_MS = 30_000;
+const BALANCE_REFRESH_MS = 30_000;    // Token balances: every 30s
+const DEFI_REFRESH_MS = 300_000;      // DeFi detection: every 5 min (saves 100 credits/call)
 
 export function usePortfolio() {
   const { publicKey } = useWallet();
   const { balances, defiPositions, totalUsdValue, solBalance, isLoading, error } =
     usePortfolioStore();
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isRefreshing = useRef(false);
+  const balanceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const defiIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isRefreshingBalances = useRef(false);
+  const isRefreshingDefi = useRef(false);
 
   const scanner = useMemo(
     () => new PortfolioScanner(RPC_URL, HELIUS_API_KEY),
     [],
   );
 
-  const refresh = useCallback(async () => {
-    if (!publicKey || isRefreshing.current) return;
-    isRefreshing.current = true;
+  const refreshBalances = useCallback(async () => {
+    if (!publicKey || isRefreshingBalances.current) return;
+    isRefreshingBalances.current = true;
     const store = usePortfolioStore.getState();
     store.setLoading(true);
     store.setError(null);
     try {
-      const [tokens, positions] = await Promise.all([
-        scanner.getTokenBalances(publicKey),
-        scanner.detectDeFiPositions(publicKey),
-      ]);
+      const tokens = await scanner.getTokenBalances(publicKey);
 
       const enrichedTokens: TokenBalance[] = await Promise.all(
         tokens.map(async (token) => {
@@ -52,8 +52,26 @@ export function usePortfolio() {
       );
 
       usePortfolioStore.getState().setBalances(enrichedTokens);
+    } catch (err: any) {
+      usePortfolioStore.getState().setError(err.message || 'Failed to scan portfolio');
+    } finally {
+      usePortfolioStore.getState().setLoading(false);
+      isRefreshingBalances.current = false;
+    }
+  }, [publicKey, scanner]);
 
-      const solToken = enrichedTokens.find((t) => t.symbol === 'SOL');
+  const refreshDefi = useCallback(async () => {
+    if (!publicKey || isRefreshingDefi.current) return;
+    isRefreshingDefi.current = true;
+    try {
+      // Pass cached balances to avoid duplicate DAS + pricing pipeline
+      const cachedBalances = usePortfolioStore.getState().balances;
+      const positions = await scanner.detectDeFiPositions(
+        publicKey,
+        cachedBalances.length > 0 ? cachedBalances : undefined,
+      );
+
+      const solToken = usePortfolioStore.getState().balances.find((t) => t.symbol === 'SOL');
       const solPrice = solToken && solToken.amount > 0
         ? solToken.usdValue / solToken.amount
         : 0;
@@ -66,21 +84,30 @@ export function usePortfolio() {
 
       usePortfolioStore.getState().setDefiPositions(enrichedPositions);
       useVaultStore.getState().setDefiPositions(enrichedPositions);
-    } catch (err: any) {
-      usePortfolioStore.getState().setError(err.message || 'Failed to scan portfolio');
+    } catch {
+      // DeFi detection is non-critical
     } finally {
-      usePortfolioStore.getState().setLoading(false);
-      isRefreshing.current = false;
+      isRefreshingDefi.current = false;
     }
   }, [publicKey, scanner]);
+
+  // Combined refresh for initial load
+  const refresh = useCallback(async () => {
+    await refreshBalances();
+    await refreshDefi();
+  }, [refreshBalances, refreshDefi]);
 
   const prevPublicKeyRef = useRef(publicKey?.toBase58() ?? '');
 
   useEffect(() => {
     if (!publicKey) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      if (balanceIntervalRef.current) {
+        clearInterval(balanceIntervalRef.current);
+        balanceIntervalRef.current = null;
+      }
+      if (defiIntervalRef.current) {
+        clearInterval(defiIntervalRef.current);
+        defiIntervalRef.current = null;
       }
       return;
     }
@@ -94,18 +121,25 @@ export function usePortfolio() {
       usePortfolioStore.getState().reset();
     }
 
-    // Always refresh on mount or wallet switch
-    refresh();
+    // Initial refresh on mount or wallet switch
+    refreshBalances();
+    refreshDefi();
 
-    intervalRef.current = setInterval(refresh, REFRESH_INTERVAL_MS);
+    // Separate intervals: balances fast, DeFi slow
+    balanceIntervalRef.current = setInterval(refreshBalances, BALANCE_REFRESH_MS);
+    defiIntervalRef.current = setInterval(refreshDefi, DEFI_REFRESH_MS);
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      if (balanceIntervalRef.current) {
+        clearInterval(balanceIntervalRef.current);
+        balanceIntervalRef.current = null;
+      }
+      if (defiIntervalRef.current) {
+        clearInterval(defiIntervalRef.current);
+        defiIntervalRef.current = null;
       }
     };
-  }, [publicKey, refresh]);
+  }, [publicKey, refreshBalances, refreshDefi]);
 
   return {
     balances,

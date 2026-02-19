@@ -3,9 +3,13 @@ import { Platform } from 'react-native';
 export const PROGRAM_ID = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
 export const RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
 export const HELIUS_API_KEY = process.env.EXPO_PUBLIC_HELIUS_API_KEY || '';
-export const HELIUS_API_BASE = 'https://api-devnet.helius.xyz/v0';
-export const HELIUS_ENHANCED_API = 'https://api-devnet.helius-rpc.com/v0';
-export const HELIUS_PARSE_TX_API = 'https://api-devnet.helius-rpc.com/v0/transactions';
+
+// Derive Helius REST endpoints from RPC_URL — zero-config for mainnet migration
+const IS_DEVNET = RPC_URL.includes('devnet') || RPC_URL.includes('api.devnet');
+const HELIUS_NET_PREFIX = IS_DEVNET ? 'api-devnet' : 'api-mainnet';
+export const HELIUS_API_BASE = `https://${HELIUS_NET_PREFIX}.helius.xyz/v0`;
+export const HELIUS_ENHANCED_API = `https://${HELIUS_NET_PREFIX}.helius-rpc.com/v0`;
+export const HELIUS_PARSE_TX_API = `https://${HELIUS_NET_PREFIX}.helius-rpc.com/v0/transactions`;
 export const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
 export const JUPITER_SWAP_API = 'https://quote-api.jup.ag/v6/swap';
 

@@ -1,23 +1,36 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { TokenBalance, DeFiPosition } from '../types';
-import { HELIUS_API_BASE, KNOWN_TOKEN_LOGOS } from '../utils/constants';
+import { RPC_URL, KNOWN_TOKEN_LOGOS } from '../utils/constants';
 import { DeFiDetector } from '../defi/detector';
 import { KNOWN_TOKEN_SYMBOLS } from '../defi/registry';
+import { fetchWithRetry, rpcWithRetry } from '../utils/fetchWithRetry';
+import type {
+  DASGetAssetsByOwnerResult,
+  PythPriceFeed,
+  PythPriceUpdateResponse,
+  JupiterPriceResponse,
+} from '../types/api';
 
 // In-memory cache: symbol → Pyth feed ID (persists for app session)
 const pythFeedCache = new Map<string, string>();
 // Symbols we already know have no Pyth feed
 const pythNoFeedSet = new Set<string>();
 
+// Price cache with TTL (symbol → { price, timestamp })
+const priceCache = new Map<string, { price: number; ts: number }>();
+const PRICE_CACHE_TTL_MS = 60_000; // 60 seconds
+
 const PYTH_HERMES_BASE = 'https://hermes.pyth.network';
 
 export class PortfolioScanner {
   private connection: Connection;
   private heliusApiKey: string;
+  private rpcUrl: string;
 
   constructor(rpcUrl: string, heliusApiKey: string) {
     this.connection = new Connection(rpcUrl);
     this.heliusApiKey = heliusApiKey;
+    this.rpcUrl = rpcUrl;
   }
 
   async getTokenBalances(wallet: PublicKey): Promise<TokenBalance[]> {
@@ -33,32 +46,10 @@ export class PortfolioScanner {
       usdValue: 0,
     });
 
-    // Fetch SPL tokens — try Helius first, fall back to RPC
+    // Fetch SPL tokens — try DAS getAssetsByOwner first, then Helius Balances, then RPC
     let gotTokens = false;
     if (this.heliusApiKey) {
-      try {
-        const url = `${HELIUS_API_BASE}/addresses/${wallet.toString()}/balances?api-key=${this.heliusApiKey}`;
-        const response = await fetch(url);
-        if (response.ok) {
-          const data = await response.json();
-          for (const token of data.tokens || []) {
-            if (token.amount > 0) {
-              const mintStr = token.mint as string;
-              const known = KNOWN_TOKEN_SYMBOLS[mintStr];
-              balances.push({
-                mint: new PublicKey(mintStr),
-                symbol: token.symbol || known?.symbol || mintStr.slice(0, 6),
-                amount: token.amount / Math.pow(10, token.decimals),
-                decimals: token.decimals,
-                usdValue: 0,
-              });
-            }
-          }
-          gotTokens = true;
-        }
-      } catch {
-        // Fall through to RPC fallback
-      }
+      gotTokens = await this.fetchViaDAS(wallet, balances);
     }
 
     // RPC fallback: fetch SPL token accounts directly
@@ -103,6 +94,56 @@ export class PortfolioScanner {
   }
 
   /**
+   * Fetch tokens via Helius DAS getAssetsByOwner (modern replacement for Balances API).
+   * Returns true if successful.
+   */
+  private async fetchViaDAS(wallet: PublicKey, balances: TokenBalance[]): Promise<boolean> {
+    try {
+      const result = await rpcWithRetry<DASGetAssetsByOwnerResult>(this.rpcUrl, 'getAssetsByOwner', [{
+        ownerAddress: wallet.toString(),
+        page: 1,
+        limit: 1000,
+        displayOptions: {
+          showFungible: true,
+          showNativeBalance: false,
+          showZeroBalance: false,
+        },
+      }]);
+
+      const items = result?.items || [];
+      for (const item of items) {
+        // Only process fungible tokens (skip NFTs, compressed NFTs)
+        if (item.interface !== 'FungibleToken' && item.interface !== 'FungibleAsset') continue;
+
+        const mintStr = item.id;
+        if (!mintStr) continue;
+
+        const tokenInfo = item.token_info;
+        const balance = tokenInfo?.balance;
+        const decimals = tokenInfo?.decimals ?? 0;
+
+        if (!balance || Number(balance) <= 0) continue;
+
+        const amount = Number(balance) / Math.pow(10, decimals);
+        const known = KNOWN_TOKEN_SYMBOLS[mintStr];
+        const symbol = tokenInfo?.symbol || item.content?.metadata?.symbol || known?.symbol || mintStr.slice(0, 6);
+
+        balances.push({
+          mint: new PublicKey(mintStr),
+          symbol,
+          amount,
+          decimals,
+          usdValue: 0,
+        });
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Resolve Pyth feed IDs for a list of token symbols.
    * Uses in-memory cache to avoid repeated lookups.
    */
@@ -125,12 +166,12 @@ export class PortfolioScanner {
     const lookups = uncached.map(async (sym) => {
       try {
         const url = `${PYTH_HERMES_BASE}/v2/price_feeds?query=${sym}&asset_type=crypto`;
-        const resp = await fetch(url);
+        const resp = await fetchWithRetry(url);
         if (!resp.ok) return;
-        const feeds: any[] = await resp.json();
+        const feeds: PythPriceFeed[] = await resp.json();
 
         // Find exact match: base === symbol AND quote_currency === "USD"
-        const match = feeds.find((f: any) => {
+        const match = feeds.find((f) => {
           const base = (f.attributes?.base || '').toUpperCase();
           const quote = (f.attributes?.quote_currency || '').toUpperCase();
           return base === sym && quote === 'USD';
@@ -153,17 +194,35 @@ export class PortfolioScanner {
 
   /**
    * Enrich balances with prices from Pyth Hermes REST API.
+   * Uses a 60-second price cache to avoid redundant network calls.
    * Returns the number of balances that received prices.
    */
   private async enrichWithPythPrices(balances: TokenBalance[]): Promise<number> {
+    const now = Date.now();
     const symbols = balances
       .filter((b) => b.amount > 0)
       .map((b) => b.symbol.toUpperCase());
 
     if (symbols.length === 0) return 0;
 
-    const feedMap = await this.resolvePythFeedIds(symbols);
-    if (feedMap.size === 0) return 0;
+    // Check cache first — apply cached prices immediately
+    let enriched = 0;
+    const uncachedSymbols: string[] = [];
+    for (const balance of balances) {
+      const sym = balance.symbol.toUpperCase();
+      const cached = priceCache.get(sym);
+      if (cached && now - cached.ts < PRICE_CACHE_TTL_MS) {
+        balance.usdValue = balance.amount * cached.price;
+        enriched++;
+      } else {
+        uncachedSymbols.push(sym);
+      }
+    }
+
+    if (uncachedSymbols.length === 0) return enriched;
+
+    const feedMap = await this.resolvePythFeedIds(uncachedSymbols);
+    if (feedMap.size === 0) return enriched;
 
     // Build batch price request
     const feedIds = Array.from(feedMap.values());
@@ -171,12 +230,12 @@ export class PortfolioScanner {
     const url = `${PYTH_HERMES_BASE}/v2/updates/price/latest?${idsParam}`;
 
     try {
-      const resp = await fetch(url);
-      if (!resp.ok) return 0;
-      const data = await resp.json();
+      const resp = await fetchWithRetry(url);
+      if (!resp.ok) return enriched;
+      const data: PythPriceUpdateResponse = await resp.json();
 
-      // Build feedId → price map
-      const priceMap = new Map<string, number>();
+      // Build feedId → price map and update cache
+      const priceFeedMap = new Map<string, number>();
       for (const entry of data.parsed || []) {
         const feedId = entry.id;
         const priceStr = entry.price?.price;
@@ -184,24 +243,26 @@ export class PortfolioScanner {
         if (priceStr != null && expo != null) {
           const usdPrice = Number(priceStr) * Math.pow(10, expo);
           if (usdPrice > 0) {
-            priceMap.set(feedId, usdPrice);
+            priceFeedMap.set(feedId, usdPrice);
           }
         }
       }
 
-      // Assign prices to balances
-      let enriched = 0;
+      // Assign prices to balances and update cache
       for (const balance of balances) {
+        if (balance.usdValue > 0) continue; // Already priced from cache
         const sym = balance.symbol.toUpperCase();
         const feedId = feedMap.get(sym);
-        if (feedId && priceMap.has(feedId)) {
-          balance.usdValue = balance.amount * priceMap.get(feedId)!;
+        if (feedId && priceFeedMap.has(feedId)) {
+          const price = priceFeedMap.get(feedId)!;
+          balance.usdValue = balance.amount * price;
+          priceCache.set(sym, { price, ts: now });
           enriched++;
         }
       }
       return enriched;
     } catch {
-      return 0;
+      return enriched;
     }
   }
 
@@ -219,10 +280,11 @@ export class PortfolioScanner {
 
     try {
       const url = `https://api.jup.ag/price/v2?ids=${mints.join(',')}`;
-      const response = await fetch(url);
+      const response = await fetchWithRetry(url);
       if (!response.ok) return;
-      const data = await response.json();
+      const data: JupiterPriceResponse = await response.json();
 
+      const now = Date.now();
       for (const balance of balances) {
         if (balance.usdValue > 0) continue; // Already priced by Pyth
         const mintKey = balance.mint.equals(PublicKey.default)
@@ -230,7 +292,10 @@ export class PortfolioScanner {
           : balance.mint.toString();
         const priceData = data.data?.[mintKey];
         if (priceData?.price) {
-          balance.usdValue = balance.amount * Number(priceData.price);
+          const price = Number(priceData.price);
+          balance.usdValue = balance.amount * price;
+          // Cache Jupiter prices too
+          priceCache.set(balance.symbol.toUpperCase(), { price, ts: now });
         }
       }
     } catch {
@@ -257,9 +322,9 @@ export class PortfolioScanner {
     }
   }
 
-  async detectDeFiPositions(wallet: PublicKey): Promise<DeFiPosition[]> {
+  async detectDeFiPositions(wallet: PublicKey, preloadedBalances?: TokenBalance[]): Promise<DeFiPosition[]> {
     try {
-      const tokenBalances = await this.getTokenBalances(wallet);
+      const tokenBalances = preloadedBalances ?? await this.getTokenBalances(wallet);
       const detector = new DeFiDetector(this.connection, this.heliusApiKey);
       return detector.detectAll(wallet, tokenBalances);
     } catch {

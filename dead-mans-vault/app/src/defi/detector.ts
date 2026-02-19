@@ -12,6 +12,9 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { DeFiPosition, TokenBalance } from '../types/defi';
 import { HELIUS_SOURCE_MAP } from './registry';
+import { HELIUS_ENHANCED_API } from '../utils/constants';
+import { fetchWithRetry } from '../utils/fetchWithRetry';
+import type { HeliusEnhancedTransaction } from '../types/api';
 
 // Protocol detectors
 import { detectLiquidStaking } from './protocols/liquidStaking';
@@ -59,11 +62,6 @@ export class DeFiDetector {
       this.detectViaHelius(wallet),
     ]);
 
-    // Collect all fulfilled positions, log failures
-    const labels = [
-      'liquidStaking', 'jupiter', 'kamino', 'raydium',
-      'nativeStake', 'orca', 'meteora', 'marginfi', 'helius',
-    ];
     const allPositions: DeFiPosition[] = [];
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
@@ -78,42 +76,55 @@ export class DeFiDetector {
 
   /**
    * Use Helius Enhanced Transactions API to discover DeFi protocol interactions.
+   * Paginates up to 3 pages (150 txs) using cursor-based pagination.
    * Returns positions for protocols where the wallet has recent activity.
    */
   private async detectViaHelius(wallet: PublicKey): Promise<DeFiPosition[]> {
     if (!this.heliusApiKey) return [];
 
     try {
-      const url = `https://api-devnet.helius-rpc.com/v0/addresses/${wallet.toString()}/transactions/?api-key=${this.heliusApiKey}&limit=50`;
-      const response = await fetch(url);
-      if (!response.ok) return [];
-
-      const transactions: any[] = await response.json();
       const discoveredProtocols = new Set<string>();
       const positions: DeFiPosition[] = [];
+      let beforeSig: string | undefined;
+      const MAX_PAGES = 3;
 
-      for (const tx of transactions) {
-        const source = tx.source;
-        if (!source) continue;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        let url = `${HELIUS_ENHANCED_API}/addresses/${wallet.toString()}/transactions/?api-key=${this.heliusApiKey}&limit=50&commitment=confirmed`;
+        if (beforeSig) {
+          url += `&before-signature=${beforeSig}`;
+        }
 
-        const protocol = HELIUS_SOURCE_MAP[source];
-        if (!protocol || discoveredProtocols.has(protocol)) continue;
+        const response = await fetchWithRetry(url);
+        if (!response.ok) break;
 
-        discoveredProtocols.add(protocol);
-        // We add a lightweight "activity detected" position for protocols
-        // where we found transaction history but no on-chain position.
-        // These will be deduplicated against actual positions found above.
-        positions.push({
-          protocol,
-          type: 'activity_detected',
-          description: `Recent ${source.toLowerCase()} activity detected via transaction history`,
-          estimatedValueUsd: 0,
-          estimatedValueSol: 0,
-          tokens: [],
-          action: 'ignore',
-          accountAddress: wallet, // placeholder — will be deduped if real position exists
-          closureStrategy: 'unsupported',
-        });
+        const transactions: HeliusEnhancedTransaction[] = await response.json();
+        if (transactions.length === 0) break;
+
+        for (const tx of transactions) {
+          const source = tx.source;
+          if (!source) continue;
+
+          const protocol = HELIUS_SOURCE_MAP[source];
+          if (!protocol || discoveredProtocols.has(protocol)) continue;
+
+          discoveredProtocols.add(protocol);
+          positions.push({
+            protocol,
+            type: 'activity_detected',
+            description: `Recent ${source.toLowerCase()} activity detected via transaction history`,
+            estimatedValueUsd: 0,
+            estimatedValueSol: 0,
+            tokens: [],
+            action: 'ignore',
+            accountAddress: wallet,
+            closureStrategy: 'unsupported',
+          });
+        }
+
+        // Set cursor for next page
+        const lastTx = transactions[transactions.length - 1];
+        beforeSig = lastTx?.signature;
+        if (!beforeSig || transactions.length < 50) break;
       }
 
       return positions;
