@@ -33,6 +33,18 @@ dead-mans-vault/.yarn
 dead-mans-vault/app/node_modules
 dead-mans-vault/app/.expo
 
+# Claude Code configuration
+.claude/
+
+# APK binaries
+*.apk
+
+# Test screenshots
+dead-mans-vault/tests/Screenshot_*
+
+# Scripts with test keypairs
+dead-mans-vault/scripts/
+
 # IDE
 .DS_Store
 .idea/
