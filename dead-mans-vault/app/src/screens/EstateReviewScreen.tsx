@@ -10,7 +10,7 @@ import {
   Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Transaction } from '@solana/web3.js';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVaultStore } from '../store/useVaultStore';
 import { useWallet } from '../hooks/useWallet';
@@ -68,8 +68,17 @@ export function EstateReviewScreen() {
       const txService = new VaultTransactionService();
       const connection = txService.getConnection();
 
+      const onChainBeneficiaries = beneficiaries.map((b) => ({
+        wallet: new PublicKey(b.wallet.toBase58()),
+        shareBps: b.shareBps,
+        hasSpecificAssets: b.hasSpecificAssets,
+      }));
+
+      // Check for existing on-chain vault
       const [vaultPda] = txService.getVaultPDA(publicKey);
       const existingAccount = await connection.getAccountInfo(vaultPda);
+      let tx: Transaction;
+
       if (existingAccount && existingAccount.data.length > 0) {
         let existingVault = await txService.fetchVaultConfig(publicKey);
         if (!existingVault && existingAccount.data.length >= 92) {
@@ -78,26 +87,35 @@ export function EstateReviewScreen() {
           );
         }
         if (existingVault) {
-          useVaultStore.getState().setRevoked(false);
-          setVaultConfig(existingVault);
+          if (existingVault.active && !existingVault.executed) {
+            // Active vault exists — sync to device and navigate
+            useVaultStore.getState().setRevoked(false);
+            setVaultConfig(existingVault);
+            Alert.alert('Vault Active', 'An active vault already exists on-chain. Synced to device.', [
+              { text: 'OK', onPress: () => { navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },
+            ]);
+            return;
+          } else if (existingVault.executed) {
+            // Executed vault — cannot re-use this PDA
+            Alert.alert('Vault Executed', 'This vault has already been executed and cannot be re-used.', [
+              { text: 'OK', onPress: () => navigation.popToTop() },
+            ]);
+            return;
+          }
+          // Revoked zombie vault — atomic close + reinit in single transaction
+          tx = await txService.buildCloseAndReinitVaultTx(
+            publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
+          );
         } else {
-          setSetupComplete(true);
+          tx = await txService.buildInitializeVaultTx(
+            publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
+          );
         }
-        Alert.alert('Success', 'Vault already active on-chain! Synced to device.', [
-          { text: 'OK', onPress: () => { navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },
-        ]);
-        return;
+      } else {
+        tx = await txService.buildInitializeVaultTx(
+          publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
+        );
       }
-
-      const onChainBeneficiaries = beneficiaries.map((b) => ({
-        wallet: new PublicKey(b.wallet.toBase58()),
-        shareBps: b.shareBps,
-        hasSpecificAssets: b.hasSpecificAssets,
-      }));
-
-      const tx = await txService.buildInitializeVaultTx(
-        publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
-      );
 
       tx.feePayer = publicKey;
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
@@ -126,14 +144,18 @@ export function EstateReviewScreen() {
           const recoveryService = new VaultTransactionService();
           const vault = await recoveryService.fetchVaultConfig(publicKey);
           if (vault) {
-            useVaultStore.getState().setRevoked(false);
-            setVaultConfig(vault);
+            if (vault.active && !vault.executed) {
+              useVaultStore.getState().setRevoked(false);
+              setVaultConfig(vault);
+              Alert.alert('Vault Active', 'An active vault already exists on-chain. Synced to device.', [
+                { text: 'OK', onPress: () => { navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },
+              ]);
+              return;
+            } else if (!vault.active && !vault.executed) {
+              Alert.alert('Retry Required', 'A revoked vault was found. Please try activating again to clean it up.');
+              return;
+            }
           }
-          setSetupComplete(true);
-          Alert.alert('Success', 'Vault already active on-chain! Synced to device.', [
-            { text: 'OK', onPress: () => { navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },
-          ]);
-          return;
         } catch { /* fallthrough */ }
       }
       if (msg.includes('CancellationException') || msg.includes('cancelled')) {

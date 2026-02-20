@@ -14,6 +14,78 @@ export type DeadMansVault = {
   },
   "instructions": [
     {
+      "name": "closeRevokedVault",
+      "discriminator": [
+        133,
+        1,
+        201,
+        37,
+        182,
+        253,
+        224,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vaultConfig"
+          ]
+        },
+        {
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "executeDistribution",
       "discriminator": [
         163,
@@ -35,7 +107,26 @@ export type DeadMansVault = {
         },
         {
           "name": "vaultConfig",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
         },
         {
           "name": "heartbeatRecord",
@@ -150,7 +241,26 @@ export type DeadMansVault = {
             "The vault PDA holds both config data AND deposited SOL.",
             "Lamports above rent-exemption are available for distribution."
           ],
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
         },
         {
           "name": "heartbeatRecord",
@@ -298,7 +408,26 @@ export type DeadMansVault = {
         },
         {
           "name": "vaultConfig",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
         },
         {
           "name": "heartbeatRecord",
@@ -444,8 +573,9 @@ export type DeadMansVault = {
         {
           "name": "owner",
           "docs": [
-            "Only the owner can revoke"
+            "Only the owner can revoke; receives rent refund from closed accounts"
           ],
+          "writable": true,
           "signer": true,
           "relations": [
             "vaultConfig"
@@ -453,7 +583,51 @@ export type DeadMansVault = {
         },
         {
           "name": "vaultConfig",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
         }
       ],
       "args": []
@@ -488,7 +662,29 @@ export type DeadMansVault = {
         },
         {
           "name": "heartbeatRecord",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -661,6 +857,11 @@ export type DeadMansVault = {
       "code": 6016,
       "name": "insufficientVaultBalance",
       "msg": "Insufficient SOL in vault for distribution"
+    },
+    {
+      "code": 6017,
+      "name": "vaultStillActive",
+      "msg": "Vault is still active — revoke it first"
     }
   ],
   "types": [

@@ -52,4 +52,7 @@ pub enum VaultError {
 
     #[msg("Insufficient SOL in vault for distribution")]
     InsufficientVaultBalance,
+
+    #[msg("Vault is still active — revoke it first")]
+    VaultStillActive,
 }

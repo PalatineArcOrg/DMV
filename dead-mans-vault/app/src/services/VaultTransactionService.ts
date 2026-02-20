@@ -355,6 +355,7 @@ export class VaultTransactionService {
 
   async buildRevokeVaultTx(owner: PublicKey): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
 
     const readonlyWallet = {
       publicKey: owner,
@@ -371,10 +372,92 @@ export class VaultTransactionService {
       .accountsPartial({
         owner,
         vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
       })
       .transaction();
 
-    return this.addPriorityFee(tx, [owner, vaultPda], 80_000);
+    return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 120_000);
+  }
+
+  async buildCloseRevokedVaultTx(owner: PublicKey): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+
+    const readonlyWallet = {
+      publicKey: owner,
+      signTransaction: async (tx: Transaction) => tx,
+      signAllTransactions: async (txs: Transaction[]) => txs,
+    };
+    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+      commitment: 'confirmed',
+    });
+    const program = new Program<DeadMansVault>(idl as any, provider);
+
+    const tx = await program.methods
+      .closeRevokedVault()
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+      })
+      .transaction();
+
+    return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 100_000);
+  }
+
+  /**
+   * Atomic close-then-reinit: closes a revoked zombie vault and re-initializes
+   * in a single transaction. If either instruction fails, the entire tx reverts.
+   * Single MWA approval required.
+   */
+  async buildCloseAndReinitVaultTx(
+    owner: PublicKey,
+    agentPubkey: PublicKey,
+    heartbeatInterval: number,
+    gracePeriod: number,
+    beneficiaries: { wallet: PublicKey; shareBps: number; hasSpecificAssets: boolean }[],
+    isMutable: boolean = true,
+  ): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+
+    const readonlyWallet = {
+      publicKey: owner,
+      signTransaction: async (tx: Transaction) => tx,
+      signAllTransactions: async (txs: Transaction[]) => txs,
+    };
+    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+      commitment: 'confirmed',
+    });
+    const program = new Program<DeadMansVault>(idl as any, provider);
+
+    const closeIx = await program.methods
+      .closeRevokedVault()
+      .accountsPartial({ owner, vaultConfig: vaultPda, heartbeatRecord: heartbeatPda })
+      .instruction();
+
+    const initIx = await program.methods
+      .initializeVault({
+        agentPubkey,
+        heartbeatInterval: new BN(heartbeatInterval),
+        gracePeriod: new BN(gracePeriod),
+        beneficiaries: beneficiaries.map((b) => ({
+          wallet: b.wallet,
+          shareBps: b.shareBps,
+          hasSpecificAssets: b.hasSpecificAssets,
+        })),
+        isMutable,
+      })
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction();
+
+    const tx = new Transaction().add(closeIx, initIx);
+    return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 350_000);
   }
 
   async buildUpdateVaultTx(

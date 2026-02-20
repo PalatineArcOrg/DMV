@@ -573,21 +573,24 @@ describe("dead-mans-vault", () => {
 
   // ─── Revoke Vault ───
 
-  it("allows owner to revoke vault", async () => {
-    // First revoke
+  it("allows owner to revoke vault (closes accounts)", async () => {
     await program.methods
       .revokeVault()
       .accounts({
         owner: owner.publicKey,
         vaultConfig: vaultConfigPda,
+        heartbeatRecord: heartbeatRecordPda,
       })
       .rpc();
 
-    const vault = await program.account.vaultConfig.fetch(vaultConfigPda);
-    expect(vault.active).to.be.false;
+    // Both accounts should be closed (null)
+    const vaultAccount = await provider.connection.getAccountInfo(vaultConfigPda);
+    expect(vaultAccount).to.be.null;
+    const heartbeatAccount = await provider.connection.getAccountInfo(heartbeatRecordPda);
+    expect(heartbeatAccount).to.be.null;
   });
 
-  it("rejects heartbeat on inactive vault", async () => {
+  it("rejects heartbeat on closed vault", async () => {
     try {
       await program.methods
         .recordHeartbeat({ activeTap: {} })
@@ -598,13 +601,14 @@ describe("dead-mans-vault", () => {
         })
         .signers([agent])
         .rpc();
-      expect.fail("Should have thrown VaultInactive");
+      expect.fail("Should have thrown");
     } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("VaultInactive");
+      // Closed account → AccountNotInitialized
+      expect(err.toString()).to.include("AccountNotInitialized");
     }
   });
 
-  it("rejects rotation on inactive vault", async () => {
+  it("rejects rotation on closed vault", async () => {
     const newAgent = anchor.web3.Keypair.generate();
     try {
       await program.methods
@@ -615,10 +619,51 @@ describe("dead-mans-vault", () => {
           heartbeatRecord: heartbeatRecordPda,
         })
         .rpc();
-      expect.fail("Should have thrown VaultInactive");
+      expect.fail("Should have thrown");
     } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("VaultInactive");
+      expect(err.toString()).to.include("AccountNotInitialized");
     }
+  });
+
+  it("allows re-initialization after revoke", async () => {
+    // Shared vault was closed by revoke above — re-init on the same PDA
+    const newAgent = anchor.web3.Keypair.generate();
+    await program.methods
+      .initializeVault({
+        agentPubkey: newAgent.publicKey,
+        heartbeatInterval: new anchor.BN(86400),
+        gracePeriod: new anchor.BN(604800),
+        beneficiaries: [
+          {
+            wallet: beneficiary1.publicKey,
+            shareBps: 10000,
+            hasSpecificAssets: false,
+          },
+        ],
+        isMutable: true,
+      })
+      .accounts({
+        owner: owner.publicKey,
+        vaultConfig: vaultConfigPda,
+        heartbeatRecord: heartbeatRecordPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const vault = await program.account.vaultConfig.fetch(vaultConfigPda);
+    expect(vault.active).to.be.true;
+    expect(vault.agentPubkey.toString()).to.equal(newAgent.publicKey.toString());
+    expect(vault.beneficiaries.length).to.equal(1);
+
+    // Revoke again to leave clean state (closed) for subsequent tests
+    await program.methods
+      .revokeVault()
+      .accounts({
+        owner: owner.publicKey,
+        vaultConfig: vaultConfigPda,
+        heartbeatRecord: heartbeatRecordPda,
+      })
+      .rpc();
   });
 
   it("rejects revoke from non-owner", async () => {
@@ -666,6 +711,7 @@ describe("dead-mans-vault", () => {
         .accounts({
           owner: impostor.publicKey,
           vaultConfig: newVaultPda,
+          heartbeatRecord: newHeartbeatPda,
         })
         .signers([impostor])
         .rpc();
@@ -920,6 +966,7 @@ describe("dead-mans-vault", () => {
         .accounts({
           owner: immOwner2.publicKey,
           vaultConfig: immVaultPda2,
+          heartbeatRecord: immHeartbeatPda2,
         })
         .signers([immOwner2])
         .rpc();
@@ -931,7 +978,7 @@ describe("dead-mans-vault", () => {
 
   // ─── Record Execution on Inactive Vault ───
 
-  it("rejects record_execution on inactive vault", async () => {
+  it("rejects record_execution on closed vault", async () => {
     const inactiveOwner = anchor.web3.Keypair.generate();
     await airdrop(provider, inactiveOwner.publicKey, 1);
     const inactiveAgent = anchor.web3.Keypair.generate();
@@ -973,17 +1020,18 @@ describe("dead-mans-vault", () => {
       .signers([inactiveOwner])
       .rpc();
 
-    // Revoke the vault
+    // Revoke the vault (closes both accounts)
     await program.methods
       .revokeVault()
       .accounts({
         owner: inactiveOwner.publicKey,
         vaultConfig: inactiveVaultPda,
+        heartbeatRecord: inactiveHeartbeatPda,
       })
       .signers([inactiveOwner])
       .rpc();
 
-    // Try record_execution on inactive vault — should fail
+    // Try record_execution on closed vault — should fail
     try {
       await program.methods
         .recordExecution({
@@ -1003,15 +1051,16 @@ describe("dead-mans-vault", () => {
         })
         .signers([inactiveAgent, inactiveOwner])
         .rpc();
-      expect.fail("Should have thrown VaultInactive");
+      expect.fail("Should have thrown");
     } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("VaultInactive");
+      // Closed account → AccountNotInitialized
+      expect(err.toString()).to.include("AccountNotInitialized");
     }
   });
 
-  // ─── Revoke Already Inactive ───
+  // ─── Revoke Already Closed ───
 
-  it("rejects revoking an already inactive vault", async () => {
+  it("rejects revoking an already closed vault", async () => {
     const revOwner = anchor.web3.Keypair.generate();
     await airdrop(provider, revOwner.publicKey, 1);
     const revAgent = anchor.web3.Keypair.generate();
@@ -1049,29 +1098,88 @@ describe("dead-mans-vault", () => {
       .signers([revOwner])
       .rpc();
 
-    // First revoke — should succeed
+    // First revoke — closes accounts
     await program.methods
       .revokeVault()
       .accounts({
         owner: revOwner.publicKey,
         vaultConfig: revVaultPda,
+        heartbeatRecord: revHeartbeatPda,
       })
       .signers([revOwner])
       .rpc();
 
-    // Second revoke — should fail with VaultInactive
+    // Second revoke — account doesn't exist
     try {
       await program.methods
         .revokeVault()
         .accounts({
           owner: revOwner.publicKey,
           vaultConfig: revVaultPda,
+          heartbeatRecord: revHeartbeatPda,
         })
         .signers([revOwner])
         .rpc();
-      expect.fail("Should have thrown VaultInactive");
+      expect.fail("Should have thrown");
     } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("VaultInactive");
+      expect(err.toString()).to.include("AccountNotInitialized");
+    }
+  });
+
+  // ─── Close Revoked Vault ───
+
+  it("rejects close_revoked_vault on active vault", async () => {
+    const crvOwner = anchor.web3.Keypair.generate();
+    await airdrop(provider, crvOwner.publicKey, 1);
+    const crvAgent = anchor.web3.Keypair.generate();
+
+    const [crvVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), crvOwner.publicKey.toBuffer()],
+      program.programId
+    );
+    const [crvHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("heartbeat"), crvVaultPda.toBuffer()],
+      program.programId
+    );
+
+    // Initialize (active vault)
+    await program.methods
+      .initializeVault({
+        agentPubkey: crvAgent.publicKey,
+        heartbeatInterval: new anchor.BN(86400),
+        gracePeriod: new anchor.BN(604800),
+        beneficiaries: [
+          {
+            wallet: beneficiary1.publicKey,
+            shareBps: 10000,
+            hasSpecificAssets: false,
+          },
+        ],
+        isMutable: true,
+      })
+      .accounts({
+        owner: crvOwner.publicKey,
+        vaultConfig: crvVaultPda,
+        heartbeatRecord: crvHeartbeatPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([crvOwner])
+      .rpc();
+
+    // Try to close an active vault — should fail with VaultStillActive
+    try {
+      await program.methods
+        .closeRevokedVault()
+        .accounts({
+          owner: crvOwner.publicKey,
+          vaultConfig: crvVaultPda,
+          heartbeatRecord: crvHeartbeatPda,
+        })
+        .signers([crvOwner])
+        .rpc();
+      expect.fail("Should have thrown VaultStillActive");
+    } catch (err: any) {
+      expect(err.error.errorCode.code).to.equal("VaultStillActive");
     }
   });
 });

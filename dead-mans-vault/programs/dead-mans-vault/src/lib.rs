@@ -60,6 +60,10 @@ pub mod dead_mans_vault {
         instructions::revoke_vault::handler(ctx)
     }
 
+    pub fn close_revoked_vault(ctx: Context<CloseRevokedVault>) -> Result<()> {
+        instructions::close_revoked_vault::handler(ctx)
+    }
+
     pub fn rotate_agent(
         ctx: Context<RotateAgent>,
         new_agent_pubkey: Pubkey,

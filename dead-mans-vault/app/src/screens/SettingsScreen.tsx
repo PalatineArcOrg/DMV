@@ -113,7 +113,7 @@ export function SettingsScreen() {
                 useHeartbeatStore.getState().reset();
                 useEscalationStore.getState().reset();
 
-                Alert.alert('Vault Revoked', `Vault deactivated on-chain.\n\nTx: ${txSig.slice(0, 20)}...`, [
+                Alert.alert('Vault Revoked', `Vault closed and rent reclaimed.\n\nTx: ${txSig.slice(0, 20)}...`, [
                   { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
                   { text: 'OK' },
                 ]);
