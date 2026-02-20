@@ -39,23 +39,7 @@ export function SettingsScreen() {
     ? vaultConfig.owner.toBase58() === publicKey.toBase58()
     : false;
 
-  // Load vault config from on-chain when screen gains focus (ensures isOwner is accurate)
-  useFocusEffect(
-    useCallback(() => {
-      if (connected && publicKey && !vaultConfig) {
-        (async () => {
-          try {
-            const { VaultTransactionService } = require('../services/VaultTransactionService');
-            const txService = new VaultTransactionService();
-            const vault = await txService.fetchVaultConfig(publicKey);
-            if (vault) {
-              useVaultStore.getState().setVaultConfig(vault);
-            }
-          } catch {}
-        })();
-      }
-    }, [connected, publicKey, vaultConfig]),
-  );
+
 
   const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
 

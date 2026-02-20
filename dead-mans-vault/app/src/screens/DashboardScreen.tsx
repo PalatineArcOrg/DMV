@@ -169,13 +169,12 @@ export function DashboardScreen() {
     }
   }, [publicKey, fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA]);
 
-  // Detect wallet switch — reset vault state when wallet changes
+  // Reset local screen state on wallet switch (global store reset handled by RootNavigator)
   useEffect(() => {
     const currentKey = publicKey?.toBase58() ?? '';
     if (prevPublicKey.current && currentKey && prevPublicKey.current !== currentKey) {
       setVaultData(null);
       setHeartbeatData(null);
-      useVaultStore.getState().resetForWalletSwitch();
     }
     prevPublicKey.current = currentKey;
   }, [publicKey]);

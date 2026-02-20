@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -13,6 +13,10 @@ import { DeFiPositionsScreen } from '../screens/DeFiPositionsScreen';
 import { EstateReviewScreen } from '../screens/EstateReviewScreen';
 import { AssetsScreen } from '../screens/AssetsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { useWallet } from '../hooks/useWallet';
+import { useVaultStore } from '../store/useVaultStore';
+import { useHeartbeatStore } from '../store/useHeartbeatStore';
+import { useEscalationStore } from '../store/useEscalationStore';
 import { COLORS, FONTS } from '../utils/constants';
 
 const Tab = createBottomTabNavigator();
@@ -115,6 +119,48 @@ const DMVDarkTheme = {
 };
 
 export function RootNavigator() {
+  const { publicKey, connected } = useWallet();
+  const prevPkRef = useRef(publicKey?.toBase58() ?? '');
+
+  // Global wallet-change detection — resets all stores on disconnect or wallet switch
+  useEffect(() => {
+    const currentKey = publicKey?.toBase58() ?? '';
+
+    if (!connected || !currentKey) {
+      // Wallet disconnected — clear everything
+      if (prevPkRef.current) {
+        useVaultStore.getState().resetForWalletSwitch();
+        useHeartbeatStore.getState().reset();
+        useEscalationStore.getState().reset();
+      }
+      prevPkRef.current = '';
+      return;
+    }
+
+    if (prevPkRef.current && prevPkRef.current !== currentKey) {
+      // Switched to a different wallet — reset then fetch new vault
+      useVaultStore.getState().resetForWalletSwitch();
+      useHeartbeatStore.getState().reset();
+      useEscalationStore.getState().reset();
+    }
+
+    // Fetch vault config for the connected wallet
+    if (prevPkRef.current !== currentKey || !useVaultStore.getState().vaultConfig) {
+      (async () => {
+        try {
+          const { VaultTransactionService } = require('../services/VaultTransactionService');
+          const txService = new VaultTransactionService();
+          const vault = await txService.fetchVaultConfig(publicKey!);
+          if (vault) {
+            useVaultStore.getState().setVaultConfig(vault);
+          }
+        } catch {}
+      })();
+    }
+
+    prevPkRef.current = currentKey;
+  }, [connected, publicKey]);
+
   return (
     <NavigationContainer theme={DMVDarkTheme}>
       <Tab.Navigator

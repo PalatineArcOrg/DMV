@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useMemo } from 'react';
+import React, { useCallback, useRef, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -18,18 +18,6 @@ export function SetupWizardScreen() {
   const escalationStage = useEscalationStore((s) => s.state.stage);
 
   const skipAutoSync = useRef(false);
-  const prevPkRef = useRef(publicKey?.toBase58() ?? '');
-
-  // Detect wallet switch — reset stale vault state
-  useEffect(() => {
-    const currentKey = publicKey?.toBase58() ?? '';
-    if (prevPkRef.current && currentKey && prevPkRef.current !== currentKey) {
-      useVaultStore.getState().resetForWalletSwitch();
-      useHeartbeatStore.getState().reset();
-      useEscalationStore.getState().reset();
-    }
-    prevPkRef.current = currentKey;
-  }, [publicKey]);
 
   // Ownership check: only show post-setup view if vault belongs to current wallet
   const isActuallySetup = useMemo(() => {
