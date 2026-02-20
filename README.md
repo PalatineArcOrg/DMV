@@ -36,6 +36,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Stage 4 is
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
 - **Autonomous execution** -- Agent key (TEE-stored) handles distribution without user interaction at Stage 4
 - **Idempotent crash recovery** -- Every execution step checkpointed to SQLite before proceeding
+- **Clean vault lifecycle** -- Revoking closes on-chain PDAs and reclaims rent; re-initialization on the same wallet works atomically
 
 ### Portfolio & DeFi
 - **Live portfolio tracking** -- Token balances via Helius DAS API, USD prices via dual oracle (Pyth Hermes + Jupiter fallback), 24h price changes
@@ -126,7 +127,8 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 | `execute_distribution` | Agent | Transfer SOL to a beneficiary (BN precision arithmetic) |
 | `record_execution` | Agent | Create immutable execution log, deactivate vault |
 | `rotate_agent` | Owner | Rotate agent key (device migration) with 5 security guards |
-| `revoke_vault` | Owner | Emergency deactivation. Blocked on immutable vaults |
+| `revoke_vault` | Owner | Close vault + heartbeat PDAs, reclaim rent. Blocked on immutable vaults |
+| `close_revoked_vault` | Owner | Clean up zombie vaults revoked under older program versions |
 
 All transactions include per-instruction compute unit limits and dynamic priority fees for reliable landing.
 
@@ -140,11 +142,11 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 ### Error Codes
 
-15 custom error codes covering: interval validation, share allocation, signer authorization, vault state guards, beneficiary whitelist enforcement, and immutability protection.
+16 custom error codes covering: interval validation, share allocation, signer authorization, vault state guards, beneficiary whitelist enforcement, immutability protection, and vault lifecycle management.
 
 ### Tests
 
-23/23 tests passing -- covers happy paths, all error cases, rotate_agent security guards, execution flow, and double-execution prevention.
+30/30 tests passing -- covers happy paths, all error cases, rotate_agent security guards, execution flow, double-execution prevention, vault revoke/close lifecycle, and re-initialization after revoke.
 
 ---
 
@@ -217,11 +219,11 @@ React Native's Hermes runtime requires several workarounds:
 ```
 dead-mans-vault/
 +-- programs/dead-mans-vault/src/    # Anchor program (Rust)
-|   +-- instructions/                # 7 instruction handlers
+|   +-- instructions/                # 8 instruction handlers
 |   +-- state/                       # Account definitions
-|   +-- errors.rs                    # 15 error codes
+|   +-- errors.rs                    # 16 error codes
 |   +-- constants.rs                 # On-chain constants
-+-- tests/                           # Anchor program tests (23/23 passing)
++-- tests/                           # Anchor program tests (30/30 passing)
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
         +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.

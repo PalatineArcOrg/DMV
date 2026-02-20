@@ -50,10 +50,20 @@ export const useVaultStore = create<VaultStore>((set) => ({
   setVaultConfig: (config) =>
     set((state) => {
       if (state.isRevoked) return {};
+      const onChain = config?.beneficiaries ?? [];
+      const merged = onChain.map((ob: any, i: number) => {
+        const localMatch = state.beneficiaries.find(
+          (lb) => lb.wallet.toString() === ob.wallet.toString(),
+        );
+        return {
+          ...ob,
+          label: localMatch?.label || ob.label || `Beneficiary ${i + 1}`,
+        };
+      });
       return {
         vaultConfig: config,
         isSetupComplete: config !== null && config.active === true && config.executed !== true,
-        beneficiaries: config?.beneficiaries ?? [],
+        beneficiaries: merged,
       };
     }),
   setRevoked: (revoked) => set({ isRevoked: revoked }),

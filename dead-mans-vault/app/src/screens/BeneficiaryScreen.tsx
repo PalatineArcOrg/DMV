@@ -7,6 +7,8 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { PublicKey } from '@solana/web3.js';
@@ -23,13 +25,14 @@ export function BeneficiaryScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const fromSettings = route.params?.fromSettings ?? false;
-  const { publicKey } = useWallet();
+  const { publicKey, signTransaction } = useWallet();
   const { beneficiaries, addBeneficiary, removeBeneficiary, updateBeneficiary } = useVaultStore();
 
   const [label, setLabel] = useState('');
   const [walletAddress, setWalletAddress] = useState('');
   const [sharePercent, setSharePercent] = useState('');
   const [editingWallet, setEditingWallet] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const totalBps = beneficiaries.reduce((sum, b) => sum + b.shareBps, 0);
   const totalPercent = totalBps / 100;
@@ -90,11 +93,71 @@ export function BeneficiaryScreen() {
   const handleContinue = useCallback(() => {
     if (!isValid) { Alert.alert('Error', 'Shares must sum to exactly 100%.'); return; }
     if (fromSettings) {
-      navigation.goBack();
-    } else {
-      navigation.navigate('HeartbeatConfig');
+      Alert.alert(
+        'Update Vault On-Chain?',
+        `Update vault with ${beneficiaries.length} beneficiar${beneficiaries.length === 1 ? 'y' : 'ies'}. You will need to sign the transaction.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Update',
+            onPress: async () => {
+              if (!publicKey) return;
+              setIsUpdating(true);
+              try {
+                const { VaultTransactionService } = require('../services/VaultTransactionService');
+                const txService = new VaultTransactionService();
+                const connection = txService.getConnection();
+
+                const onChainBeneficiaries = beneficiaries.map((b: any) => ({
+                  wallet: new PublicKey(b.wallet.toBase58()),
+                  shareBps: b.shareBps,
+                  hasSpecificAssets: b.hasSpecificAssets,
+                }));
+
+                const tx = await txService.buildUpdateVaultTx(publicKey, {
+                  beneficiaries: onChainBeneficiaries,
+                });
+                tx.feePayer = publicKey;
+                const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+                tx.recentBlockhash = blockhash;
+
+                const signedTx = await signTransaction(tx);
+                const txSig = await connection.sendRawTransaction(signedTx.serialize(), {
+                  skipPreflight: false,
+                  preflightCommitment: 'confirmed',
+                });
+                await connection.confirmTransaction(
+                  { signature: txSig, blockhash, lastValidBlockHeight },
+                  'confirmed',
+                );
+
+                const updatedVault = await txService.fetchVaultConfig(publicKey);
+                if (updatedVault) {
+                  useVaultStore.getState().setVaultConfig(updatedVault);
+                }
+
+                Alert.alert('Vault Updated', `Beneficiaries updated on-chain.\n\nTx: ${txSig.slice(0, 20)}...`, [
+                  { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
+                  { text: 'OK', onPress: () => navigation.navigate('Settings') },
+                ]);
+              } catch (err: any) {
+                const msg = err.message || String(err);
+                if (msg.includes('CancellationException') || msg.includes('cancelled')) {
+                  Alert.alert('Cancelled', 'Wallet signing was cancelled.');
+                } else {
+                  Alert.alert('Error', msg);
+                }
+              } finally {
+                setIsUpdating(false);
+              }
+            },
+          },
+        ],
+      );
+      return;
     }
-  }, [isValid, navigation, fromSettings]);
+    navigation.navigate('HeartbeatConfig');
+  }, [isValid, navigation, fromSettings, publicKey, beneficiaries, signTransaction]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -173,12 +236,18 @@ export function BeneficiaryScreen() {
 
       {/* Footer */}
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => fromSettings ? navigation.navigate('Settings') : navigation.goBack()}>
           <MaterialCommunityIcons name="arrow-left" size={18} color="rgba(255,255,255,0.5)" />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.continueBtn, !isValid && { opacity: 0.4 }]} onPress={handleContinue} disabled={!isValid}>
-          <Text style={styles.continueBtnText}>Continue</Text>
-          <MaterialCommunityIcons name="arrow-right" size={16} color={COLORS.bg} />
+        <TouchableOpacity style={[styles.continueBtn, (!isValid || isUpdating) && { opacity: 0.4 }]} onPress={handleContinue} disabled={!isValid || isUpdating}>
+          {isUpdating ? (
+            <ActivityIndicator size="small" color={COLORS.bg} />
+          ) : (
+            <>
+              <Text style={styles.continueBtnText}>{fromSettings ? 'Update Vault' : 'Continue'}</Text>
+              <MaterialCommunityIcons name={fromSettings ? 'upload' : 'arrow-right'} size={16} color={COLORS.bg} />
+            </>
+          )}
         </TouchableOpacity>
       </View>
 

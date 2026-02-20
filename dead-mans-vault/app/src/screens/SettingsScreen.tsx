@@ -34,7 +34,6 @@ export function SettingsScreen() {
   const { isAuthEnabled, setAuthEnabled } = useAuthStore();
   const [copied, setCopied] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
 
   const isOwner = vaultConfig?.owner && publicKey
     ? vaultConfig.owner.toBase58() === publicKey.toBase58()
@@ -145,85 +144,11 @@ export function SettingsScreen() {
   }, [publicKey, signTransaction]);
 
   const handleEditBeneficiaries = useCallback(() => {
-    navigation.getParent()?.navigate('Setup', {
+    navigation.navigate('Setup', {
       screen: 'Beneficiaries',
       params: { fromSettings: true },
     });
   }, [navigation]);
-
-  const handleUpdateVault = useCallback(async () => {
-    if (!publicKey || beneficiaries.length === 0) return;
-
-    Alert.alert(
-      'Update Vault On-Chain?',
-      `This will update your vault with ${beneficiaries.length} beneficiaries on-chain. You will need to sign the transaction.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Update',
-          onPress: async () => {
-            setIsUpdating(true);
-            try {
-              const { VaultTransactionService } = require('../services/VaultTransactionService');
-              const { PublicKey: PK } = require('@solana/web3.js');
-              const txService = new VaultTransactionService();
-              const connection = txService.getConnection();
-
-              const existingVault = await txService.fetchVaultConfig(publicKey);
-              if (existingVault && existingVault.owner && existingVault.owner.toBase58() !== publicKey.toBase58()) {
-                Alert.alert('Not Owner', 'This vault belongs to a different wallet.');
-                setIsUpdating(false);
-                return;
-              }
-
-              const onChainBeneficiaries = beneficiaries.map((b: any) => ({
-                wallet: new PK(b.wallet.toBase58()),
-                shareBps: b.shareBps,
-                hasSpecificAssets: b.hasSpecificAssets,
-              }));
-
-              const tx = await txService.buildUpdateVaultTx(publicKey, {
-                beneficiaries: onChainBeneficiaries,
-              });
-              tx.feePayer = publicKey;
-              const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-              tx.recentBlockhash = blockhash;
-
-              const signedTx = await signTransaction(tx);
-              const txSig = await connection.sendRawTransaction(signedTx.serialize(), {
-                skipPreflight: false,
-                preflightCommitment: 'confirmed',
-              });
-              await connection.confirmTransaction(
-                { signature: txSig, blockhash, lastValidBlockHeight },
-                'confirmed',
-              );
-
-              // Refresh vault config
-              const updatedVault = await txService.fetchVaultConfig(publicKey);
-              if (updatedVault) {
-                useVaultStore.getState().setVaultConfig(updatedVault);
-              }
-
-              Alert.alert('Vault Updated', `Beneficiaries updated on-chain.\n\nTx: ${txSig.slice(0, 20)}...`, [
-                { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
-                { text: 'OK' },
-              ]);
-            } catch (err: any) {
-              const msg = err.message || String(err);
-              if (msg.includes('CancellationException') || msg.includes('cancelled')) {
-                Alert.alert('Cancelled', 'Wallet signing was cancelled.');
-              } else {
-                Alert.alert('Error', msg);
-              }
-            } finally {
-              setIsUpdating(false);
-            }
-          },
-        },
-      ],
-    );
-  }, [publicKey, beneficiaries, signTransaction]);
 
   const handleAuthToggle = useCallback(async (enabled: boolean) => {
     if (enabled) {
@@ -367,18 +292,6 @@ export function SettingsScreen() {
                   <MaterialCommunityIcons name="account-edit" size={15} color={COLORS.solanaPurple} />
                 </View>
                 <Text style={[styles.actionLabel, { color: COLORS.solanaPurple }]}>Edit Beneficiaries</Text>
-                <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
-              </TouchableOpacity>
-              <View style={styles.rowDivider} />
-              <TouchableOpacity style={styles.actionRow} onPress={handleUpdateVault} disabled={isUpdating}>
-                <View style={[styles.actionIcon, { backgroundColor: 'rgba(0,212,180,0.12)', borderColor: 'rgba(0,212,180,0.25)' }]}>
-                  {isUpdating ? (
-                    <ActivityIndicator size="small" color={COLORS.accent} />
-                  ) : (
-                    <MaterialCommunityIcons name="upload" size={15} color={COLORS.accent} />
-                  )}
-                </View>
-                <Text style={[styles.actionLabel, { color: COLORS.accent }]}>Update Vault On-Chain</Text>
                 <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
               </TouchableOpacity>
             </>
