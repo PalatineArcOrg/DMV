@@ -82,14 +82,15 @@ export function HeartbeatButton({
   const pulseOpacities = [pulseOpacity0, pulseOpacity1, pulseOpacity2];
 
   const showEcg = stage === 4;
-  const showRingPulse = stage >= 1 && stage <= 3;
+  const showRingPulse = stage >= 0 && stage <= 3;
 
-  // Pulse ring animation — only stages 1-3
+  // Pulse ring animation — stages 1-3 continuous loop
   useEffect(() => {
-    // Stage 0 uses ECG, stage 4 uses flatline — no ring animation for either
-    if (!showRingPulse) {
+    if (stage < 1 || stage > 3) {
+      // S0: rings start invisible (driven by beat effect)
+      // S4+: no rings
       pulseScales.forEach(s => s.setValue(1));
-      pulseOpacities.forEach((o, i) => o.setValue(0.4 - i * 0.1));
+      pulseOpacities.forEach(o => o.setValue(0));
       return;
     }
 
@@ -157,17 +158,44 @@ export function HeartbeatButton({
     }
   }, [stage]);
 
-  // Stage 0: heart beat pulse every 4s
+  // Stage 0: heartbeat ripple — heart thumps + rings burst outward every 4s
   useEffect(() => {
     if (stage !== 0) {
       heartBeatScale.setValue(1);
       return;
     }
     const fireBeat = () => {
+      // Heart thump
       Animated.sequence([
-        Animated.timing(heartBeatScale, { toValue: 1.18, duration: 150, useNativeDriver: true }),
-        Animated.timing(heartBeatScale, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.timing(heartBeatScale, { toValue: 1.2, duration: 120, useNativeDriver: true }),
+        Animated.timing(heartBeatScale, { toValue: 0.95, duration: 80, useNativeDriver: true }),
+        Animated.timing(heartBeatScale, { toValue: 1, duration: 200, useNativeDriver: true }),
       ]).start();
+
+      // Staggered ring burst — ripple outward
+      pulseScales.forEach((scale, i) => {
+        const opacity = pulseOpacities[i];
+        const delay = i * 120;
+        const duration = 800 + i * 200;
+        const targetScale = 1.5 + i * 0.25;
+        const peakOpacity = 0.4 - i * 0.1;
+
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.parallel([
+            Animated.timing(scale, { toValue: targetScale, duration, useNativeDriver: true }),
+            Animated.sequence([
+              Animated.timing(opacity, { toValue: peakOpacity, duration: 100, useNativeDriver: true }),
+              Animated.timing(opacity, { toValue: 0, duration: duration - 100, useNativeDriver: true }),
+            ]),
+          ]),
+          // Reset for next beat
+          Animated.parallel([
+            Animated.timing(scale, { toValue: 1, duration: 0, useNativeDriver: true }),
+            Animated.timing(opacity, { toValue: 0, duration: 0, useNativeDriver: true }),
+          ]),
+        ]).start();
+      });
     };
     fireBeat();
     const interval = setInterval(fireBeat, 4000);
@@ -209,7 +237,7 @@ export function HeartbeatButton({
     <View style={[styles.container, { width: containerSize, height: containerSize + 40 }]}>
       {/* Pulse area — fixed square container for button + rings/ecg */}
       <View style={[styles.pulseArea, { width: containerSize, height: containerSize }]}>
-        {/* Pulse rings for stages 1-3 */}
+        {/* Pulse rings — S0: burst on heartbeat, S1-3: continuous loop */}
         {showRingPulse && [0, 1, 2].map(i => (
           <Animated.View
             key={i}
