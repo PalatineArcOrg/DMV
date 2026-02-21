@@ -138,10 +138,15 @@ export const KNOWN_DEFI_MINTS: Record<string, MintInfo> = {
  * Known DeFi protocol program IDs for account scanning (Layer 2).
  */
 export const PROTOCOL_PROGRAMS: Record<string, { protocol: DeFiProtocol; name: string }> = {
-  // Orca Whirlpool
+  // Orca Whirlpool (mainnet)
   'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc': {
     protocol: 'orca',
     name: 'Orca Whirlpool',
+  },
+  // Orca Whirlpool (devnet)
+  '2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ': {
+    protocol: 'orca',
+    name: 'Orca Whirlpool (Devnet)',
   },
   // Raydium AMM V4
   '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8': {

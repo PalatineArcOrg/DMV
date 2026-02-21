@@ -158,35 +158,36 @@ export function HeartbeatButton({
     }
   }, [stage]);
 
-  // Stage 0: heartbeat ripple — heart thumps + rings burst outward every 4s
+  // Stage 0: heartbeat ripple — heart thumps + rings burst outward (~72 BPM)
   useEffect(() => {
     if (stage !== 0) {
       heartBeatScale.setValue(1);
       return;
     }
+    const BEAT_INTERVAL = 1200; // ~50 BPM — realistic resting heartbeat feel
     const fireBeat = () => {
-      // Heart thump
+      // Heart thump — quick systole/diastole
       Animated.sequence([
-        Animated.timing(heartBeatScale, { toValue: 1.2, duration: 120, useNativeDriver: true }),
-        Animated.timing(heartBeatScale, { toValue: 0.95, duration: 80, useNativeDriver: true }),
-        Animated.timing(heartBeatScale, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.timing(heartBeatScale, { toValue: 1.18, duration: 80, useNativeDriver: true }),
+        Animated.timing(heartBeatScale, { toValue: 0.96, duration: 60, useNativeDriver: true }),
+        Animated.timing(heartBeatScale, { toValue: 1, duration: 120, useNativeDriver: true }),
       ]).start();
 
       // Staggered ring burst — ripple outward
       pulseScales.forEach((scale, i) => {
         const opacity = pulseOpacities[i];
-        const delay = i * 120;
-        const duration = 800 + i * 200;
-        const targetScale = 1.5 + i * 0.25;
-        const peakOpacity = 0.4 - i * 0.1;
+        const delay = i * 60;
+        const duration = 400 + i * 100;
+        const targetScale = 1.4 + i * 0.2;
+        const peakOpacity = 0.35 - i * 0.08;
 
         Animated.sequence([
           Animated.delay(delay),
           Animated.parallel([
             Animated.timing(scale, { toValue: targetScale, duration, useNativeDriver: true }),
             Animated.sequence([
-              Animated.timing(opacity, { toValue: peakOpacity, duration: 100, useNativeDriver: true }),
-              Animated.timing(opacity, { toValue: 0, duration: duration - 100, useNativeDriver: true }),
+              Animated.timing(opacity, { toValue: peakOpacity, duration: 60, useNativeDriver: true }),
+              Animated.timing(opacity, { toValue: 0, duration: duration - 60, useNativeDriver: true }),
             ]),
           ]),
           // Reset for next beat
@@ -198,7 +199,7 @@ export function HeartbeatButton({
       });
     };
     fireBeat();
-    const interval = setInterval(fireBeat, 4000);
+    const interval = setInterval(fireBeat, BEAT_INTERVAL);
     return () => clearInterval(interval);
   }, [stage]);
 
