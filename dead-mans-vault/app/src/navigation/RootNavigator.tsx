@@ -159,29 +159,47 @@ export function RootNavigator() {
           }
 
           // Check for device migration need (missing/mismatched agent key)
-          if (!migrationCheckedRef.current) {
+          if (!migrationCheckedRef.current && vault && vault.active && !vault.executed) {
             migrationCheckedRef.current = true;
-            const { MigrationService } = require('../services/MigrationService');
-            const needsRotation = await MigrationService.needsAgentRotation(publicKey!);
-            if (needsRotation) {
-              Alert.alert(
-                'Device Migration Required',
-                'Your vault\'s agent key does not match this device. Heartbeats will fail until you rotate the agent key.\n\nWould you like to rotate it now? Your wallet signature is required.',
-                [
-                  { text: 'Later', style: 'cancel' },
-                  {
-                    text: 'Rotate Now',
-                    onPress: async () => {
-                      try {
-                        await MigrationService.executeRotation(publicKey!, signAndSendTransaction);
-                        Alert.alert('Migration Complete', 'Agent key rotated successfully. Heartbeats will resume.');
-                      } catch {
-                        Alert.alert('Rotation Failed', 'Could not rotate agent key. Please try again from Settings.');
-                      }
+
+            // Skip for freshly created vaults (< 2 min old)
+            const createdAt = vault.createdAt?.toNumber?.() ?? 0;
+            const ageSeconds = Math.floor(Date.now() / 1000) - createdAt;
+            if (ageSeconds > 120) {
+              const { KeyManager } = require('../tee/KeyManager');
+              const keyManager = KeyManager.getInstance();
+              const hasKey = await keyManager.hasAgentKey();
+              let needsRotation = false;
+
+              if (!hasKey) {
+                needsRotation = true;
+              } else {
+                const localPubkey = await keyManager.getAgentPublicKey();
+                const onChainAgent = vault.agentPubkey?.toBase58?.() ?? '';
+                needsRotation = localPubkey !== onChainAgent;
+              }
+
+              if (needsRotation) {
+                const { MigrationService } = require('../services/MigrationService');
+                Alert.alert(
+                  'Device Migration Required',
+                  'Your vault\'s agent key does not match this device. Heartbeats will fail until you rotate the agent key.\n\nWould you like to rotate it now? Your wallet signature is required.',
+                  [
+                    { text: 'Later', style: 'cancel' },
+                    {
+                      text: 'Rotate Now',
+                      onPress: async () => {
+                        try {
+                          await MigrationService.executeRotation(publicKey!, signAndSendTransaction);
+                          Alert.alert('Migration Complete', 'Agent key rotated successfully. Heartbeats will resume.');
+                        } catch {
+                          Alert.alert('Rotation Failed', 'Could not rotate agent key. Please try again from Settings.');
+                        }
+                      },
                     },
-                  },
-                ],
-              );
+                  ],
+                );
+              }
             }
           }
         } catch {}

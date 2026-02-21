@@ -138,7 +138,7 @@ export function BeneficiaryScreen() {
 
                 Alert.alert('Vault Updated', `Beneficiaries updated on-chain.\n\nTx: ${txSig.slice(0, 20)}...`, [
                   { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
-                  { text: 'OK', onPress: () => navigation.navigate('Settings') },
+                  { text: 'OK', onPress: () => navigation.goBack() },
                 ]);
               } catch (err: any) {
                 const msg = err.message || String(err);
