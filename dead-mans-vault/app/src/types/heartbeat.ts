@@ -8,7 +8,6 @@ export type HeartbeatMethod =
 export interface HeartbeatConfig {
   methods: HeartbeatMethod[];
   intervalSeconds: number;
-  reminderOffsetSeconds: number;
 }
 
 export interface HeartbeatStatus {

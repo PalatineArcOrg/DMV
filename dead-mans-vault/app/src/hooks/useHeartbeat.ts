@@ -10,7 +10,6 @@ import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS } from '../utils/constants';
 const DEFAULT_CONFIG: HeartbeatConfig = {
   methods: ['active_tap'],
   intervalSeconds: HEARTBEAT_INTERVALS.weekly,
-  reminderOffsetSeconds: 3600,
 };
 
 const DEV_ESCALATION = {

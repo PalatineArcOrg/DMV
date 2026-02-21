@@ -1,15 +1,16 @@
 import { PublicKey } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
 
 export interface VaultConfig {
   owner: PublicKey;
   agentPubkey: PublicKey;
-  heartbeatInterval: number;
-  gracePeriod: number;
+  heartbeatInterval: BN;
+  gracePeriod: BN;
   beneficiaries: Beneficiary[];
   executed: boolean;
   active: boolean;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: BN;
+  updatedAt: BN;
   bump: number;
   isMutable: boolean;
 }

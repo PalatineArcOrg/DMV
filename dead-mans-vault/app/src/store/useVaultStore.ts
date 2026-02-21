@@ -7,6 +7,7 @@ import {
   EscalationConfig,
 } from '../types';
 import { ESCALATION_DEFAULTS } from '../utils/constants';
+import { useHeartbeatStore } from './useHeartbeatStore';
 
 interface VaultStore {
   isInitialized: boolean;
@@ -60,7 +61,20 @@ export const useVaultStore = create<VaultStore>((set) => ({
           label: localMatch?.label || ob.label || `Beneficiary ${i + 1}`,
         };
       });
+
+      // Sync heartbeat config from on-chain vault data
+      if (config) {
+        const interval = config.heartbeatInterval?.toNumber?.() ?? 0;
+        if (interval > 0) {
+          useHeartbeatStore.getState().setConfig({
+            methods: ['active_tap'],
+            intervalSeconds: interval,
+          });
+        }
+      }
+
       return {
+        isRevoked: false,
         vaultConfig: config,
         isSetupComplete: config !== null && config.active === true && config.executed !== true,
         beneficiaries: merged,

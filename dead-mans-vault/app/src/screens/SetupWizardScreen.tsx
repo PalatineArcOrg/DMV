@@ -121,13 +121,13 @@ export function SetupWizardScreen() {
             <View style={styles.gridCell}>
               <Text style={styles.gridLabel}>Interval</Text>
               <Text style={styles.gridValue}>
-                {heartbeatConfig ? formatDuration(heartbeatConfig.intervalSeconds) : 'Not set'}
+                {heartbeatConfig ? formatDuration(heartbeatConfig.intervalSeconds) : vaultConfig ? formatDuration(vaultConfig.heartbeatInterval.toNumber()) : 'Not set'}
               </Text>
             </View>
             <View style={[styles.gridCell, styles.gridCellBorder]}>
               <Text style={styles.gridLabel}>Every</Text>
               <Text style={styles.gridValue}>
-                {heartbeatConfig ? `${heartbeatConfig.intervalSeconds / 86400}d` : '-'}
+                {heartbeatConfig ? `${heartbeatConfig.intervalSeconds / 86400}d` : vaultConfig ? `${vaultConfig.heartbeatInterval.toNumber() / 86400}d` : '-'}
               </Text>
             </View>
             <View style={styles.gridCell}>

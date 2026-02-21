@@ -82,7 +82,6 @@ export function HeartbeatConfigScreen() {
     const config: HeartbeatConfig = {
       methods: ['active_tap'],
       intervalSeconds: selectedInterval,
-      reminderOffsetSeconds: 3600,
     };
     setConfig(config);
     await setSetting(SETTINGS_KEY, JSON.stringify(config));

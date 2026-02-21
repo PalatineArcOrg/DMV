@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { Alert } from 'react-native';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -119,8 +120,9 @@ const DMVDarkTheme = {
 };
 
 export function RootNavigator() {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected, signAndSendTransaction } = useWallet();
   const prevPkRef = useRef(publicKey?.toBase58() ?? '');
+  const migrationCheckedRef = useRef(false);
 
   // Global wallet-change detection — resets all stores on disconnect or wallet switch
   useEffect(() => {
@@ -142,6 +144,7 @@ export function RootNavigator() {
       useVaultStore.getState().resetForWalletSwitch();
       useHeartbeatStore.getState().reset();
       useEscalationStore.getState().reset();
+      migrationCheckedRef.current = false;
     }
 
     // Fetch vault config for the connected wallet
@@ -153,6 +156,33 @@ export function RootNavigator() {
           const vault = await txService.fetchVaultConfig(publicKey!);
           if (vault) {
             useVaultStore.getState().setVaultConfig(vault);
+          }
+
+          // Check for device migration need (missing/mismatched agent key)
+          if (!migrationCheckedRef.current) {
+            migrationCheckedRef.current = true;
+            const { MigrationService } = require('../services/MigrationService');
+            const needsRotation = await MigrationService.needsAgentRotation(publicKey!);
+            if (needsRotation) {
+              Alert.alert(
+                'Device Migration Required',
+                'Your vault\'s agent key does not match this device. Heartbeats will fail until you rotate the agent key.\n\nWould you like to rotate it now? Your wallet signature is required.',
+                [
+                  { text: 'Later', style: 'cancel' },
+                  {
+                    text: 'Rotate Now',
+                    onPress: async () => {
+                      try {
+                        await MigrationService.executeRotation(publicKey!, signAndSendTransaction);
+                        Alert.alert('Migration Complete', 'Agent key rotated successfully. Heartbeats will resume.');
+                      } catch {
+                        Alert.alert('Rotation Failed', 'Could not rotate agent key. Please try again from Settings.');
+                      }
+                    },
+                  },
+                ],
+              );
+            }
           }
         } catch {}
       })();
