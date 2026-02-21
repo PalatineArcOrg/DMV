@@ -75,16 +75,13 @@ export function HeartbeatButton({
   // Icon pulse for stage >= 1
   const iconScale = useRef(new Animated.Value(1)).current;
 
-  // Stage 0 heartbeat animation — heart beats in sync with EKG R-spike
-  const ecgOpacity = useRef(new Animated.Value(0)).current;
+  // Stage 0 heartbeat animation — heart pulses periodically
   const heartBeatScale = useRef(new Animated.Value(1)).current;
 
   const pulseScales = [pulseScale0, pulseScale1, pulseScale2];
   const pulseOpacities = [pulseOpacity0, pulseOpacity1, pulseOpacity2];
 
-  // ECG line speeds by stage
-  const ecgSpeed = stage === 0 ? 4000 : stage === 1 ? 3000 : stage === 2 ? 2000 : stage === 3 ? 1200 : 0;
-  const showEcg = stage === 0 || stage === 4;
+  const showEcg = stage === 4;
   const showRingPulse = stage >= 1 && stage <= 3;
 
   // Pulse ring animation — only stages 1-3
@@ -160,26 +157,18 @@ export function HeartbeatButton({
     }
   }, [stage]);
 
-  // Stage 0: heart beat + EKG flash in sync with R-spike every 4s
+  // Stage 0: heart beat pulse every 4s
   useEffect(() => {
     if (stage !== 0) {
-      ecgOpacity.setValue(0);
       heartBeatScale.setValue(1);
       return;
     }
     const fireBeat = () => {
-      // EKG flash: 0 → 0.6 (100ms) → 0 (300ms)
       Animated.sequence([
-        Animated.timing(ecgOpacity, { toValue: 0.6, duration: 100, useNativeDriver: true }),
-        Animated.timing(ecgOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
-      ]).start();
-      // Heart thump: 1 → 1.15 (150ms) → 1 (250ms)
-      Animated.sequence([
-        Animated.timing(heartBeatScale, { toValue: 1.15, duration: 150, useNativeDriver: true }),
+        Animated.timing(heartBeatScale, { toValue: 1.18, duration: 150, useNativeDriver: true }),
         Animated.timing(heartBeatScale, { toValue: 1, duration: 250, useNativeDriver: true }),
       ]).start();
     };
-    // Fire immediately then repeat
     fireBeat();
     const interval = setInterval(fireBeat, 4000);
     return () => clearInterval(interval);
@@ -262,20 +251,17 @@ export function HeartbeatButton({
             },
           ]}
         >
-          {/* ECG line inside the circle — behind the icon */}
+          {/* ECG flatline — Stage 4 only */}
           {showEcg && (
-            <Animated.View
-              style={[styles.ecgOverlay, { opacity: stage === 0 ? ecgOpacity : 0.5 }]}
-              pointerEvents="none"
-            >
+            <View style={[styles.ecgOverlay, { opacity: 0.5 }]} pointerEvents="none">
               <EcgLine
                 width={buttonSize}
                 height={buttonSize * 0.4}
                 color={cfg.color}
-                speed={ecgSpeed}
+                speed={0}
                 strokeWidth={1.5}
               />
-            </Animated.View>
+            </View>
           )}
 
           {confirmed ? (
