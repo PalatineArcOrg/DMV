@@ -476,7 +476,7 @@ export function DashboardScreen() {
       {!isVaultSetup && (
         <TouchableOpacity
           style={styles.setupCta}
-          onPress={() => navigation.getParent()?.navigate('Setup')}
+          onPress={() => navigation.getParent()?.navigate('Vault')}
         >
           <View style={styles.setupCtaIcon}>
             <MaterialCommunityIcons name="account-group" size={16} color={COLORS.solanaPurple} />

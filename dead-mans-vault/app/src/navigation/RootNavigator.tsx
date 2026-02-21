@@ -67,7 +67,7 @@ function SetupStackScreen() {
       <SetupStack.Screen
         name="SetupWizard"
         component={SetupWizardScreen}
-        options={{ title: 'Setup' }}
+        options={{ title: 'Vault' }}
       />
       <SetupStack.Screen
         name="Welcome"
@@ -103,7 +103,7 @@ type TabIconName = 'view-dashboard' | 'wallet' | 'text-box-outline' | 'cog';
 const TAB_ICONS: Record<string, TabIconName> = {
   Status: 'view-dashboard',
   Assets: 'wallet',
-  Setup: 'text-box-outline',
+  Vault: 'text-box-outline',
   Settings: 'cog',
 };
 
@@ -220,7 +220,7 @@ export function RootNavigator() {
       >
         <Tab.Screen name="Status" component={DashboardStackScreen} />
         <Tab.Screen name="Assets" component={AssetsStackScreen} />
-        <Tab.Screen name="Setup" component={SetupStackScreen} />
+        <Tab.Screen name="Vault" component={SetupStackScreen} />
         <Tab.Screen name="Settings" component={SettingsScreen} />
       </Tab.Navigator>
     </NavigationContainer>

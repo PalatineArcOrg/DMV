@@ -75,6 +75,10 @@ export function HeartbeatButton({
   // Icon pulse for stage >= 1
   const iconScale = useRef(new Animated.Value(1)).current;
 
+  // Stage 0 heartbeat animation — heart beats in sync with EKG R-spike
+  const ecgOpacity = useRef(new Animated.Value(0)).current;
+  const heartBeatScale = useRef(new Animated.Value(1)).current;
+
   const pulseScales = [pulseScale0, pulseScale1, pulseScale2];
   const pulseOpacities = [pulseOpacity0, pulseOpacity1, pulseOpacity2];
 
@@ -156,6 +160,31 @@ export function HeartbeatButton({
     }
   }, [stage]);
 
+  // Stage 0: heart beat + EKG flash in sync with R-spike every 4s
+  useEffect(() => {
+    if (stage !== 0) {
+      ecgOpacity.setValue(0);
+      heartBeatScale.setValue(1);
+      return;
+    }
+    const fireBeat = () => {
+      // EKG flash: 0 → 0.6 (100ms) → 0 (300ms)
+      Animated.sequence([
+        Animated.timing(ecgOpacity, { toValue: 0.6, duration: 100, useNativeDriver: true }),
+        Animated.timing(ecgOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+      ]).start();
+      // Heart thump: 1 → 1.15 (150ms) → 1 (250ms)
+      Animated.sequence([
+        Animated.timing(heartBeatScale, { toValue: 1.15, duration: 150, useNativeDriver: true }),
+        Animated.timing(heartBeatScale, { toValue: 1, duration: 250, useNativeDriver: true }),
+      ]).start();
+    };
+    // Fire immediately then repeat
+    fireBeat();
+    const interval = setInterval(fireBeat, 4000);
+    return () => clearInterval(interval);
+  }, [stage]);
+
   // Detect loading -> not loading transition to show confirmed state
   useEffect(() => {
     if (wasLoading.current && !loading) {
@@ -235,7 +264,10 @@ export function HeartbeatButton({
         >
           {/* ECG line inside the circle — behind the icon */}
           {showEcg && (
-            <View style={styles.ecgOverlay} pointerEvents="none">
+            <Animated.View
+              style={[styles.ecgOverlay, { opacity: stage === 0 ? ecgOpacity : 0.5 }]}
+              pointerEvents="none"
+            >
               <EcgLine
                 width={buttonSize}
                 height={buttonSize * 0.4}
@@ -243,7 +275,7 @@ export function HeartbeatButton({
                 speed={ecgSpeed}
                 strokeWidth={1.5}
               />
-            </View>
+            </Animated.View>
           )}
 
           {confirmed ? (
@@ -262,7 +294,7 @@ export function HeartbeatButton({
               ]}
             />
           ) : (
-            <Animated.View style={{ transform: [{ scale: iconScale }] }}>
+            <Animated.View style={{ transform: [{ scale: stage === 0 ? heartBeatScale : iconScale }] }}>
               {stage === 0 ? (
                 <MaterialCommunityIcons name="heart-pulse" size={36} color={cfg.color} />
               ) : (
@@ -298,7 +330,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 0.5,
   },
   pulseRing: {
     borderWidth: 1,

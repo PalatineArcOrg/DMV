@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import * as ExpoClipboard from 'expo-clipboard';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '../hooks/useWallet';
 import { useDemoStore } from '../store/useDemoStore';
 import { useVaultStore } from '../store/useVaultStore';
@@ -39,7 +40,15 @@ export function SettingsScreen() {
     ? vaultConfig.owner.toBase58() === publicKey.toBase58()
     : false;
 
-
+  const programPubkey = useMemo(() => new PublicKey(PROGRAM_ID), []);
+  const vaultPda = useMemo(() => {
+    if (!publicKey) return null;
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('vault'), publicKey.toBuffer()],
+      programPubkey,
+    );
+    return pda;
+  }, [publicKey, programPubkey]);
 
   const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
 
@@ -128,7 +137,7 @@ export function SettingsScreen() {
   }, [publicKey, signTransaction]);
 
   const handleEditBeneficiaries = useCallback(() => {
-    navigation.navigate('Setup', {
+    navigation.navigate('Vault', {
       screen: 'Beneficiaries',
       params: { fromSettings: true },
     });
@@ -259,7 +268,17 @@ export function SettingsScreen() {
       <View style={styles.sectionBlock}>
         <Text style={styles.sectionLabel}>VAULT CONTRACT</Text>
         <View style={styles.card}>
-          <SettingRow icon="shield-check" iconColor={COLORS.accent} label="Vault Program" value={truncateAddress(PROGRAM_ID, 4)} />
+          <TouchableOpacity onPress={() => Linking.openURL(`https://solscan.io/account/${PROGRAM_ID}?cluster=devnet`)}>
+            <SettingRow icon="shield-check" iconColor={COLORS.accent} label="Vault Program" value={truncateAddress(PROGRAM_ID, 4)} link />
+          </TouchableOpacity>
+          {vaultConfig && vaultPda && (
+            <>
+              <View style={styles.rowDivider} />
+              <TouchableOpacity onPress={() => Linking.openURL(`https://solscan.io/account/${vaultPda.toBase58()}?cluster=devnet`)}>
+                <SettingRow icon="safe-square-outline" iconColor={COLORS.blueAccent} label="Your Vault" value={truncateAddress(vaultPda.toBase58(), 4)} link />
+              </TouchableOpacity>
+            </>
+          )}
           <View style={styles.rowDivider} />
           <SettingRow icon="account-group" iconColor={COLORS.solanaPurple} label="Beneficiaries" value={`${beneficiaries.length} configured`} />
           <View style={styles.rowDivider} />
@@ -335,11 +354,12 @@ export function SettingsScreen() {
   );
 }
 
-function SettingRow({ icon, iconColor, label, value }: {
+function SettingRow({ icon, iconColor, label, value, link }: {
   icon: string;
   iconColor: string;
   label: string;
   value: string;
+  link?: boolean;
 }) {
   return (
     <View style={styles.settingRow}>
@@ -348,8 +368,9 @@ function SettingRow({ icon, iconColor, label, value }: {
       </View>
       <View style={styles.settingInfo}>
         <Text style={styles.settingLabel}>{label}</Text>
-        {value ? <Text style={styles.settingValue}>{value}</Text> : null}
+        {value ? <Text style={[styles.settingValue, link && { color: COLORS.accent }]}>{value}</Text> : null}
       </View>
+      {link && <MaterialCommunityIcons name="open-in-new" size={12} color={COLORS.accent} />}
     </View>
   );
 }

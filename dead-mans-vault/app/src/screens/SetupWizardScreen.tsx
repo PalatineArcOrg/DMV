@@ -1,7 +1,8 @@
 import React, { useCallback, useRef, useMemo } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '../hooks/useWallet';
 import { useVaultStore } from '../store/useVaultStore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
@@ -26,6 +27,16 @@ export function SetupWizardScreen() {
     if (!vaultConfig.owner) return false;
     return vaultConfig.owner.toBase58() === publicKey.toBase58();
   }, [isSetupComplete, vaultConfig, publicKey]);
+
+  const programPubkey = useMemo(() => new PublicKey(PROGRAM_ID), []);
+  const vaultPda = useMemo(() => {
+    if (!publicKey) return null;
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('vault'), publicKey.toBuffer()],
+      programPubkey,
+    );
+    return pda;
+  }, [publicKey, programPubkey]);
 
   const heartbeatDone = heartbeatConfig !== null;
   const beneficiariesDone = validateBeneficiaryShares(
@@ -147,7 +158,20 @@ export function SetupWizardScreen() {
           </View>
           <View style={styles.detailsBody}>
             <DetailRow label="Network" value="Devnet" />
-            <DetailRow label="Program" value={truncateAddress(PROGRAM_ID, 4)} mono />
+            <DetailRow
+              label="Program"
+              value={truncateAddress(PROGRAM_ID, 4)}
+              mono
+              onPress={() => Linking.openURL(`https://solscan.io/account/${PROGRAM_ID}?cluster=devnet`)}
+            />
+            {vaultPda && (
+              <DetailRow
+                label="Your Vault"
+                value={truncateAddress(vaultPda.toBase58(), 4)}
+                mono
+                onPress={() => Linking.openURL(`https://solscan.io/account/${vaultPda.toBase58()}?cluster=devnet`)}
+              />
+            )}
             <DetailRow label="Execution" value="Agent Key (TEE)" />
           </View>
         </View>
@@ -161,6 +185,18 @@ export function SetupWizardScreen() {
           <Text style={styles.execLogBtnText}>View Execution Log</Text>
           <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
         </TouchableOpacity>
+
+        {/* Edit Beneficiaries */}
+        {vaultConfig && vaultConfig.active && !vaultConfig.executed && vaultConfig.isMutable !== false && (
+          <TouchableOpacity
+            style={styles.execLogBtn}
+            onPress={() => navigation.navigate('Beneficiaries', { fromSettings: true })}
+          >
+            <MaterialCommunityIcons name="account-edit" size={16} color={COLORS.solanaPurple} />
+            <Text style={[styles.execLogBtnText, { color: COLORS.solanaPurple }]}>Edit Beneficiaries</Text>
+            <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+        )}
 
         <View style={{ height: SPACING.xxl }} />
       </ScrollView>
@@ -211,13 +247,20 @@ export function SetupWizardScreen() {
   );
 }
 
-function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
+function DetailRow({ label, value, mono, onPress }: { label: string; value: string; mono?: boolean; onPress?: () => void }) {
+  const content = (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={[styles.detailValue, mono && { fontFamily: FONTS.mono }]}>{value}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <Text style={[styles.detailValue, mono && { fontFamily: FONTS.mono }, onPress && { color: COLORS.accent }]}>{value}</Text>
+        {onPress && <MaterialCommunityIcons name="open-in-new" size={10} color={COLORS.accent} />}
+      </View>
     </View>
   );
+  if (onPress) {
+    return <TouchableOpacity onPress={onPress}>{content}</TouchableOpacity>;
+  }
+  return content;
 }
 
 function StepCard({
