@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useMemo } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Linking } from 'react-native';
+import React, { useCallback, useRef, useMemo, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Linking, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { PublicKey } from '@solana/web3.js';
@@ -13,7 +13,7 @@ import { COLORS, FONTS, SPACING, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS }
 
 export function SetupWizardScreen() {
   const navigation = useNavigation<any>();
-  const { publicKey } = useWallet();
+  const { publicKey, signTransaction } = useWallet();
   const { beneficiaries, isSetupComplete, setSetupComplete, setVaultConfig, vaultConfig } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
   const escalationStage = useEscalationStore((s) => s.state.stage);
@@ -44,12 +44,69 @@ export function SetupWizardScreen() {
   );
   const hasPartialState = beneficiaries.length > 0 || heartbeatDone;
 
+  const [isRevoking, setIsRevoking] = useState(false);
+
   const handleStartOver = useCallback(() => {
     skipAutoSync.current = true;
     useVaultStore.getState().resetForWalletSwitch();
     useHeartbeatStore.getState().reset();
     useEscalationStore.getState().reset();
   }, []);
+
+  const handleRevoke = useCallback(async () => {
+    if (!publicKey) return;
+    Alert.alert(
+      'Revoke Vault?',
+      'This will deactivate your vault on-chain and clear all local data. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Revoke',
+          style: 'destructive',
+          onPress: async () => {
+            setIsRevoking(true);
+            try {
+              const { VaultTransactionService } = require('../services/VaultTransactionService');
+              const txService = new VaultTransactionService();
+              const tx = await txService.buildRevokeVaultTx(publicKey);
+              tx.feePayer = publicKey;
+              const connection = txService.getConnection();
+              const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+              tx.recentBlockhash = blockhash;
+
+              const signedTx = await signTransaction(tx);
+              const txSig = await connection.sendRawTransaction(signedTx.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+              });
+              await connection.confirmTransaction(
+                { signature: txSig, blockhash, lastValidBlockHeight },
+                'confirmed',
+              );
+
+              useVaultStore.getState().reset();
+              useHeartbeatStore.getState().reset();
+              useEscalationStore.getState().reset();
+
+              Alert.alert('Vault Revoked', `Vault closed and rent reclaimed.\n\nTx: ${txSig.slice(0, 20)}...`, [
+                { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
+                { text: 'OK' },
+              ]);
+            } catch (err: any) {
+              const msg = err.message || String(err);
+              if (msg.includes('CancellationException') || msg.includes('cancelled')) {
+                Alert.alert('Cancelled', 'Wallet signing was cancelled.');
+              } else {
+                Alert.alert('Error', msg);
+              }
+            } finally {
+              setIsRevoking(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [publicKey, signTransaction]);
 
   // On every focus: sync on-chain vault state + reset stack if needed
   useFocusEffect(
@@ -195,6 +252,23 @@ export function SetupWizardScreen() {
             <MaterialCommunityIcons name="account-edit" size={16} color={COLORS.solanaPurple} />
             <Text style={[styles.execLogBtnText, { color: COLORS.solanaPurple }]}>Edit Beneficiaries</Text>
             <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+        )}
+
+        {/* Revoke Vault */}
+        {vaultConfig && vaultConfig.active && !vaultConfig.executed && vaultConfig.isMutable !== false && (
+          <TouchableOpacity
+            style={[styles.execLogBtn, styles.revokeBtn]}
+            onPress={handleRevoke}
+            disabled={isRevoking}
+          >
+            {isRevoking ? (
+              <ActivityIndicator size="small" color={COLORS.critical} />
+            ) : (
+              <MaterialCommunityIcons name="shield-off" size={16} color={COLORS.critical} />
+            )}
+            <Text style={[styles.execLogBtnText, { color: COLORS.critical }]}>Revoke Vault</Text>
+            <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
           </TouchableOpacity>
         )}
 
@@ -484,6 +558,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.accent,
     fontFamily: FONTS.primaryMedium,
+  },
+  revokeBtn: {
+    borderColor: 'rgba(239,68,68,0.15)',
   },
   // Pre-setup step cards
   stepCard: {
