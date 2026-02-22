@@ -96,7 +96,7 @@ describe("dead-mans-vault", () => {
       await program.methods
         .initializeVault({
           agentPubkey: agent.publicKey,
-          heartbeatInterval: new anchor.BN(100), // too short
+          heartbeatInterval: new anchor.BN(5), // too short (below MIN_HEARTBEAT_INTERVAL=10)
           gracePeriod: new anchor.BN(604800),
           beneficiaries: [
             {
@@ -139,7 +139,7 @@ describe("dead-mans-vault", () => {
         .initializeVault({
           agentPubkey: agent.publicKey,
           heartbeatInterval: new anchor.BN(86400),
-          gracePeriod: new anchor.BN(100), // too short
+          gracePeriod: new anchor.BN(15), // too short (below MIN_GRACE_PERIOD=30)
           beneficiaries: [
             {
               wallet: beneficiary1.publicKey,

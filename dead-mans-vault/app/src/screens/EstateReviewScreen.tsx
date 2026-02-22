@@ -31,10 +31,13 @@ export function EstateReviewScreen() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [isMutable, setIsMutable] = useState(true);
 
-  const gracePeriod =
-    escalationConfig.stage1Duration +
-    escalationConfig.stage2Duration +
-    escalationConfig.stage3Duration;
+  const isDemoMode = useDemoStore((s) => s.isDemoMode);
+
+  const gracePeriod = isDemoMode
+    ? 90 // 30s per escalation stage in demo mode
+    : escalationConfig.stage1Duration +
+      escalationConfig.stage2Duration +
+      escalationConfig.stage3Duration;
 
   const handleRegister = useCallback(async () => {
     if (!publicKey || !heartbeatConfig) {
@@ -43,16 +46,6 @@ export function EstateReviewScreen() {
     }
     if (beneficiaries.length === 0) {
       Alert.alert('Error', 'At least one beneficiary is required.');
-      return;
-    }
-
-    // Block vault activation in demo mode on production builds
-    const isDemoMode = useDemoStore.getState().isDemoMode;
-    if (isDemoMode && !__DEV__) {
-      Alert.alert(
-        'Demo Mode Active',
-        'Disable demo mode in Settings before activating a real vault. Demo mode uses 30-second escalation timers which could trigger unintended execution.',
-      );
       return;
     }
 
@@ -219,7 +212,7 @@ export function EstateReviewScreen() {
           </View>
           <View style={[styles.gridCell, styles.gridCellBorder]}>
             <Text style={styles.gridLabel}>Every</Text>
-            <Text style={styles.gridValue}>{heartbeatConfig ? `${heartbeatConfig.intervalSeconds / 86400}d` : '-'}</Text>
+            <Text style={styles.gridValue}>{heartbeatConfig ? (heartbeatConfig.intervalSeconds < 86400 ? `${heartbeatConfig.intervalSeconds}s` : `${heartbeatConfig.intervalSeconds / 86400}d`) : '-'}</Text>
           </View>
           <View style={styles.gridCell}>
             <Text style={styles.gridLabel}>Grace Period</Text>
@@ -297,6 +290,16 @@ export function EstateReviewScreen() {
           }
         </Text>
       </View>
+
+      {/* Demo Warning Banner */}
+      {isDemoMode && (
+        <View style={styles.demoBanner}>
+          <MaterialCommunityIcons name="flash" size={14} color="#F59E0B" />
+          <Text style={styles.demoBannerText}>
+            DEMO MODE: Vault uses 30s heartbeat + 90s grace period. Execution is REAL and IRREVERSIBLE.
+          </Text>
+        </View>
+      )}
 
       {/* Footer */}
       <View style={styles.footer}>
@@ -383,4 +386,6 @@ const styles = StyleSheet.create({
   radioOuterActive: { borderColor: COLORS.accent },
   radioOuterImmutable: { borderColor: COLORS.critical },
   radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.accent },
+  demoBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(245,158,11,0.08)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.2)', borderRadius: 12, padding: 12, marginBottom: 16 },
+  demoBannerText: { flex: 1, fontSize: 11, color: '#F59E0B', lineHeight: 16, fontFamily: FONTS.primary, fontWeight: '600' },
 });

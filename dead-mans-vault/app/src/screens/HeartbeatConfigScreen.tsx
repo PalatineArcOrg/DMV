@@ -6,6 +6,7 @@ import { COLORS, FONTS, HEARTBEAT_INTERVALS, ESCALATION_DEFAULTS } from '../util
 import { formatDuration } from '../utils/formatting';
 import { HeartbeatConfig } from '../types';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
+import { useDemoStore } from '../store/useDemoStore';
 import { setSetting, getSetting } from '../db/settingsRepo';
 import { StepIndicator } from '../components/StepIndicator';
 
@@ -13,13 +14,26 @@ const ACTUAL_GRACE_DAYS = Math.round(
   (ESCALATION_DEFAULTS.stage1 + ESCALATION_DEFAULTS.stage2 + ESCALATION_DEFAULTS.stage3) / 86400,
 );
 
-const PRESETS = [
+const DEMO_PRESET = {
+  key: 'demo',
+  label: 'Demo (30s)',
+  description: 'Full cycle in ~2 minutes',
+  seconds: 30,
+  graceLabel: '~90s',
+  intervalLabel: '30s',
+  icon: 'flash' as const,
+  color: '#F59E0B',
+  recommended: false,
+};
+
+const PRODUCTION_PRESETS = [
   {
     key: 'weekly',
     label: 'Weekly',
     description: 'Check in every 7 days',
     seconds: HEARTBEAT_INTERVALS.weekly,
-    graceDays: ACTUAL_GRACE_DAYS,
+    graceLabel: `${ACTUAL_GRACE_DAYS}d`,
+    intervalLabel: `${HEARTBEAT_INTERVALS.weekly / 86400}d`,
     icon: 'clock-outline' as const,
     color: '#00FFA3',
     recommended: true,
@@ -29,7 +43,8 @@ const PRESETS = [
     label: 'Bi-Weekly',
     description: 'Check in every 14 days',
     seconds: HEARTBEAT_INTERVALS.biweekly,
-    graceDays: ACTUAL_GRACE_DAYS,
+    graceLabel: `${ACTUAL_GRACE_DAYS}d`,
+    intervalLabel: `${HEARTBEAT_INTERVALS.biweekly / 86400}d`,
     icon: 'calendar' as const,
     color: '#4DA6FF',
     recommended: false,
@@ -39,17 +54,25 @@ const PRESETS = [
     label: 'Monthly',
     description: 'Check in every 30 days',
     seconds: HEARTBEAT_INTERVALS.monthly,
-    graceDays: ACTUAL_GRACE_DAYS,
+    graceLabel: `${ACTUAL_GRACE_DAYS}d`,
+    intervalLabel: `${HEARTBEAT_INTERVALS.monthly / 86400}d`,
     icon: 'shield' as const,
     color: '#9945FF',
     recommended: false,
   },
 ];
 
-const ESCALATION_TIMELINE = [
+const PROD_TIMELINE = [
   { label: 'Reminder', color: '#F59E0B', delay: 'Day 1' },
   { label: 'Emergency', color: '#F97316', delay: 'Day 3' },
   { label: 'Final Warning', color: '#EF4444', delay: 'Day 5' },
+  { label: 'Execution', color: '#DC2626', delay: 'Grace end' },
+];
+
+const DEMO_TIMELINE = [
+  { label: 'Reminder', color: '#F59E0B', delay: '~30s' },
+  { label: 'Emergency', color: '#F97316', delay: '~60s' },
+  { label: 'Final Warning', color: '#EF4444', delay: '~90s' },
   { label: 'Execution', color: '#DC2626', delay: 'Grace end' },
 ];
 
@@ -59,12 +82,20 @@ export function HeartbeatConfigScreen() {
   const navigation = useNavigation<any>();
   const existingConfig = useHeartbeatStore((s) => s.config);
   const setConfig = useHeartbeatStore((s) => s.setConfig);
+  const isDemoMode = useDemoStore((s) => s.isDemoMode);
+
+  const presets = isDemoMode ? [DEMO_PRESET, ...PRODUCTION_PRESETS] : PRODUCTION_PRESETS;
+  const timeline = isDemoMode ? DEMO_TIMELINE : PROD_TIMELINE;
 
   const [selectedInterval, setSelectedInterval] = useState<number>(
-    existingConfig?.intervalSeconds ?? HEARTBEAT_INTERVALS.weekly,
+    isDemoMode ? 30 : (existingConfig?.intervalSeconds ?? HEARTBEAT_INTERVALS.weekly),
   );
 
   useEffect(() => {
+    if (isDemoMode) {
+      setSelectedInterval(30);
+      return;
+    }
     (async () => {
       const saved = await getSetting(SETTINGS_KEY);
       if (saved) {
@@ -74,9 +105,9 @@ export function HeartbeatConfigScreen() {
         } catch { /* ignore */ }
       }
     })();
-  }, []);
+  }, [isDemoMode]);
 
-  const selectedPreset = PRESETS.find((p) => p.seconds === selectedInterval) ?? PRESETS[0];
+  const selectedPreset = presets.find((p) => p.seconds === selectedInterval) ?? presets[0];
 
   const handleContinue = async () => {
     const config: HeartbeatConfig = {
@@ -99,7 +130,7 @@ export function HeartbeatConfigScreen() {
         {/* Escalation info box */}
         <View style={styles.infoBox}>
           <Text style={styles.infoLabel}>HOW ESCALATION WORKS</Text>
-          {ESCALATION_TIMELINE.map((item, i) => (
+          {timeline.map((item, i) => (
             <View key={i}>
               <View style={styles.timelineRow}>
                 <View style={[styles.timelineDot, { backgroundColor: item.color }]} />
@@ -107,13 +138,13 @@ export function HeartbeatConfigScreen() {
                 <View style={{ flex: 1 }} />
                 <Text style={styles.timelineDelay}>{item.delay}</Text>
               </View>
-              {i < ESCALATION_TIMELINE.length - 1 && <View style={styles.timelineDivider} />}
+              {i < timeline.length - 1 && <View style={styles.timelineDivider} />}
             </View>
           ))}
         </View>
 
         {/* Interval cards */}
-        {PRESETS.map((preset) => {
+        {presets.map((preset) => {
           const isSelected = selectedInterval === preset.seconds;
           return (
             <TouchableOpacity
@@ -139,9 +170,9 @@ export function HeartbeatConfigScreen() {
                 </View>
                 <Text style={styles.presetDesc}>{preset.description}</Text>
                 <View style={styles.presetMeta}>
-                  <Text style={styles.presetMetaText}>Interval: {preset.seconds / 86400}d</Text>
+                  <Text style={styles.presetMetaText}>Interval: {preset.intervalLabel}</Text>
                   <Text style={styles.presetMetaDot}>{'\u00B7'}</Text>
-                  <Text style={styles.presetMetaText}>Grace: {preset.graceDays}d</Text>
+                  <Text style={styles.presetMetaText}>Grace: {preset.graceLabel}</Text>
                 </View>
               </View>
               <View style={[styles.radio, isSelected && { backgroundColor: preset.color, borderColor: preset.color }]}>

@@ -32,6 +32,7 @@ export function formatTimestamp(unix: number): string {
 
 export function formatDuration(seconds: number): string {
   if (seconds < 0) return 'Overdue';
+  if (seconds < 60) return `${seconds}s`;
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
