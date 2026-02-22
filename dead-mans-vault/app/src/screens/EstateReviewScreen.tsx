@@ -10,7 +10,7 @@ import {
   Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { PublicKey, Transaction } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVaultStore } from '../store/useVaultStore';
 import { useWallet } from '../hooks/useWallet';
@@ -67,10 +67,19 @@ export function EstateReviewScreen() {
         hasSpecificAssets: b.hasSpecificAssets,
       }));
 
+      // Pre-flight balance check — need enough for vault init + nonce rent + distribution fees
+      const ownerBalance = await connection.getBalance(publicKey);
+      const MIN_BALANCE = 0.02 * LAMPORTS_PER_SOL;
+      if (ownerBalance < MIN_BALANCE) {
+        Alert.alert('Insufficient Balance', `You need at least 0.02 SOL to activate the vault.\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+        setIsRegistering(false);
+        return;
+      }
+
       // Check for existing on-chain vault
       const [vaultPda] = txService.getVaultPDA(publicKey);
       const existingAccount = await connection.getAccountInfo(vaultPda);
-      let tx: Transaction;
+      let vaultTx: Transaction;
 
       if (existingAccount && existingAccount.data.length > 0) {
         let existingVault = await txService.fetchVaultConfig(publicKey);
@@ -81,7 +90,6 @@ export function EstateReviewScreen() {
         }
         if (existingVault) {
           if (existingVault.active && !existingVault.executed) {
-            // Active vault exists — sync to device and navigate
             useVaultStore.getState().setRevoked(false);
             setVaultConfig(existingVault);
             Alert.alert('Vault Active', 'An active vault already exists on-chain. Synced to device.', [
@@ -89,35 +97,108 @@ export function EstateReviewScreen() {
             ]);
             return;
           } else if (existingVault.executed) {
-            // Executed vault — cannot re-use this PDA
             Alert.alert('Vault Executed', 'This vault has already been executed and cannot be re-used.', [
               { text: 'OK', onPress: () => navigation.popToTop() },
             ]);
             return;
           }
-          // Revoked zombie vault — atomic close + reinit in single transaction
-          tx = await txService.buildCloseAndReinitVaultTx(
+          vaultTx = await txService.buildCloseAndReinitVaultTx(
             publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
           );
         } else {
-          tx = await txService.buildInitializeVaultTx(
+          vaultTx = await txService.buildInitializeVaultTx(
             publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
           );
         }
       } else {
-        tx = await txService.buildInitializeVaultTx(
+        vaultTx = await txService.buildInitializeVaultTx(
           publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
         );
       }
 
-      tx.feePayer = publicKey;
+      // ── TX 1: Initialize vault + create durable nonce account ──
+      const nonceKeypair = Keypair.generate();
+      const { instructions: nonceIxs } = await txService.buildNonceCreateInstructions(
+        publicKey, nonceKeypair, agentPubkey,
+      );
+      for (const ix of nonceIxs) {
+        vaultTx.add(ix);
+      }
+
+      vaultTx.feePayer = publicKey;
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-      tx.recentBlockhash = blockhash;
+      vaultTx.recentBlockhash = blockhash;
 
-      const signedTx = await signTransaction(tx);
-      const txSig = await connection.sendRawTransaction(signedTx.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
-      await connection.confirmTransaction({ signature: txSig, blockhash, lastValidBlockHeight }, 'confirmed');
+      // Nonce keypair must partial-sign before MWA (for createAccount)
+      vaultTx.partialSign(nonceKeypair);
 
+      const signedVaultTx = await signTransaction(vaultTx);
+      const vaultTxSig = await connection.sendRawTransaction(signedVaultTx.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+      await connection.confirmTransaction(
+        { signature: vaultTxSig, blockhash, lastValidBlockHeight },
+        'confirmed',
+      );
+
+      // ── TX 2: Pre-sign distribution TX with durable nonce ──
+      // Check what assets are available for distribution
+      const nonceValue = await txService.fetchNonceValue(nonceKeypair.publicKey);
+      const updatedBalance = await connection.getBalance(publicKey);
+      const feeReserve = 0.01 * LAMPORTS_PER_SOL;
+      const distributableLamports = Math.floor(updatedBalance - feeReserve);
+
+      if (distributableLamports <= 0) {
+        Alert.alert(
+          'Low Balance',
+          'Vault created but your SOL balance is too low to pre-sign a distribution.\n\nFund your wallet and re-activate to set up distribution.',
+        );
+        setIsRegistering(false);
+        return;
+      }
+
+      const distTx = new Transaction();
+
+      // Priority fee for reliable landing at execution time (static estimate)
+      distTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
+      distTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 }));
+
+      // NonceAdvance MUST be the first non-ComputeBudget instruction
+      distTx.add(
+        SystemProgram.nonceAdvance({
+          noncePubkey: nonceKeypair.publicKey,
+          authorizedPubkey: agentPubkey,
+        }),
+      );
+
+      // Distribute SOL to each beneficiary according to their share
+      for (const b of onChainBeneficiaries) {
+        const amount = Math.floor(distributableLamports * b.shareBps / 10000);
+        if (amount > 0) {
+          distTx.add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: b.wallet,
+              lamports: amount,
+            }),
+          );
+        }
+      }
+
+      distTx.recentBlockhash = nonceValue;
+      distTx.feePayer = publicKey;
+
+      // Owner signs the distribution TX via MWA (agent signature added at execution time)
+      const signedDistTx = await signTransaction(distTx);
+
+      // Store partially-signed TX + metadata in SecureStore (TEE)
+      const txBytes = signedDistTx.serialize({ requireAllSignatures: false });
+      await keyManager.storePresignedTx(Buffer.from(txBytes).toString('base64'));
+      await keyManager.storeNonceAccount(nonceKeypair.publicKey.toBase58());
+      await keyManager.storeDistributionAmount(String(distributableLamports));
+
+      // Sync vault config to store AFTER both TXs complete
       const vaultConfig = await txService.fetchVaultConfig(publicKey);
       if (vaultConfig) {
         useVaultStore.getState().setRevoked(false);
@@ -126,10 +207,30 @@ export function EstateReviewScreen() {
         setSetupComplete(true);
       }
 
-      Alert.alert('Vault Activated', `Transaction confirmed on Solana devnet.\n\nTx: ${txSig.slice(0, 20)}...`, [
-        { text: 'View on Explorer', onPress: () => { Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`); navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },
-        { text: 'OK', onPress: () => { navigation.popToTop(); navigation.getParent()?.navigate('Status'); } },
-      ]);
+      const distSol = (distributableLamports / LAMPORTS_PER_SOL).toFixed(4);
+      Alert.alert(
+        'Vault Activated',
+        `Vault created on Solana devnet.\n\n` +
+        `Pre-signed distribution: ${distSol} SOL\n` +
+        `Tx: ${vaultTxSig.slice(0, 20)}...`,
+        [
+          {
+            text: 'View on Explorer',
+            onPress: () => {
+              Linking.openURL(`https://explorer.solana.com/tx/${vaultTxSig}?cluster=devnet`);
+              navigation.popToTop();
+              navigation.getParent()?.navigate('Status');
+            },
+          },
+          {
+            text: 'OK',
+            onPress: () => {
+              navigation.popToTop();
+              navigation.getParent()?.navigate('Status');
+            },
+          },
+        ],
+      );
     } catch (err: any) {
       const msg = err.message || String(err);
       if (msg.includes('already in use') || msg.includes('custom program error: 0x0')) {
@@ -231,7 +332,7 @@ export function EstateReviewScreen() {
           <DetailRow label="Network" value="Devnet" />
           <DetailRow label="Program" value={truncateAddress(PROGRAM_ID, 4)} mono />
           <DetailRow label="Est. Fee" value="~0.01 SOL" />
-          <DetailRow label="Execution" value="Agent Key (TEE)" />
+          <DetailRow label="Execution" value="Pre-signed TX (TEE)" />
         </View>
       </View>
 

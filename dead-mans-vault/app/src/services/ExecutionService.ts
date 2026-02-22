@@ -1,4 +1,4 @@
-import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from './VaultTransactionService';
@@ -6,8 +6,6 @@ import {
   saveExecutionStep,
   getLastCompletedStep,
   updateStepStatus,
-  getDistributableSnapshot,
-  saveDistributableSnapshot,
   clearDistributableSnapshot,
 } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepType } from '../types/execution';
@@ -15,23 +13,16 @@ import { Beneficiary } from '../types/vault';
 import { DeFiPosition } from '../types/defi';
 import { DeFiClosureService } from '../defi/closer';
 
-const SOL_RESERVE_LAMPORTS = new BN(0.1 * LAMPORTS_PER_SOL); // 0.1 SOL reserve for fees
-
 export class ExecutionService {
   private ownerPubkey: PublicKey;
   private beneficiaries: Beneficiary[];
   private defiPositions: DeFiPosition[];
   private isExecuting = false;
 
-  // Shared instances lifted from per-step creation (P1 fix)
   private txService: VaultTransactionService;
   private keyManager: KeyManager;
 
-  // Snapshot of distributable balance taken once before any distributions (S4 fix)
-  // Uses BN for precision-safe arithmetic on large lamport values
-  private distributableSnapshot: BN = new BN(0);
-
-  // Accumulated total SOL distributed for record_execution (B3 fix)
+  // Accumulated total SOL distributed for record_execution
   private totalSolDistributed: BN = new BN(0);
 
   constructor(
@@ -61,29 +52,18 @@ export class ExecutionService {
         }
       }
 
-      // Recover persisted snapshot if resuming after crash, or compute fresh.
-      // This ensures each beneficiary gets their exact entitled percentage
-      // even across crash/recovery cycles (S4 + crash recovery fix).
-      const savedSnapshot = await getDistributableSnapshot();
-      if (savedSnapshot !== null && lastCompleted >= 0) {
-        this.distributableSnapshot = new BN(savedSnapshot);
-      } else {
-        const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
-        const balance = await this.txService.getConnection().getBalance(vaultPda);
-        const balanceBN = new BN(balance);
-        this.distributableSnapshot = balanceBN.gt(SOL_RESERVE_LAMPORTS)
-          ? balanceBN.sub(SOL_RESERVE_LAMPORTS)
-          : new BN(0);
-        await saveDistributableSnapshot(this.distributableSnapshot.toNumber());
-      }
       this.totalSolDistributed = new BN(0);
 
       // Track whether any distribution step failed
       let hasDistributionFailure = false;
 
-      // Execute sequentially, skip completed steps
+      // Execute sequentially, skip completed and pre-skipped steps
       for (const step of steps) {
         if (step.order <= lastCompleted) continue;
+        if (step.status === 'skipped') {
+          await updateStepStatus(step.id, 'completed');
+          continue;
+        }
 
         // If a distribution failed, skip record_execution and self_terminate
         // to preserve the agent key for manual recovery
@@ -100,7 +80,7 @@ export class ExecutionService {
           await updateStepStatus(step.id, 'completed', txSig);
         } catch (err: any) {
           await updateStepStatus(step.id, 'failed', undefined, err.message);
-          if (step.type === 'distribute_percentage' || step.type === 'close_defi_position') {
+          if (step.type === 'submit_presigned_distribution' || step.type === 'close_defi_position') {
             hasDistributionFailure = true;
           }
         }
@@ -143,19 +123,18 @@ export class ExecutionService {
     // Distribute specific assets (skipped for MVP)
     steps.push(this.makeStep(order++, 'distribute_specific_asset', 'Distribute specific assets', 'skipped'));
 
-    // Steps 3+N: Distribute percentage to each beneficiary
-    for (const beneficiary of this.beneficiaries) {
-      const label = beneficiary.label || beneficiary.wallet.toString().slice(0, 8);
-      steps.push(
-        this.makeStep(
-          order++,
-          'distribute_percentage',
-          `Distribute ${(beneficiary.shareBps / 100).toFixed(1)}% to ${label}`,
-          'pending',
-          { wallet: beneficiary.wallet.toString(), shareBps: beneficiary.shareBps },
-        ),
-      );
-    }
+    // Submit pre-signed distribution TX (single step for all beneficiaries)
+    const beneficiaryLabels = this.beneficiaries
+      .map((b) => b.label || b.wallet.toString().slice(0, 8))
+      .join(', ');
+    steps.push(
+      this.makeStep(
+        order++,
+        'submit_presigned_distribution',
+        `Distribute SOL to ${this.beneficiaries.length} beneficiar${this.beneficiaries.length === 1 ? 'y' : 'ies'}: ${beneficiaryLabels}`,
+        'pending',
+      ),
+    );
 
     // Burn assets (skipped for MVP)
     steps.push(this.makeStep(order++, 'burn_asset', 'Burn designated assets', 'skipped'));
@@ -193,16 +172,16 @@ export class ExecutionService {
     switch (step.type) {
       case 'revoke_approvals':
       case 'distribute_specific_asset':
+      case 'distribute_percentage':
       case 'burn_asset':
       case 'close_accounts':
-        // Skipped for MVP
         return undefined;
 
       case 'close_defi_position':
         return this.executeCloseDeFiPosition(step);
 
-      case 'distribute_percentage':
-        return this.executeDistributePercentage(step);
+      case 'submit_presigned_distribution':
+        return this.executePresignedDistribution();
 
       case 'record_execution_log':
         return this.executeRecordExecution();
@@ -222,7 +201,6 @@ export class ExecutionService {
 
     const agentKeypair = await this.keyManager.getKeypair();
 
-    // Reconstruct a minimal position from step metadata
     const position: DeFiPosition = {
       protocol: step.metadata?.protocol as any,
       type: '',
@@ -248,36 +226,37 @@ export class ExecutionService {
     return result.txSignature;
   }
 
-  private async executeDistributePercentage(step: ExecutionStep): Promise<string> {
+  /**
+   * Submit the pre-signed durable nonce distribution TX.
+   * Checks available assets before submission, then agent adds
+   * its signature (nonce authority) and submits.
+   */
+  private async executePresignedDistribution(): Promise<string> {
+    const base64Tx = await this.keyManager.getPresignedTx();
+    if (!base64Tx) {
+      throw new Error('No pre-signed distribution TX found in secure storage');
+    }
+
+    // Check what assets are available for distribution
+    const ownerBalance = await this.txService.getConnection().getBalance(this.ownerPubkey);
+    const storedAmount = await this.keyManager.getDistributionAmount();
+    const requiredLamports = storedAmount ? parseInt(storedAmount, 10) : 0;
+
+    if (requiredLamports > 0 && ownerBalance < requiredLamports) {
+      throw new Error(
+        `Insufficient owner balance for distribution. ` +
+        `Required: ${(requiredLamports / 1e9).toFixed(4)} SOL, ` +
+        `Available: ${(ownerBalance / 1e9).toFixed(4)} SOL`,
+      );
+    }
+
     const agentKeypair = await this.keyManager.getKeypair();
+    const txBytes = Buffer.from(base64Tx, 'base64');
 
-    const beneficiaryWallet = new PublicKey(step.metadata?.wallet as string);
-    const shareBps = step.metadata?.shareBps as number;
+    const sig = await this.txService.submitPresignedTx(agentKeypair, txBytes);
 
-    // Use the frozen distributableSnapshot instead of re-reading balance.
-    // BN arithmetic prevents precision loss for vaults > 900k SOL.
-    if (this.distributableSnapshot.lte(new BN(0))) {
-      throw new Error('Insufficient SOL in vault for distribution');
-    }
-
-    // BN: (distributableSnapshot * shareBps) / 10000
-    const amountLamports = this.distributableSnapshot.mul(new BN(shareBps)).div(new BN(10000));
-
-    if (amountLamports.lte(new BN(0))) {
-      throw new Error('Distribution amount too small');
-    }
-
-    // On-chain enforced: program verifies grace period, beneficiary whitelist,
-    // vault state, and agent authorization before transferring from vault PDA
-    const sig = await this.txService.executeDistribution(
-      agentKeypair,
-      this.ownerPubkey,
-      beneficiaryWallet,
-      amountLamports,
-    );
-
-    // Accumulate for record_execution (B3 fix)
-    this.totalSolDistributed = this.totalSolDistributed.add(amountLamports);
+    // Use the stored distribution amount for accurate on-chain record
+    this.totalSolDistributed = new BN(requiredLamports > 0 ? requiredLamports : 0);
 
     return sig;
   }
@@ -285,7 +264,6 @@ export class ExecutionService {
   private async executeRecordExecution(): Promise<string> {
     const agentKeypair = await this.keyManager.getKeypair();
 
-    // Zero attestation hash for MVP
     const attestationHash = new Array(32).fill(0);
 
     return this.txService.recordExecution(agentKeypair, this.ownerPubkey, {
@@ -299,6 +277,9 @@ export class ExecutionService {
 
   private async executeSelfTerminate(): Promise<void> {
     await clearDistributableSnapshot();
+    await this.keyManager.clearPresignedTx();
+    await this.keyManager.clearNonceAccount();
+    await this.keyManager.clearDistributionAmount();
     await this.keyManager.destroyKey();
   }
 }

@@ -6,6 +6,8 @@ import {
   SystemProgram,
   ComputeBudgetProgram,
   sendAndConfirmTransaction,
+  NONCE_ACCOUNT_LENGTH,
+  NonceAccount,
 } from '@solana/web3.js';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
@@ -514,6 +516,108 @@ export class VaultTransactionService {
       }),
     );
     return this.addPriorityFee(tx, [owner, vaultPda], 80_000);
+  }
+
+  /**
+   * Build instructions to create a durable nonce account.
+   * The nonce authority is set to the agent key so it can advance the nonce
+   * when submitting the pre-signed distribution TX at execution time.
+   */
+  async buildNonceCreateInstructions(
+    owner: PublicKey,
+    nonceKeypair: Keypair,
+    agentPubkey: PublicKey,
+  ): Promise<{ instructions: Transaction['instructions']; rentLamports: number }> {
+    const rentLamports = await this.connection.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_LENGTH);
+
+    const createIx = SystemProgram.createAccount({
+      fromPubkey: owner,
+      newAccountPubkey: nonceKeypair.publicKey,
+      lamports: rentLamports,
+      space: NONCE_ACCOUNT_LENGTH,
+      programId: SystemProgram.programId,
+    });
+
+    const initNonceIx = SystemProgram.nonceInitialize({
+      noncePubkey: nonceKeypair.publicKey,
+      authorizedPubkey: agentPubkey,
+    });
+
+    return { instructions: [createIx, initNonceIx], rentLamports };
+  }
+
+  /**
+   * Fetch the current nonce value from a nonce account.
+   */
+  async fetchNonceValue(nonceAccountPubkey: PublicKey): Promise<string> {
+    const accountInfo = await this.connection.getAccountInfo(nonceAccountPubkey);
+    if (!accountInfo) {
+      throw new Error('Nonce account not found');
+    }
+    const nonceAccount = NonceAccount.fromAccountData(accountInfo.data);
+    return nonceAccount.nonce;
+  }
+
+  /**
+   * Build a durable-nonce distribution TX that transfers SOL from the owner
+   * to each beneficiary according to their share percentages.
+   * The TX uses the nonce value as recentBlockhash so it stays valid indefinitely.
+   * Returns the TX needing both owner (fee payer) and agent (nonce authority) signatures.
+   */
+  buildPresignedDistributionTx(
+    owner: PublicKey,
+    agentPubkey: PublicKey,
+    nonceAccountPubkey: PublicKey,
+    nonceValue: string,
+    beneficiaries: { wallet: PublicKey; shareBps: number }[],
+    distributableLamports: number,
+  ): Transaction {
+    const tx = new Transaction();
+
+    // NonceAdvance MUST be the first instruction for durable nonce TXs
+    tx.add(
+      SystemProgram.nonceAdvance({
+        noncePubkey: nonceAccountPubkey,
+        authorizedPubkey: agentPubkey,
+      }),
+    );
+
+    for (const b of beneficiaries) {
+      const amount = Math.floor(distributableLamports * b.shareBps / 10000);
+      if (amount > 0) {
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: owner,
+            toPubkey: b.wallet,
+            lamports: amount,
+          }),
+        );
+      }
+    }
+
+    tx.recentBlockhash = nonceValue;
+    tx.feePayer = owner;
+
+    return tx;
+  }
+
+  /**
+   * Submit a pre-signed distribution TX by adding the agent's signature.
+   */
+  async submitPresignedTx(
+    agentKeypair: Keypair,
+    serializedTx: Buffer,
+  ): Promise<string> {
+    const tx = Transaction.from(serializedTx);
+    tx.partialSign(agentKeypair);
+
+    const sig = await this.connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    });
+
+    await this.connection.confirmTransaction(sig, 'confirmed');
+    return sig;
   }
 
   async buildRotateAgentTx(
