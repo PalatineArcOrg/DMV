@@ -146,7 +146,7 @@ export function DashboardScreen() {
     escalationStage,
     secondsRemaining,
     isConfirming,
-  } = useHeartbeat(isVaultSetup && (vaultData?.active ?? false));
+  } = useHeartbeat(isVaultSetup && (vaultData?.active ?? false), publicKey ?? null);
 
   const cfg = STAGE_CONFIG[escalationStage] || STAGE_CONFIG[0];
 

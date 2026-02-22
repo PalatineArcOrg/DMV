@@ -1,10 +1,14 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
+import { PublicKey } from '@solana/web3.js';
 import { HeartbeatMethod, HeartbeatStatus, HeartbeatConfig, EscalationStage } from '../types';
 import { HeartbeatService } from '../services/HeartbeatService';
 import { EscalationService } from '../services/EscalationService';
+import { ExecutionService } from '../services/ExecutionService';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
+import { useVaultStore } from '../store/useVaultStore';
 import { useDemoStore } from '../store/useDemoStore';
+import { getDefiPositions } from '../db/defiPositionRepo';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS } from '../utils/constants';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
@@ -28,7 +32,7 @@ interface UseHeartbeatResult {
   isConfirming: boolean;
 }
 
-export function useHeartbeat(vaultActive: boolean): UseHeartbeatResult {
+export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null = null): UseHeartbeatResult {
   const heartbeatConfig = useHeartbeatStore((s) => s.config) ?? DEFAULT_CONFIG;
   const heartbeatStatus = useHeartbeatStore((s) => s.status);
   const escalationState = useEscalationStore((s) => s.state);
@@ -75,6 +79,34 @@ export function useHeartbeat(vaultActive: boolean): UseHeartbeatResult {
     const escService = new EscalationService(hbService, escConfig);
     escalationServiceRef.current = escService;
 
+    // Wire execution callback — fires when Stage 4 is reached
+    if (ownerPubkey) {
+      escService.setExecutionCallback(async () => {
+        try {
+          const currentState = useVaultStore.getState();
+          let defiPositions = currentState.defiPositions;
+
+          // Recover from SQLite if memory is empty (app restart scenario)
+          if (defiPositions.length === 0) {
+            const persisted = await getDefiPositions(ownerPubkey.toString());
+            if (persisted.length > 0) {
+              defiPositions = persisted;
+              currentState.setDefiPositions(persisted);
+            }
+          }
+
+          const executionService = new ExecutionService(
+            ownerPubkey,
+            currentState.beneficiaries,
+            defiPositions,
+          );
+          await executionService.execute();
+        } catch {
+          // Execution failure handled internally by ExecutionService step tracking
+        }
+      });
+    }
+
     escService.start();
     setIsMonitoring(true);
 
@@ -107,7 +139,7 @@ export function useHeartbeat(vaultActive: boolean): UseHeartbeatResult {
       }
       setIsMonitoring(false);
     };
-  }, [vaultActive, heartbeatConfig, isDemoMode]);
+  }, [vaultActive, heartbeatConfig, isDemoMode, ownerPubkey]);
 
   const confirmHeartbeat = useCallback(
     async (method: HeartbeatMethod = 'active_tap') => {

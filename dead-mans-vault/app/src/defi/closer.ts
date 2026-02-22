@@ -77,11 +77,13 @@ export class DeFiClosureService {
         position.tokenAmount * Math.pow(10, position.tokenDecimals),
       ).toString();
 
+      // Use 3% slippage for autonomous execution (no human approval)
       const result = await executeSwap(
         this.connection,
         agentKeypair,
         position.tokenMint,
         rawAmount,
+        300,
       );
 
       const solRecovered = Number(result.outputAmount) / 1e9;

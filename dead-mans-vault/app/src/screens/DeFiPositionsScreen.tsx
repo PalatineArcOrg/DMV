@@ -14,6 +14,7 @@ import { useVaultStore } from '../store/useVaultStore';
 import { usePortfolioStore } from '../store/usePortfolioStore';
 import { PortfolioScanner } from '../services/PortfolioScanner';
 import { DeFiPosition, DeFiPositionAction, ClosureStrategy } from '../types/defi';
+import { saveDefiPositions } from '../db/defiPositionRepo';
 import { RPC_URL, HELIUS_API_KEY, COLORS, SPACING, FONTS } from '../utils/constants';
 import { StepIndicator } from '../components/StepIndicator';
 
@@ -90,10 +91,13 @@ export function DeFiPositionsScreen() {
     [],
   );
 
-  const handleContinue = useCallback(() => {
+  const handleContinue = useCallback(async () => {
     setDefiPositions(positions);
+    if (publicKey) {
+      await saveDefiPositions(publicKey.toString(), positions);
+    }
     navigation.navigate('EstateReview');
-  }, [positions, setDefiPositions, navigation]);
+  }, [positions, setDefiPositions, publicKey, navigation]);
 
   if (isLoading) {
     return (

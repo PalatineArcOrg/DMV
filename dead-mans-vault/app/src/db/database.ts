@@ -47,11 +47,32 @@ export async function initDatabase(): Promise<void> {
       PRIMARY KEY (mint, date)
     );
 
+    CREATE TABLE IF NOT EXISTS defi_positions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_wallet TEXT NOT NULL,
+      protocol TEXT NOT NULL,
+      type TEXT NOT NULL,
+      description TEXT NOT NULL,
+      estimated_value_usd REAL NOT NULL DEFAULT 0,
+      estimated_value_sol REAL NOT NULL DEFAULT 0,
+      action TEXT NOT NULL DEFAULT 'close',
+      account_address TEXT NOT NULL,
+      closure_strategy TEXT NOT NULL,
+      token_mint TEXT,
+      token_amount REAL,
+      token_decimals INTEGER,
+      tokens_json TEXT,
+      updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_heartbeat_timestamp
       ON heartbeat_history(timestamp DESC);
 
     CREATE INDEX IF NOT EXISTS idx_execution_order
       ON execution_steps(step_order ASC);
+
+    CREATE INDEX IF NOT EXISTS idx_defi_positions_owner
+      ON defi_positions(owner_wallet);
   `);
 }
 

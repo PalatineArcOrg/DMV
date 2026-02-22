@@ -102,6 +102,11 @@ export async function executeSwap(
     throw new Error(`Jupiter: no route found for ${inputMint} → SOL`);
   }
 
+  // Validate minimum output — reject illiquid or zero-value swaps
+  if (!quote.otherAmountThreshold || BigInt(quote.otherAmountThreshold) <= 0n) {
+    throw new Error('Jupiter: minimum output is zero — likely illiquid pair');
+  }
+
   // 2. Get swap transaction
   const swapTxBase64 = await getSwapTransaction(quote, agentKeypair.publicKey.toString());
   if (!swapTxBase64) {
