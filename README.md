@@ -35,6 +35,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Stage 4 is
 - **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
 - **Autonomous execution** -- Agent key (TEE-stored) handles distribution without user interaction at Stage 4
+- **Durable nonce pre-signed distribution** -- Owner pre-signs distribution TX during vault setup; agent submits atomically at Stage 4 with no wallet interaction
 - **Idempotent crash recovery** -- Every execution step checkpointed to SQLite before proceeding
 - **Clean vault lifecycle** -- Revoking closes on-chain PDAs and reclaims rent; re-initialization on the same wallet works atomically
 
@@ -170,9 +171,9 @@ Authentication screen guards app access with biometric/PIN when enabled.
 | **BackgroundAgent** | Singleton orchestrator for heartbeat monitoring and escalation evaluation |
 | **HeartbeatService** | Records confirmations to SQLite, tracks overdue status, monitors on-chain wallet activity |
 | **EscalationService** | Autonomous state machine evaluating every 60s (10s in demo), transitions through 4 stages |
-| **ExecutionService** | 5-step idempotent execution engine with SQLite checkpointing (BN arithmetic end-to-end) |
+| **ExecutionService** | 8-step idempotent execution engine with pre-signed durable nonce distribution and SQLite checkpointing |
 | **VaultTransactionService** | Builds and sends all on-chain transactions with priority fees and raw byte parsing fallback |
-| **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker) |
+| **KeyManager** | Agent keypair + pre-signed TX + nonce account lifecycle via expo-secure-store (TEE on Seeker) |
 | **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX) with frequency caps |
 | **PortfolioScanner** | Token balances via Helius DAS, dual-oracle pricing (Pyth + Jupiter), DeFi detection |
 | **MigrationService** | Detects device migration and triggers on-chain agent rotation |
@@ -233,7 +234,7 @@ dead-mans-vault/
         +-- hooks/                   # useWallet, useHeartbeat, usePortfolio, useVaultProgram
         +-- store/                   # Zustand stores (vault, heartbeat, escalation, demo, auth)
         +-- tee/                     # KeyManager (TEE agent key management)
-        +-- db/                      # SQLite database layer (4 tables + repos)
+        +-- db/                      # SQLite database layer (6 tables + repos)
         +-- defi/                    # DeFi protocol detectors + registry
         +-- types/                   # TypeScript type definitions + API interfaces
         +-- utils/                   # Constants, formatting, validation, IDL, fetchWithRetry

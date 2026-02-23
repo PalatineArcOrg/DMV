@@ -519,31 +519,39 @@ export class VaultTransactionService {
   }
 
   /**
-   * Build instructions to create a durable nonce account.
+   * Build instructions to create a durable nonce account using createAccountWithSeed.
+   * Uses seed-derived address so only the owner needs to sign (no second signer).
+   * Seed Vault rejects multi-signer TXs where it doesn't control all signers.
    * The nonce authority is set to the agent key so it can advance the nonce
    * when submitting the pre-signed distribution TX at execution time.
    */
   async buildNonceCreateInstructions(
     owner: PublicKey,
-    nonceKeypair: Keypair,
     agentPubkey: PublicKey,
-  ): Promise<{ instructions: Transaction['instructions']; rentLamports: number }> {
+  ): Promise<{ instructions: Transaction['instructions']; nonceAccountPubkey: PublicKey; rentLamports: number }> {
+    const seed = agentPubkey.toBase58().slice(0, 32);
+    const nonceAccountPubkey = await PublicKey.createWithSeed(
+      owner, seed, SystemProgram.programId,
+    );
+
     const rentLamports = await this.connection.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_LENGTH);
 
-    const createIx = SystemProgram.createAccount({
+    const createIx = SystemProgram.createAccountWithSeed({
       fromPubkey: owner,
-      newAccountPubkey: nonceKeypair.publicKey,
+      newAccountPubkey: nonceAccountPubkey,
+      basePubkey: owner,
+      seed,
       lamports: rentLamports,
       space: NONCE_ACCOUNT_LENGTH,
       programId: SystemProgram.programId,
     });
 
     const initNonceIx = SystemProgram.nonceInitialize({
-      noncePubkey: nonceKeypair.publicKey,
+      noncePubkey: nonceAccountPubkey,
       authorizedPubkey: agentPubkey,
     });
 
-    return { instructions: [createIx, initNonceIx], rentLamports };
+    return { instructions: [createIx, initNonceIx], nonceAccountPubkey, rentLamports };
   }
 
   /**
