@@ -3,7 +3,6 @@ export type ExecutionStepType =
   | 'close_defi_position'
   | 'distribute_specific_asset'
   | 'distribute_percentage'
-  | 'distribute_sol'
   | 'submit_presigned_distribution'
   | 'burn_asset'
   | 'close_accounts'

@@ -23,7 +23,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { useEscalationStore } from '../store/useEscalationStore';
-
+import { KeyManager } from '../tee/KeyManager';
 import appJson from '../../app.json';
 
 export function SettingsScreen() {
@@ -106,7 +106,11 @@ export function SettingsScreen() {
                 useHeartbeatStore.getState().reset();
                 useEscalationStore.getState().reset();
 
-                // No extra cleanup needed — vault PDA SOL returned to owner on revoke
+                // Clear pre-signed distribution TX (no longer valid after revoke)
+                const km = KeyManager.getInstance();
+                await km.clearPresignedTx();
+                await km.clearNonceAccount();
+                await km.clearDistributionAmount();
 
                 Alert.alert('Vault Revoked', `Vault closed and rent reclaimed.\n\nTx: ${txSig.slice(0, 20)}...`, [
                   { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
