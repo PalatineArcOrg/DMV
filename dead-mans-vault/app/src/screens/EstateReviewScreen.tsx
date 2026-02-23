@@ -24,7 +24,7 @@ import { StepIndicator } from '../components/StepIndicator';
 
 export function EstateReviewScreen() {
   const navigation = useNavigation<any>();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction, signMessage } = useWallet();
   const { beneficiaries, escalationConfig, setSetupComplete, setVaultConfig } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
 
@@ -189,11 +189,15 @@ export function EstateReviewScreen() {
       distTx.recentBlockhash = nonceValue;
       distTx.feePayer = publicKey;
 
-      // Owner signs the distribution TX via MWA (agent signature added at execution time)
-      const signedDistTx = await signTransaction(distTx);
+      // Sign the TX message via signMessage to bypass Seed Vault's blockhash
+      // network validation (durable nonce blockhash triggers "Network mismatch").
+      // signMessage signs raw bytes without parsing them as a transaction.
+      const messageBytes = distTx.serializeMessage();
+      const ownerSig = await signMessage(messageBytes);
+      distTx.addSignature(publicKey, Buffer.from(ownerSig));
 
       // Store partially-signed TX + metadata in SecureStore (TEE)
-      const txBytes = signedDistTx.serialize({ requireAllSignatures: false });
+      const txBytes = distTx.serialize({ requireAllSignatures: false });
       await keyManager.storePresignedTx(Buffer.from(txBytes).toString('base64'));
       await keyManager.storeNonceAccount(nonceKeypair.publicKey.toBase58());
       await keyManager.storeDistributionAmount(String(distributableLamports));
