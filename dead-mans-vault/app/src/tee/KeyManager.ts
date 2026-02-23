@@ -4,9 +4,6 @@ import bs58 from 'bs58';
 
 const SECRET_KEY = 'dmv_agent_secret_key';
 const PUBLIC_KEY = 'dmv_agent_public_key';
-const PRESIGNED_TX_KEY = 'dmv_presigned_distribution_tx';
-const NONCE_ACCOUNT_KEY = 'dmv_nonce_account';
-const DISTRIBUTION_AMOUNT_KEY = 'dmv_distribution_amount';
 
 export class KeyManager {
   private static instance: KeyManager | null = null;
@@ -66,51 +63,6 @@ export class KeyManager {
   async destroyKey(): Promise<void> {
     await SecureStore.deleteItemAsync(SECRET_KEY);
     await SecureStore.deleteItemAsync(PUBLIC_KEY);
-    await SecureStore.deleteItemAsync(PRESIGNED_TX_KEY);
-    await SecureStore.deleteItemAsync(NONCE_ACCOUNT_KEY);
-    await SecureStore.deleteItemAsync(DISTRIBUTION_AMOUNT_KEY);
     this.cachedKeypair = null;
-  }
-
-  async storePresignedTx(base64Tx: string): Promise<void> {
-    await SecureStore.setItemAsync(PRESIGNED_TX_KEY, base64Tx, {
-      requireAuthentication: false,
-    });
-  }
-
-  async getPresignedTx(): Promise<string | null> {
-    return SecureStore.getItemAsync(PRESIGNED_TX_KEY);
-  }
-
-  async clearPresignedTx(): Promise<void> {
-    await SecureStore.deleteItemAsync(PRESIGNED_TX_KEY);
-  }
-
-  async storeNonceAccount(pubkey: string): Promise<void> {
-    await SecureStore.setItemAsync(NONCE_ACCOUNT_KEY, pubkey, {
-      requireAuthentication: false,
-    });
-  }
-
-  async getNonceAccount(): Promise<string | null> {
-    return SecureStore.getItemAsync(NONCE_ACCOUNT_KEY);
-  }
-
-  async clearNonceAccount(): Promise<void> {
-    await SecureStore.deleteItemAsync(NONCE_ACCOUNT_KEY);
-  }
-
-  async storeDistributionAmount(lamports: string): Promise<void> {
-    await SecureStore.setItemAsync(DISTRIBUTION_AMOUNT_KEY, lamports, {
-      requireAuthentication: false,
-    });
-  }
-
-  async getDistributionAmount(): Promise<string | null> {
-    return SecureStore.getItemAsync(DISTRIBUTION_AMOUNT_KEY);
-  }
-
-  async clearDistributionAmount(): Promise<void> {
-    await SecureStore.deleteItemAsync(DISTRIBUTION_AMOUNT_KEY);
   }
 }

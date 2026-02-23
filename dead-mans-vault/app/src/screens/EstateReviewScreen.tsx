@@ -10,7 +10,7 @@ import {
   Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useVaultStore } from '../store/useVaultStore';
 import { useWallet } from '../hooks/useWallet';
@@ -24,7 +24,7 @@ import { StepIndicator } from '../components/StepIndicator';
 
 export function EstateReviewScreen() {
   const navigation = useNavigation<any>();
-  const { publicKey, signTransaction, signMessage } = useWallet();
+  const { publicKey, signTransaction } = useWallet();
   const { beneficiaries, escalationConfig, setSetupComplete, setVaultConfig } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
 
@@ -67,7 +67,7 @@ export function EstateReviewScreen() {
         hasSpecificAssets: b.hasSpecificAssets,
       }));
 
-      // Pre-flight balance check — need enough for vault init + nonce rent + distribution fees
+      // Pre-flight balance check — need enough for vault init + deposit + fees
       const ownerBalance = await connection.getBalance(publicKey);
       const MIN_BALANCE = 0.02 * LAMPORTS_PER_SOL;
       if (ownerBalance < MIN_BALANCE) {
@@ -116,14 +116,23 @@ export function EstateReviewScreen() {
         );
       }
 
-      // ── TX 1: Initialize vault + create durable nonce account ──
-      // Uses createAccountWithSeed so only the owner needs to sign.
-      // Seed Vault rejects multi-signer TXs with unknown keypairs.
-      const { instructions: nonceIxs, nonceAccountPubkey } = await txService.buildNonceCreateInstructions(
-        publicKey, agentPubkey,
-      );
-      for (const ix of nonceIxs) {
-        vaultTx.add(ix);
+      // ── Single TX: Initialize vault + deposit SOL into vault PDA ──
+      // At Stage 4, the agent calls execute_sol_distribution on-chain
+      // (signed by agent only) to distribute from the vault PDA.
+      // vaultPda already derived above for existing-vault check.
+
+      // Calculate how much SOL to deposit into the vault PDA
+      const feeReserve = 0.02 * LAMPORTS_PER_SOL;
+      const depositLamports = Math.floor(ownerBalance - feeReserve);
+
+      if (depositLamports > 0) {
+        vaultTx.add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: vaultPda,
+            lamports: depositLamports,
+          }),
+        );
       }
 
       vaultTx.feePayer = publicKey;
@@ -141,67 +150,7 @@ export function EstateReviewScreen() {
         'confirmed',
       );
 
-      // ── TX 2: Pre-sign distribution TX with durable nonce ──
-      // Check what assets are available for distribution
-      const nonceValue = await txService.fetchNonceValue(nonceAccountPubkey);
-      const updatedBalance = await connection.getBalance(publicKey);
-      const feeReserve = 0.01 * LAMPORTS_PER_SOL;
-      const distributableLamports = Math.floor(updatedBalance - feeReserve);
-
-      if (distributableLamports <= 0) {
-        Alert.alert(
-          'Low Balance',
-          'Vault created but your SOL balance is too low to pre-sign a distribution.\n\nFund your wallet and re-activate to set up distribution.',
-        );
-        setIsRegistering(false);
-        return;
-      }
-
-      const distTx = new Transaction();
-
-      // Priority fee for reliable landing at execution time (static estimate)
-      distTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }));
-      distTx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 }));
-
-      // NonceAdvance MUST be the first non-ComputeBudget instruction
-      distTx.add(
-        SystemProgram.nonceAdvance({
-          noncePubkey: nonceAccountPubkey,
-          authorizedPubkey: agentPubkey,
-        }),
-      );
-
-      // Distribute SOL to each beneficiary according to their share
-      for (const b of onChainBeneficiaries) {
-        const amount = Math.floor(distributableLamports * b.shareBps / 10000);
-        if (amount > 0) {
-          distTx.add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: b.wallet,
-              lamports: amount,
-            }),
-          );
-        }
-      }
-
-      distTx.recentBlockhash = nonceValue;
-      distTx.feePayer = publicKey;
-
-      // Sign the TX message via signMessage to bypass Seed Vault's blockhash
-      // network validation (durable nonce blockhash triggers "Network mismatch").
-      // signMessage signs raw bytes without parsing them as a transaction.
-      const messageBytes = distTx.serializeMessage();
-      const ownerSig = await signMessage(messageBytes);
-      distTx.addSignature(publicKey, Buffer.from(ownerSig));
-
-      // Store partially-signed TX + metadata in SecureStore (TEE)
-      const txBytes = distTx.serialize({ requireAllSignatures: false });
-      await keyManager.storePresignedTx(Buffer.from(txBytes).toString('base64'));
-      await keyManager.storeNonceAccount(nonceAccountPubkey.toBase58());
-      await keyManager.storeDistributionAmount(String(distributableLamports));
-
-      // Sync vault config to store AFTER both TXs complete
+      // Sync vault config to store
       const vaultConfig = await txService.fetchVaultConfig(publicKey);
       if (vaultConfig) {
         useVaultStore.getState().setRevoked(false);
@@ -210,11 +159,11 @@ export function EstateReviewScreen() {
         setSetupComplete(true);
       }
 
-      const distSol = (distributableLamports / LAMPORTS_PER_SOL).toFixed(4);
+      const depositSol = depositLamports > 0 ? (depositLamports / LAMPORTS_PER_SOL).toFixed(4) : '0';
       Alert.alert(
         'Vault Activated',
         `Vault created on Solana devnet.\n\n` +
-        `Pre-signed distribution: ${distSol} SOL\n` +
+        `Deposited: ${depositSol} SOL into vault\n` +
         `Tx: ${vaultTxSig.slice(0, 20)}...`,
         [
           {
