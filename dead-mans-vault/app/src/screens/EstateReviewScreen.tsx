@@ -18,6 +18,8 @@ import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useDemoStore } from '../store/useDemoStore';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
+import { useEscalationStore } from '../store/useEscalationStore';
+import { clearHeartbeatHistory, recordHeartbeat } from '../db/heartbeatRepo';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, PROGRAM_ID } from '../utils/constants';
 import { StepIndicator } from '../components/StepIndicator';
@@ -141,6 +143,13 @@ export function EstateReviewScreen() {
         { signature: vaultTxSig, blockhash, lastValidBlockHeight },
         'confirmed',
       );
+
+      // Reset stale heartbeat/escalation state from any previous vault session
+      // This prevents the EscalationService from immediately jumping to Stage 4
+      // when the Dashboard starts monitoring with leftover SQLite heartbeat data
+      await clearHeartbeatHistory();
+      await recordHeartbeat('active_tap');
+      useEscalationStore.getState().reset();
 
       // Sync vault config to store
       const vaultConfig = await txService.fetchVaultConfig(publicKey);

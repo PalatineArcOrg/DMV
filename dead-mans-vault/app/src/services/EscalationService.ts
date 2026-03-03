@@ -28,6 +28,11 @@ export class EscalationService {
   constructor(heartbeatService: HeartbeatService, config: EscalationConfig) {
     this.heartbeatService = heartbeatService;
     this.config = config;
+
+    // Restore current stage from Zustand to prevent re-triggering Stage 4
+    // when the useEffect re-runs and creates a new EscalationService instance
+    const store = useEscalationStore.getState();
+    this.currentStage = store.state.stage;
   }
 
   setExecutionCallback(callback: () => void): void {
@@ -125,8 +130,15 @@ export class EscalationService {
       }
       case 4:
         // Stop the evaluation loop — Stage 4 is terminal, no further evaluation needed.
-        // This prevents re-firing the execution callback if the app restarts mid-execution.
         this.stop();
+
+        // Guard against double execution: if Stage 4 was already started (e.g. useEffect
+        // re-ran and created a new EscalationService), do NOT fire the callback again.
+        if (store.state.executionStarted) {
+          break;
+        }
+
+        store.setExecutionStarted(true);
         NotificationService.sendExecutionStarted();
         store.recordNotification();
         if (this.executionCallback) {

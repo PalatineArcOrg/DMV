@@ -40,6 +40,11 @@ export async function getHeartbeatCount(): Promise<number> {
   return row?.count ?? 0;
 }
 
+export async function clearHeartbeatHistory(): Promise<void> {
+  const db = getDb();
+  await db.runAsync('DELETE FROM heartbeat_history');
+}
+
 export async function getHeartbeatHistory(
   limit: number = 50,
 ): Promise<HeartbeatHistoryEntry[]> {

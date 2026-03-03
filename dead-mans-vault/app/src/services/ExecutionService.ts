@@ -19,11 +19,13 @@ import { Beneficiary } from '../types/vault';
 import { DeFiPosition } from '../types/defi';
 import { DeFiClosureService } from '../defi/closer';
 
+// Module-level guard prevents concurrent execution across multiple instances
+let globalExecutionInProgress = false;
+
 export class ExecutionService {
   private ownerPubkey: PublicKey;
   private beneficiaries: Beneficiary[];
   private defiPositions: DeFiPosition[];
-  private isExecuting = false;
 
   private txService: VaultTransactionService;
   private keyManager: KeyManager;
@@ -45,8 +47,8 @@ export class ExecutionService {
   }
 
   async execute(): Promise<void> {
-    if (this.isExecuting) return;
-    this.isExecuting = true;
+    if (globalExecutionInProgress) return;
+    globalExecutionInProgress = true;
 
     try {
       const lastCompleted = await getLastCompletedStep();
@@ -90,8 +92,9 @@ export class ExecutionService {
         }
       }
 
-      // Track whether any distribution step failed
+      // Track failures to protect agent key for recovery
       let hasDistributionFailure = false;
+      let recordExecutionSucceeded = false;
 
       // Execute sequentially, skip completed and pre-skipped steps
       for (const step of steps) {
@@ -109,20 +112,36 @@ export class ExecutionService {
           continue;
         }
 
+        // Defense in depth: never destroy agent key unless record_execution succeeded
+        if (step.type === 'self_terminate' && !recordExecutionSucceeded) {
+          await updateStepStatus(step.id, 'failed', undefined,
+            'Skipped: record_execution did not succeed. Agent key preserved for recovery.');
+          continue;
+        }
+
         await updateStepStatus(step.id, 'in_progress');
 
         try {
           const txSig = await this.executeStep(step);
           await updateStepStatus(step.id, 'completed', txSig);
+          if (step.type === 'record_execution_log') {
+            recordExecutionSucceeded = true;
+          }
         } catch (err: any) {
-          await updateStepStatus(step.id, 'failed', undefined, err.message);
+          // Set failure flag BEFORE updateStepStatus to guarantee it's always set
+          // even if the DB write throws
           if (step.type === 'distribute_sol' || step.type === 'distribute_token' || step.type === 'close_defi_position') {
             hasDistributionFailure = true;
+          }
+          try {
+            await updateStepStatus(step.id, 'failed', undefined, err.message);
+          } catch {
+            // DB write failed — hasDistributionFailure is already set above
           }
         }
       }
     } finally {
-      this.isExecuting = false;
+      globalExecutionInProgress = false;
     }
   }
 
@@ -297,7 +316,7 @@ export class ExecutionService {
    * Uses a snapshot of the vault balance (taken on first distribution step)
    * to ensure consistent amounts across crash recovery.
    */
-  private async executeDistributeSol(step: ExecutionStep): Promise<string> {
+  private async executeDistributeSol(step: ExecutionStep): Promise<string | undefined> {
     const agentKeypair = await this.keyManager.getKeypair();
     const connection = this.txService.getConnection();
     const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
@@ -313,8 +332,9 @@ export class ExecutionService {
       await saveDistributableSnapshot(distributable);
     }
 
+    // No SOL deposited — skip gracefully (vault may only have SPL tokens)
     if (distributable <= 0) {
-      throw new Error('Vault PDA has no distributable SOL (only rent-exempt minimum remains)');
+      return undefined;
     }
 
     const beneficiaryWallet = new PublicKey(step.metadata?.beneficiaryWallet as string);
@@ -322,7 +342,7 @@ export class ExecutionService {
     const amountLamports = Math.floor(distributable * shareBps / 10000);
 
     if (amountLamports <= 0) {
-      throw new Error('Calculated distribution amount is zero');
+      return undefined;
     }
 
     const sig = await this.txService.executeDistribution(

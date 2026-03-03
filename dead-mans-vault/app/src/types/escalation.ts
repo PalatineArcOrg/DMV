@@ -7,6 +7,7 @@ export interface EscalationState {
   stageEnteredAt: number | null;
   executionDeadline: number | null;
   lastNotificationAt: number | null;
+  executionStarted: boolean;
 }
 
 export interface EscalationConfig {
