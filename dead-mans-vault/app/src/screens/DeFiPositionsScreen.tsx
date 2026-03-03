@@ -45,6 +45,35 @@ const STRATEGY_COLORS: Record<ClosureStrategy, string> = {
   unsupported: COLORS.textMuted,
 };
 
+// --- Tier classification ---
+// Tier 1 (Depositable): liquid tokens that can be swapped to SOL
+// Tier 2 (Reassignable): native stake accounts — withdraw authority can be reassigned
+// Tier 3 (Unrecoverable): locked positions requiring owner signature to close
+
+type PositionTier = 1 | 2 | 3;
+
+const UNRECOVERABLE_PROTOCOLS: Set<string> = new Set([
+  'orca', 'raydium', 'meteora', 'marginfi', 'kamino',
+]);
+
+function classifyTier(pos: DeFiPosition): PositionTier {
+  if (pos.protocol === 'native_stake') return 2;
+  if (pos.closureStrategy === 'unsupported' || UNRECOVERABLE_PROTOCOLS.has(pos.protocol)) return 3;
+  return 1;
+}
+
+const TIER_LABELS: Record<PositionTier, string> = {
+  1: 'DEPOSITABLE',
+  2: 'REASSIGNABLE',
+  3: 'REQUIRES MANUAL ACTION',
+};
+
+const TIER_COLORS: Record<PositionTier, string> = {
+  1: COLORS.accent,
+  2: COLORS.warning,
+  3: COLORS.critical,
+};
+
 export function DeFiPositionsScreen() {
   const navigation = useNavigation<any>();
   const { publicKey } = useWallet();
@@ -130,6 +159,19 @@ export function DeFiPositionsScreen() {
           : `Found ${positions.length} position${positions.length > 1 ? 's' : ''} across ${Object.keys(grouped).length} protocol${Object.keys(grouped).length > 1 ? 's' : ''}. Choose an action for each.`}
       </Text>
 
+      {/* Tier 3 (Unrecoverable) warning banner */}
+      {positions.some((p) => classifyTier(p) === 3) && (
+        <View style={styles.tierWarningBanner}>
+          <MaterialIcons name="warning" size={18} color={COLORS.critical} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.tierWarningTitle}>Unrecoverable Positions Detected</Text>
+            <Text style={styles.tierWarningText}>
+              Some positions (concentrated liquidity, lending, perps) are locked to your wallet signature and cannot be automatically distributed. Close or withdraw these manually before they become inaccessible.
+            </Text>
+          </View>
+        </View>
+      )}
+
       {Object.entries(grouped).map(([protocol, protocolPositions]) => (
         <View key={protocol} style={styles.protocolGroup}>
           <View style={styles.protocolHeader}>
@@ -152,24 +194,38 @@ export function DeFiPositionsScreen() {
               <View key={i} style={styles.positionCard}>
                 <View style={styles.positionHeader}>
                   <Text style={styles.positionType}>{pos.type.replace('_', ' ')}</Text>
-                  <View
-                    style={[
-                      styles.strategyBadge,
-                      { backgroundColor: STRATEGY_COLORS[pos.closureStrategy] + '20' },
-                    ]}
-                  >
-                    <Text
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <View
                       style={[
-                        styles.strategyText,
-                        { color: STRATEGY_COLORS[pos.closureStrategy] },
+                        styles.strategyBadge,
+                        { backgroundColor: TIER_COLORS[classifyTier(pos)] + '15' },
                       ]}
                     >
-                      {pos.closureStrategy === 'jupiter_swap'
-                        ? 'Jupiter Swap'
-                        : pos.closureStrategy === 'protocol_native'
-                          ? 'Native Close'
-                          : 'Detect Only'}
-                    </Text>
+                      <Text
+                        style={[styles.strategyText, { color: TIER_COLORS[classifyTier(pos)] }]}
+                      >
+                        {TIER_LABELS[classifyTier(pos)]}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.strategyBadge,
+                        { backgroundColor: STRATEGY_COLORS[pos.closureStrategy] + '20' },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.strategyText,
+                          { color: STRATEGY_COLORS[pos.closureStrategy] },
+                        ]}
+                      >
+                        {pos.closureStrategy === 'jupiter_swap'
+                          ? 'Jupiter Swap'
+                          : pos.closureStrategy === 'protocol_native'
+                            ? 'Native Close'
+                            : 'Detect Only'}
+                      </Text>
+                    </View>
                   </View>
                 </View>
 
@@ -425,5 +481,28 @@ const styles = StyleSheet.create({
     color: COLORS.bg,
     fontSize: 16,
     fontWeight: '700',
+  },
+  tierWarningBanner: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.25)',
+    borderRadius: 12,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  tierWarningTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.critical,
+    fontFamily: FONTS.primaryBold,
+    marginBottom: 4,
+  },
+  tierWarningText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+    fontFamily: FONTS.primary,
+    lineHeight: 18,
   },
 });

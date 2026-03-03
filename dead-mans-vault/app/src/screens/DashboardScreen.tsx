@@ -28,6 +28,8 @@ import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils
 import { EscalationStage } from '../types';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
+import { DepositModal } from '../components/DepositModal';
+import { LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
 
 // --- Helpers ---
 
@@ -124,7 +126,7 @@ function SkeletonTokenRow() {
 
 export function DashboardScreen() {
   const navigation = useNavigation<any>();
-  const { publicKey, connected, connect } = useWallet();
+  const { publicKey, connected, connect, signTransaction } = useWallet();
   const { balances, defiPositions: portfolioDefi, totalUsdValue, solBalance, isLoading, error, refresh } = usePortfolio();
   const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } = useVaultProgram();
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
@@ -134,6 +136,10 @@ export function DashboardScreen() {
   const storeDefiPositions = useVaultStore((s) => s.defiPositions);
   const storeBeneficiaryCount = useVaultStore((s) => s.beneficiaries.length);
   const defiPositions = portfolioDefi.length > 0 ? portfolioDefi : storeDefiPositions;
+
+  const [vaultBalance, setVaultBalance] = useState(0);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [showDepositModal, setShowDepositModal] = useState(false);
 
   // Wallet-switch detection
   const prevPublicKey = useRef(publicKey?.toBase58() ?? '');
@@ -161,6 +167,20 @@ export function DashboardScreen() {
         const [vaultPda] = getVaultPDA(publicKey);
         const hb = await fetchHeartbeatRecord(vaultPda);
         setHeartbeatData(hb);
+
+        // Fetch vault PDA balance for deposit card
+        try {
+          const txService = new VaultTransactionService();
+          const connection = txService.getConnection();
+          const accountInfo = await connection.getAccountInfo(vaultPda);
+          if (accountInfo) {
+            const rent = await connection.getMinimumBalanceForRentExemption(accountInfo.data.length);
+            setVaultBalance(Math.max(0, accountInfo.lamports - rent));
+          }
+          setWalletBalance(await connection.getBalance(publicKey));
+        } catch {
+          // Non-fatal
+        }
       }
     } catch {
       // Non-fatal
@@ -168,6 +188,26 @@ export function DashboardScreen() {
       setIsLoadingVault(false);
     }
   }, [publicKey, fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA]);
+
+  const handleDeposit = useCallback(async (lamports: number) => {
+    if (!publicKey || !signTransaction) throw new Error('Wallet not connected');
+    const txService = new VaultTransactionService();
+    const connection = txService.getConnection();
+    const tx = await txService.buildFundVaultTx(publicKey, lamports);
+    tx.feePayer = publicKey;
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    const signed = await signTransaction(tx);
+    const sig = await connection.sendRawTransaction(
+      (signed as Transaction).serialize(),
+      { skipPreflight: false, preflightCommitment: 'confirmed' },
+    );
+    await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed',
+    );
+    await loadVaultState();
+  }, [publicKey, signTransaction, loadVaultState]);
 
   // Reset local screen state on wallet switch (global store reset handled by RootNavigator)
   useEffect(() => {
@@ -348,6 +388,53 @@ export function DashboardScreen() {
         <View style={{ marginHorizontal: 16, marginBottom: 12 }}>
           <EscalationBanner stage={escalationStage} secondsRemaining={secondsRemaining} />
         </View>
+      )}
+
+      {/* Vault Balance Card */}
+      {isVaultSetup && vaultData?.active && !vaultData?.executed && escalationStage < 4 && (
+        <View style={styles.vaultBalanceCard}>
+          <View style={styles.vaultBalanceHeader}>
+            <MaterialCommunityIcons name="safe-square-outline" size={14} color="rgba(255,255,255,0.4)" />
+            <Text style={styles.vaultBalanceLabel}>VAULT BALANCE</Text>
+          </View>
+          <Text style={styles.vaultBalanceValue}>
+            {(vaultBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL
+          </Text>
+          <Text style={styles.vaultBalanceSubtext}>
+            {vaultBalance > 0
+              ? `Available for distribution to ${beneficiaryCount} beneficiar${beneficiaryCount === 1 ? 'y' : 'ies'}`
+              : 'Deposit SOL to enable distribution to your beneficiaries'}
+          </Text>
+          <TouchableOpacity style={styles.depositBtn} onPress={() => setShowDepositModal(true)}>
+            <MaterialCommunityIcons name="plus-circle" size={16} color={COLORS.bg} />
+            <Text style={styles.depositBtnText}>{vaultBalance > 0 ? 'Deposit More' : 'Deposit SOL'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <DepositModal
+        visible={showDepositModal}
+        walletBalance={walletBalance}
+        onConfirm={handleDeposit}
+        onClose={() => setShowDepositModal(false)}
+      />
+
+      {/* Uncovered Assets Warning */}
+      {isVaultSetup && vaultData?.active && !vaultData?.executed && defiPositions.some((p: DeFiPosition) =>
+        p.closureStrategy === 'unsupported' || ['orca', 'raydium', 'meteora', 'marginfi', 'kamino'].includes(p.protocol)
+      ) && (
+        <TouchableOpacity
+          style={styles.uncoveredAssetsCard}
+          onPress={() => navigation.getParent()?.navigate('Assets')}
+        >
+          <MaterialCommunityIcons name="alert-circle-outline" size={16} color={COLORS.warning} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.uncoveredAssetsText}>
+              You have DeFi positions that cannot be automatically distributed. Review in Assets tab.
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={14} color={COLORS.warning} />
+        </TouchableOpacity>
       )}
 
       {/* Execution In Progress */}
@@ -975,5 +1062,74 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     fontFamily: FONTS.primarySemiBold,
+  },
+  vaultBalanceCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,163,0.15)',
+    padding: 16,
+  },
+  vaultBalanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  vaultBalanceLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 1,
+    fontFamily: FONTS.primarySemiBold,
+  },
+  vaultBalanceValue: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: COLORS.accent,
+    fontFamily: FONTS.primaryBold,
+  },
+  vaultBalanceSubtext: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.45)',
+    fontFamily: FONTS.primary,
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  depositBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.accent,
+    borderRadius: 12,
+    paddingVertical: 12,
+  },
+  depositBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.bg,
+    fontFamily: FONTS.primaryBold,
+  },
+  uncoveredAssetsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  uncoveredAssetsText: {
+    fontSize: 12,
+    color: COLORS.warning,
+    fontFamily: FONTS.primary,
+    lineHeight: 17,
   },
 });
