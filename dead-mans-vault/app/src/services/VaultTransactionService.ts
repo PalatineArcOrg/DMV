@@ -7,6 +7,13 @@ import {
   ComputeBudgetProgram,
   sendAndConfirmTransaction,
 } from '@solana/web3.js';
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  createTransferInstruction,
+  TOKEN_PROGRAM_ID,
+  getAccount,
+} from '@solana/spl-token';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
 import { PROGRAM_ID, RPC_URL, HELIUS_API_KEY } from '../utils/constants';
@@ -514,6 +521,114 @@ export class VaultTransactionService {
       }),
     );
     return this.addPriorityFee(tx, [owner, vaultPda], 80_000);
+  }
+
+  async buildDepositTokenTx(
+    owner: PublicKey,
+    mint: PublicKey,
+    rawAmount: number,
+  ): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const ownerAta = await getAssociatedTokenAddress(mint, owner);
+    const vaultAta = await getAssociatedTokenAddress(mint, vaultPda, true);
+
+    const tx = new Transaction();
+
+    // Create vault PDA's ATA if it doesn't exist
+    try {
+      await getAccount(this.connection, vaultAta);
+    } catch {
+      tx.add(
+        createAssociatedTokenAccountInstruction(owner, vaultAta, vaultPda, mint),
+      );
+    }
+
+    tx.add(createTransferInstruction(ownerAta, vaultAta, owner, rawAmount));
+
+    return this.addPriorityFee(tx, [owner, vaultPda, mint], 120_000);
+  }
+
+  async executeSplDistribution(
+    agentKeypair: Keypair,
+    ownerPubkey: PublicKey,
+    beneficiaryWallet: PublicKey,
+    mint: PublicKey,
+    amount: BN,
+  ): Promise<string> {
+    const program = this.getProgram(agentKeypair);
+    const [vaultPda] = this.getVaultPDA(ownerPubkey);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+
+    const sourceAta = await getAssociatedTokenAddress(mint, vaultPda, true);
+    const destAta = await getAssociatedTokenAddress(mint, beneficiaryWallet);
+
+    const tx = new Transaction();
+
+    // Create beneficiary's ATA if it doesn't exist (agent pays)
+    try {
+      await getAccount(this.connection, destAta);
+    } catch {
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          agentKeypair.publicKey, destAta, beneficiaryWallet, mint,
+        ),
+      );
+    }
+
+    const distIx = await program.methods
+      .executeDistribution(amount, new Array(32).fill(0))
+      .accountsPartial({
+        agent: agentKeypair.publicKey,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+        sourceTokenAccount: sourceAta,
+        destinationTokenAccount: destAta,
+        vaultAuthority: vaultPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .instruction();
+
+    tx.add(distIx);
+
+    const priorityTx = await this.addPriorityFee(tx, [
+      vaultPda, heartbeatPda, agentKeypair.publicKey, sourceAta, destAta,
+    ], 200_000);
+
+    priorityTx.feePayer = agentKeypair.publicKey;
+    const { blockhash } = await this.connection.getLatestBlockhash();
+    priorityTx.recentBlockhash = blockhash;
+
+    return sendAndConfirmTransaction(this.connection, priorityTx, [agentKeypair], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    });
+  }
+
+  async getVaultTokenBalances(vaultPda: PublicKey): Promise<{
+    mint: PublicKey;
+    amount: number;
+    decimals: number;
+    uiAmount: number;
+  }[]> {
+    const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+      vaultPda,
+      { programId: TOKEN_PROGRAM_ID },
+    );
+
+    return tokenAccounts.value
+      .map(({ account }) => {
+        const parsed = account.data.parsed?.info;
+        if (!parsed) return null;
+        const tokenAmount = parsed.tokenAmount;
+        if (Number(tokenAmount.amount) <= 0) return null;
+        return {
+          mint: new PublicKey(parsed.mint),
+          amount: Number(tokenAmount.amount),
+          decimals: tokenAmount.decimals,
+          uiAmount: Number(tokenAmount.uiAmountString),
+        };
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
   }
 
   async buildRotateAgentTx(

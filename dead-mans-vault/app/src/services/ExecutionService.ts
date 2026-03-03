@@ -9,6 +9,10 @@ import {
   clearDistributableSnapshot,
   saveDistributableSnapshot,
   getDistributableSnapshot,
+  saveTokenSnapshot,
+  getTokenSnapshot,
+  clearTokenSnapshot,
+  TokenSnapshotEntry,
 } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepType } from '../types/execution';
 import { Beneficiary } from '../types/vault';
@@ -25,6 +29,8 @@ export class ExecutionService {
   private keyManager: KeyManager;
 
   private totalSolDistributed: BN = new BN(0);
+  private tokenTypesDistributed: number = 0;
+  private vaultTokens: TokenSnapshotEntry[] = [];
 
   constructor(
     ownerPubkey: PublicKey,
@@ -44,6 +50,24 @@ export class ExecutionService {
 
     try {
       const lastCompleted = await getLastCompletedStep();
+
+      // Scan vault PDA's token balances (or recover from snapshot)
+      let tokenSnapshot = await getTokenSnapshot();
+      if (!tokenSnapshot) {
+        const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
+        const vaultTokens = await this.txService.getVaultTokenBalances(vaultPda);
+        tokenSnapshot = vaultTokens.map((t) => ({
+          mint: t.mint.toString(),
+          amount: t.amount,
+          decimals: t.decimals,
+          symbol: '',
+        }));
+        if (tokenSnapshot.length > 0) {
+          await saveTokenSnapshot(tokenSnapshot);
+        }
+      }
+      this.vaultTokens = tokenSnapshot;
+
       const steps = this.buildExecutionPlan();
 
       // Save all steps to SQLite
@@ -92,7 +116,7 @@ export class ExecutionService {
           await updateStepStatus(step.id, 'completed', txSig);
         } catch (err: any) {
           await updateStepStatus(step.id, 'failed', undefined, err.message);
-          if (step.type === 'distribute_sol' || step.type === 'close_defi_position') {
+          if (step.type === 'distribute_sol' || step.type === 'distribute_token' || step.type === 'close_defi_position') {
             hasDistributionFailure = true;
           }
         }
@@ -149,6 +173,33 @@ export class ExecutionService {
       );
     }
 
+    // Distribute SPL tokens from vault PDA's ATAs to each beneficiary
+    for (const token of this.vaultTokens) {
+      for (const b of this.beneficiaries) {
+        const label = b.label || b.wallet.toString().slice(0, 8);
+        const tokenLabel = token.symbol || token.mint.slice(0, 6);
+        const shareAmount = Math.floor(token.amount * b.shareBps / 10000);
+        if (shareAmount <= 0) continue;
+
+        steps.push(
+          this.makeStep(
+            order++,
+            'distribute_token',
+            `Distribute ${(b.shareBps / 100).toFixed(1)}% ${tokenLabel} to ${label}`,
+            'pending',
+            {
+              beneficiaryWallet: b.wallet.toString(),
+              shareBps: b.shareBps,
+              mint: token.mint,
+              amount: shareAmount,
+              decimals: token.decimals,
+              symbol: token.symbol,
+            },
+          ),
+        );
+      }
+    }
+
     // Burn assets (skipped for MVP)
     steps.push(this.makeStep(order++, 'burn_asset', 'Burn designated assets', 'skipped'));
 
@@ -194,6 +245,9 @@ export class ExecutionService {
 
       case 'distribute_sol':
         return this.executeDistributeSol(step);
+
+      case 'distribute_token':
+        return this.executeDistributeToken(step);
 
       case 'record_execution_log':
         return this.executeRecordExecution();
@@ -282,15 +336,38 @@ export class ExecutionService {
     return sig;
   }
 
+  private async executeDistributeToken(step: ExecutionStep): Promise<string> {
+    const agentKeypair = await this.keyManager.getKeypair();
+    const beneficiaryWallet = new PublicKey(step.metadata?.beneficiaryWallet as string);
+    const mint = new PublicKey(step.metadata?.mint as string);
+    const amount = new BN(step.metadata?.amount as number);
+
+    const sig = await this.txService.executeSplDistribution(
+      agentKeypair,
+      this.ownerPubkey,
+      beneficiaryWallet,
+      mint,
+      amount,
+    );
+
+    this.tokenTypesDistributed++;
+    return sig;
+  }
+
   private async executeRecordExecution(): Promise<string> {
     const agentKeypair = await this.keyManager.getKeypair();
 
     const attestationHash = new Array(32).fill(0);
+    const uniqueTokenCount = new Set(this.vaultTokens.map((t) => t.mint)).size;
+    const solTransfers = this.beneficiaries.length;
+    const tokenTransfers = this.vaultTokens.length > 0
+      ? this.beneficiaries.length * uniqueTokenCount
+      : 0;
 
     return this.txService.recordExecution(agentKeypair, this.ownerPubkey, {
-      transferCount: this.beneficiaries.length,
+      transferCount: solTransfers + tokenTransfers,
       totalSolDistributed: this.totalSolDistributed,
-      tokenTypesDistributed: 0,
+      tokenTypesDistributed: uniqueTokenCount,
       attestationHash,
       completed: true,
     });
@@ -298,6 +375,7 @@ export class ExecutionService {
 
   private async executeSelfTerminate(): Promise<void> {
     await clearDistributableSnapshot();
+    await clearTokenSnapshot();
     await this.keyManager.destroyKey();
   }
 }

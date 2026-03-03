@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,41 +9,70 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, FONTS } from '../utils/constants';
+import type { TokenBalance } from '../types/defi';
 
 interface DepositModalProps {
   visible: boolean;
   walletBalance: number;
-  onConfirm: (lamports: number) => Promise<void>;
+  tokenBalances: TokenBalance[];
+  onConfirmSol: (lamports: number) => Promise<void>;
+  onConfirmToken: (mint: PublicKey, rawAmount: number, decimals: number) => Promise<void>;
   onClose: () => void;
 }
 
-export function DepositModal({ visible, walletBalance, onConfirm, onClose }: DepositModalProps) {
+export function DepositModal({
+  visible, walletBalance, tokenBalances, onConfirmSol, onConfirmToken, onClose,
+}: DepositModalProps) {
+  const [selectedAsset, setSelectedAsset] = useState<'SOL' | string>('SOL');
   const [amount, setAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const splTokens = useMemo(
+    () => tokenBalances.filter((t) => t.symbol !== 'SOL' && t.amount > 0),
+    [tokenBalances],
+  );
+
+  const selectedToken = selectedAsset !== 'SOL'
+    ? splTokens.find((t) => t.mint.toString() === selectedAsset)
+    : null;
+
   const feeReserve = 0.01 * LAMPORTS_PER_SOL;
-  const maxSol = Math.max(0, (walletBalance - feeReserve) / LAMPORTS_PER_SOL);
+  const maxAmount = selectedAsset === 'SOL'
+    ? Math.max(0, (walletBalance - feeReserve) / LAMPORTS_PER_SOL)
+    : (selectedToken?.amount ?? 0);
+
+  const symbol = selectedAsset === 'SOL' ? 'SOL' : (selectedToken?.symbol ?? '???');
   const parsedAmount = parseFloat(amount) || 0;
-  const isValid = parsedAmount > 0 && parsedAmount <= maxSol;
+  const isValid = parsedAmount > 0 && parsedAmount <= maxAmount;
 
   const handleMax = () => {
-    setAmount(maxSol > 0 ? maxSol.toFixed(4) : '0');
+    setAmount(maxAmount > 0 ? (selectedAsset === 'SOL' ? maxAmount.toFixed(4) : String(maxAmount)) : '0');
+  };
+
+  const handleSelect = (asset: 'SOL' | string) => {
+    setSelectedAsset(asset);
+    setAmount('');
   };
 
   const handleConfirm = async () => {
     if (!isValid) return;
     setIsSubmitting(true);
     try {
-      const lamports = Math.floor(parsedAmount * LAMPORTS_PER_SOL);
-      await onConfirm(lamports);
+      if (selectedAsset === 'SOL') {
+        await onConfirmSol(Math.floor(parsedAmount * LAMPORTS_PER_SOL));
+      } else if (selectedToken) {
+        const rawAmount = Math.floor(parsedAmount * 10 ** selectedToken.decimals);
+        await onConfirmToken(selectedToken.mint, rawAmount, selectedToken.decimals);
+      }
       setAmount('');
       onClose();
     } catch {
-      // Error handled by parent
+      // Error propagated from parent handlers
     } finally {
       setIsSubmitting(false);
     }
@@ -52,6 +81,7 @@ export function DepositModal({ visible, walletBalance, onConfirm, onClose }: Dep
   const handleClose = () => {
     if (isSubmitting) return;
     setAmount('');
+    setSelectedAsset('SOL');
     onClose();
   };
 
@@ -65,13 +95,41 @@ export function DepositModal({ visible, walletBalance, onConfirm, onClose }: Dep
         <View style={styles.container}>
           <View style={styles.header}>
             <MaterialCommunityIcons name="bank-transfer-in" size={20} color={COLORS.accent} />
-            <Text style={styles.title}>Deposit SOL</Text>
+            <Text style={styles.title}>Deposit to Vault</Text>
           </View>
 
           <Text style={styles.description}>
-            Deposit SOL into your vault PDA. This is the amount that will be distributed to your beneficiaries.
+            Select an asset and amount to deposit into your vault PDA for distribution to beneficiaries.
           </Text>
 
+          {/* Asset Selector */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.assetScroll}>
+            <TouchableOpacity
+              style={[styles.assetChip, selectedAsset === 'SOL' && styles.assetChipSelected]}
+              onPress={() => handleSelect('SOL')}
+            >
+              <Text style={[styles.assetChipText, selectedAsset === 'SOL' && styles.assetChipTextSelected]}>
+                SOL
+              </Text>
+            </TouchableOpacity>
+            {splTokens.map((t) => {
+              const mintStr = t.mint.toString();
+              const isSelected = selectedAsset === mintStr;
+              return (
+                <TouchableOpacity
+                  key={mintStr}
+                  style={[styles.assetChip, isSelected && styles.assetChipSelected]}
+                  onPress={() => handleSelect(mintStr)}
+                >
+                  <Text style={[styles.assetChipText, isSelected && styles.assetChipTextSelected]}>
+                    {t.symbol}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Amount Input */}
           <View style={styles.inputRow}>
             <TextInput
               style={styles.input}
@@ -89,15 +147,21 @@ export function DepositModal({ visible, walletBalance, onConfirm, onClose }: Dep
           </View>
 
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Wallet balance</Text>
-            <Text style={styles.infoValue}>{(walletBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL</Text>
+            <Text style={styles.infoLabel}>Available {symbol}</Text>
+            <Text style={styles.infoValue}>
+              {selectedAsset === 'SOL'
+                ? `${(walletBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`
+                : `${selectedToken?.amount ?? 0} ${symbol}`}
+            </Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Available (excl. fees)</Text>
-            <Text style={styles.infoValue}>{maxSol.toFixed(4)} SOL</Text>
+            <Text style={styles.infoLabel}>Deposit amount</Text>
+            <Text style={styles.infoValue}>
+              {parsedAmount > 0 ? `${parsedAmount} ${symbol}` : '-'}
+            </Text>
           </View>
 
-          {parsedAmount > maxSol && parsedAmount > 0 && (
+          {parsedAmount > maxAmount && parsedAmount > 0 && (
             <Text style={styles.errorText}>Amount exceeds available balance</Text>
           )}
 
@@ -113,7 +177,7 @@ export function DepositModal({ visible, walletBalance, onConfirm, onClose }: Dep
               {isSubmitting ? (
                 <ActivityIndicator color={COLORS.bg} size="small" />
               ) : (
-                <Text style={styles.confirmBtnText}>Deposit</Text>
+                <Text style={styles.confirmBtnText}>Deposit {symbol}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -137,7 +201,23 @@ const styles = StyleSheet.create({
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   title: { fontSize: 17, fontWeight: '700', color: '#FFFFFF', fontFamily: FONTS.primaryBold },
-  description: { fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 18, fontFamily: FONTS.primary, marginBottom: 20 },
+  description: { fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 18, fontFamily: FONTS.primary, marginBottom: 16 },
+  assetScroll: { marginBottom: 16, flexGrow: 0 },
+  assetChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    marginRight: 8,
+  },
+  assetChipSelected: {
+    borderColor: COLORS.accent,
+    backgroundColor: 'rgba(0,255,163,0.1)',
+  },
+  assetChipText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.5)', fontFamily: FONTS.primarySemiBold },
+  assetChipTextSelected: { color: COLORS.accent },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
   input: {
     flex: 1,

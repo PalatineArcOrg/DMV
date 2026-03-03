@@ -22,7 +22,7 @@ import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, PROGRAM_ID } from '../utils/constants';
 import { StepIndicator } from '../components/StepIndicator';
 
-const AGENT_FUNDING_LAMPORTS = Math.floor(0.01 * LAMPORTS_PER_SOL);
+const AGENT_FUNDING_LAMPORTS = Math.floor(0.05 * LAMPORTS_PER_SOL);
 
 export function EstateReviewScreen() {
   const navigation = useNavigation<any>();

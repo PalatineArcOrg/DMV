@@ -29,7 +29,7 @@ import { EscalationStage } from '../types';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
 import { DepositModal } from '../components/DepositModal';
-import { LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
+import { PublicKey, LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
 
 // --- Helpers ---
 
@@ -138,6 +138,7 @@ export function DashboardScreen() {
   const defiPositions = portfolioDefi.length > 0 ? portfolioDefi : storeDefiPositions;
 
   const [vaultBalance, setVaultBalance] = useState(0);
+  const [vaultTokenBalances, setVaultTokenBalances] = useState<{ mint: string; uiAmount: number; symbol: string; decimals: number }[]>([]);
   const [walletBalance, setWalletBalance] = useState(0);
   const [showDepositModal, setShowDepositModal] = useState(false);
 
@@ -178,6 +179,18 @@ export function DashboardScreen() {
             setVaultBalance(Math.max(0, accountInfo.lamports - rent));
           }
           setWalletBalance(await connection.getBalance(publicKey));
+
+          // Fetch vault PDA token balances
+          const vaultTokens = await txService.getVaultTokenBalances(vaultPda);
+          setVaultTokenBalances(vaultTokens.map((t) => {
+            const match = balances.find((b) => b.mint.toString() === t.mint.toString());
+            return {
+              mint: t.mint.toString(),
+              uiAmount: t.uiAmount,
+              symbol: match?.symbol ?? t.mint.toString().slice(0, 6),
+              decimals: t.decimals,
+            };
+          }));
         } catch {
           // Non-fatal
         }
@@ -194,6 +207,26 @@ export function DashboardScreen() {
     const txService = new VaultTransactionService();
     const connection = txService.getConnection();
     const tx = await txService.buildFundVaultTx(publicKey, lamports);
+    tx.feePayer = publicKey;
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    const signed = await signTransaction(tx);
+    const sig = await connection.sendRawTransaction(
+      (signed as Transaction).serialize(),
+      { skipPreflight: false, preflightCommitment: 'confirmed' },
+    );
+    await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed',
+    );
+    await loadVaultState();
+  }, [publicKey, signTransaction, loadVaultState]);
+
+  const handleDepositToken = useCallback(async (mint: PublicKey, rawAmount: number, _decimals: number) => {
+    if (!publicKey || !signTransaction) throw new Error('Wallet not connected');
+    const txService = new VaultTransactionService();
+    const connection = txService.getConnection();
+    const tx = await txService.buildDepositTokenTx(publicKey, mint, rawAmount);
     tx.feePayer = publicKey;
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
     tx.recentBlockhash = blockhash;
@@ -400,14 +433,24 @@ export function DashboardScreen() {
           <Text style={styles.vaultBalanceValue}>
             {(vaultBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL
           </Text>
+          {vaultTokenBalances.length > 0 && (
+            <View style={{ marginTop: 4, marginBottom: 4 }}>
+              {vaultTokenBalances.map((t, i) => (
+                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+                  <Text style={styles.vaultTokenLabel}>{t.symbol}</Text>
+                  <Text style={styles.vaultTokenValue}>{t.uiAmount.toFixed(t.decimals > 4 ? 4 : t.decimals)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
           <Text style={styles.vaultBalanceSubtext}>
-            {vaultBalance > 0
+            {vaultBalance > 0 || vaultTokenBalances.length > 0
               ? `Available for distribution to ${beneficiaryCount} beneficiar${beneficiaryCount === 1 ? 'y' : 'ies'}`
-              : 'Deposit SOL to enable distribution to your beneficiaries'}
+              : 'Deposit assets to enable distribution to your beneficiaries'}
           </Text>
           <TouchableOpacity style={styles.depositBtn} onPress={() => setShowDepositModal(true)}>
             <MaterialCommunityIcons name="plus-circle" size={16} color={COLORS.bg} />
-            <Text style={styles.depositBtnText}>{vaultBalance > 0 ? 'Deposit More' : 'Deposit SOL'}</Text>
+            <Text style={styles.depositBtnText}>{vaultBalance > 0 || vaultTokenBalances.length > 0 ? 'Deposit More' : 'Deposit Assets'}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -415,7 +458,9 @@ export function DashboardScreen() {
       <DepositModal
         visible={showDepositModal}
         walletBalance={walletBalance}
-        onConfirm={handleDeposit}
+        tokenBalances={balances}
+        onConfirmSol={handleDeposit}
+        onConfirmToken={handleDepositToken}
         onClose={() => setShowDepositModal(false)}
       />
 
@@ -1090,6 +1135,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.accent,
     fontFamily: FONTS.primaryBold,
+  },
+  vaultTokenLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.5)',
+    fontFamily: FONTS.primary,
+  },
+  vaultTokenValue: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    fontFamily: FONTS.mono,
   },
   vaultBalanceSubtext: {
     fontSize: 12,

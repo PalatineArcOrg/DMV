@@ -84,6 +84,34 @@ export async function clearDistributableSnapshot(): Promise<void> {
   );
 }
 
+export interface TokenSnapshotEntry {
+  mint: string;
+  amount: number;
+  decimals: number;
+  symbol: string;
+}
+
+export async function saveTokenSnapshot(tokens: TokenSnapshotEntry[]): Promise<void> {
+  const db = getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO settings (key, value) VALUES ('token_snapshot', ?)`,
+    [JSON.stringify(tokens)],
+  );
+}
+
+export async function getTokenSnapshot(): Promise<TokenSnapshotEntry[] | null> {
+  const db = getDb();
+  const row = await db.getFirstAsync<{ value: string }>(
+    `SELECT value FROM settings WHERE key = 'token_snapshot'`,
+  );
+  return row ? JSON.parse(row.value) : null;
+}
+
+export async function clearTokenSnapshot(): Promise<void> {
+  const db = getDb();
+  await db.runAsync(`DELETE FROM settings WHERE key = 'token_snapshot'`);
+}
+
 export async function updateStepStatus(
   id: string,
   status: ExecutionStepStatus,
