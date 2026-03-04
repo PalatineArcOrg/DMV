@@ -548,6 +548,67 @@ export class VaultTransactionService {
     return this.addPriorityFee(tx, [owner, vaultPda, mint], 120_000);
   }
 
+  async buildWithdrawTokenTx(
+    owner: PublicKey,
+    mint: PublicKey,
+    amount: number,
+  ): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const ownerAta = await getAssociatedTokenAddress(mint, owner);
+    const vaultAta = await getAssociatedTokenAddress(mint, vaultPda, true);
+
+    const readonlyWallet = {
+      publicKey: owner,
+      signTransaction: async (tx: Transaction) => tx,
+      signAllTransactions: async (txs: Transaction[]) => txs,
+    };
+    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+      commitment: 'confirmed',
+    });
+    const program = new Program<DeadMansVault>(idl as any, provider);
+
+    const tx = await program.methods
+      .withdrawFromVault(new BN(amount))
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+        sourceTokenAccount: vaultAta,
+        destinationTokenAccount: ownerAta,
+        vaultAuthority: vaultPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .transaction();
+
+    return this.addPriorityFee(tx, [owner, vaultPda, mint], 120_000);
+  }
+
+  async buildWithdrawSolTx(
+    owner: PublicKey,
+    amountLamports: number,
+  ): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+
+    const readonlyWallet = {
+      publicKey: owner,
+      signTransaction: async (tx: Transaction) => tx,
+      signAllTransactions: async (txs: Transaction[]) => txs,
+    };
+    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+      commitment: 'confirmed',
+    });
+    const program = new Program<DeadMansVault>(idl as any, provider);
+
+    const tx = await program.methods
+      .withdrawSolFromVault(new BN(amountLamports))
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+      })
+      .transaction();
+
+    return this.addPriorityFee(tx, [owner, vaultPda], 120_000);
+  }
+
   async executeSplDistribution(
     agentKeypair: Keypair,
     ownerPubkey: PublicKey,

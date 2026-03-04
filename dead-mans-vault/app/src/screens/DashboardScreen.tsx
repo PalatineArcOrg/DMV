@@ -242,6 +242,46 @@ export function DashboardScreen() {
     await loadVaultState();
   }, [publicKey, signTransaction, loadVaultState]);
 
+  const handleWithdrawSol = useCallback(async (lamports: number) => {
+    if (!publicKey || !signTransaction) throw new Error('Wallet not connected');
+    const txService = new VaultTransactionService();
+    const connection = txService.getConnection();
+    const tx = await txService.buildWithdrawSolTx(publicKey, lamports);
+    tx.feePayer = publicKey;
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    const signed = await signTransaction(tx);
+    const sig = await connection.sendRawTransaction(
+      (signed as Transaction).serialize(),
+      { skipPreflight: false, preflightCommitment: 'confirmed' },
+    );
+    await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed',
+    );
+    await loadVaultState();
+  }, [publicKey, signTransaction, loadVaultState]);
+
+  const handleWithdrawToken = useCallback(async (mint: PublicKey, rawAmount: number, _decimals: number) => {
+    if (!publicKey || !signTransaction) throw new Error('Wallet not connected');
+    const txService = new VaultTransactionService();
+    const connection = txService.getConnection();
+    const tx = await txService.buildWithdrawTokenTx(publicKey, mint, rawAmount);
+    tx.feePayer = publicKey;
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    const signed = await signTransaction(tx);
+    const sig = await connection.sendRawTransaction(
+      (signed as Transaction).serialize(),
+      { skipPreflight: false, preflightCommitment: 'confirmed' },
+    );
+    await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed',
+    );
+    await loadVaultState();
+  }, [publicKey, signTransaction, loadVaultState]);
+
   // Reset local screen state on wallet switch (global store reset handled by RootNavigator)
   useEffect(() => {
     const currentKey = publicKey?.toBase58() ?? '';
@@ -459,8 +499,18 @@ export function DashboardScreen() {
         visible={showDepositModal}
         walletBalance={walletBalance}
         tokenBalances={balances}
+        vaultSolBalance={vaultBalance}
+        vaultTokenBalances={vaultTokenBalances.map((t) => ({
+          mint: new PublicKey(t.mint),
+          amount: t.uiAmount * 10 ** t.decimals,
+          decimals: t.decimals,
+          uiAmount: t.uiAmount,
+          symbol: t.symbol,
+        }))}
         onConfirmSol={handleDeposit}
         onConfirmToken={handleDepositToken}
+        onWithdrawSol={handleWithdrawSol}
+        onWithdrawToken={handleWithdrawToken}
         onClose={() => setShowDepositModal(false)}
       />
 

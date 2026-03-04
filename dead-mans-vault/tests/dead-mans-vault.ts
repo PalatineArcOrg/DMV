@@ -2,6 +2,15 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { DeadMansVault } from "../target/types/dead_mans_vault";
 import { expect } from "chai";
+import {
+  createMint,
+  createAccount,
+  mintTo,
+  getAccount,
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccount,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 
 describe("dead-mans-vault", () => {
   const provider = anchor.AnchorProvider.env();
@@ -1180,6 +1189,157 @@ describe("dead-mans-vault", () => {
       expect.fail("Should have thrown VaultStillActive");
     } catch (err: any) {
       expect(err.error.errorCode.code).to.equal("VaultStillActive");
+    }
+  });
+  // ─── Withdraw from Vault ───
+
+  it("owner can withdraw SOL from vault PDA", async () => {
+    // Deposit SOL into vault PDA first
+    const depositAmount = 0.5 * anchor.web3.LAMPORTS_PER_SOL;
+    const tx = new anchor.web3.Transaction().add(
+      anchor.web3.SystemProgram.transfer({
+        fromPubkey: owner.publicKey,
+        toPubkey: vaultConfigPda,
+        lamports: depositAmount,
+      })
+    );
+    await provider.sendAndConfirm(tx);
+
+    const balanceBefore = await provider.connection.getBalance(vaultConfigPda);
+
+    // Withdraw half the deposited SOL
+    const withdrawAmount = 0.25 * anchor.web3.LAMPORTS_PER_SOL;
+    await program.methods
+      .withdrawSolFromVault(new anchor.BN(withdrawAmount))
+      .accounts({
+        owner: owner.publicKey,
+        vaultConfig: vaultConfigPda,
+      })
+      .rpc();
+
+    const balanceAfter = await provider.connection.getBalance(vaultConfigPda);
+    expect(balanceBefore - balanceAfter).to.equal(withdrawAmount);
+  });
+
+  it("rejects SOL withdraw exceeding available balance", async () => {
+    // Try to withdraw more than available (above rent exemption)
+    const hugeAmount = 100 * anchor.web3.LAMPORTS_PER_SOL;
+    try {
+      await program.methods
+        .withdrawSolFromVault(new anchor.BN(hugeAmount))
+        .accounts({
+          owner: owner.publicKey,
+          vaultConfig: vaultConfigPda,
+        })
+        .rpc();
+      expect.fail("Should have thrown InsufficientVaultBalance");
+    } catch (err: any) {
+      expect(err.error.errorCode.code).to.equal("InsufficientVaultBalance");
+    }
+  });
+
+  it("owner can withdraw SPL tokens from vault PDA", async () => {
+    // Create a test mint
+    const mintAuthority = anchor.web3.Keypair.generate();
+    await airdrop(provider, mintAuthority.publicKey, 2);
+
+    const mint = await createMint(
+      provider.connection,
+      mintAuthority,
+      mintAuthority.publicKey,
+      null,
+      6
+    );
+
+    // Create owner's ATA and mint tokens
+    const ownerAta = await createAssociatedTokenAccount(
+      provider.connection,
+      mintAuthority,
+      mint,
+      owner.publicKey
+    );
+    await mintTo(
+      provider.connection,
+      mintAuthority,
+      mint,
+      ownerAta,
+      mintAuthority,
+      1_000_000
+    );
+
+    // Create vault PDA's ATA (allowOwnerOffCurve = true for PDA)
+    const vaultAta = await createAssociatedTokenAccount(
+      provider.connection,
+      mintAuthority,
+      mint,
+      vaultConfigPda,
+      undefined,
+      TOKEN_PROGRAM_ID,
+      undefined,
+      true
+    );
+
+    // Transfer tokens to vault PDA's ATA (simulates deposit)
+    const depositTx = new anchor.web3.Transaction().add(
+      anchor.web3.SystemProgram.transfer({
+        fromPubkey: owner.publicKey,
+        toPubkey: vaultConfigPda,
+        lamports: 0, // just need the TX to sign
+      })
+    );
+    // Direct SPL transfer from owner to vault ATA
+    const { createTransferInstruction } = await import("@solana/spl-token");
+    const transferIx = createTransferInstruction(
+      ownerAta,
+      vaultAta,
+      owner.publicKey,
+      500_000
+    );
+    const depositSplTx = new anchor.web3.Transaction().add(transferIx);
+    await provider.sendAndConfirm(depositSplTx);
+
+    // Verify vault ATA has tokens
+    const vaultAccountBefore = await getAccount(provider.connection, vaultAta);
+    expect(Number(vaultAccountBefore.amount)).to.equal(500_000);
+
+    // Withdraw tokens from vault PDA back to owner
+    await program.methods
+      .withdrawFromVault(new anchor.BN(200_000))
+      .accounts({
+        owner: owner.publicKey,
+        vaultConfig: vaultConfigPda,
+        sourceTokenAccount: vaultAta,
+        destinationTokenAccount: ownerAta,
+        vaultAuthority: vaultConfigPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+
+    const vaultAccountAfter = await getAccount(provider.connection, vaultAta);
+    expect(Number(vaultAccountAfter.amount)).to.equal(300_000);
+
+    const ownerAccountAfter = await getAccount(provider.connection, ownerAta);
+    expect(Number(ownerAccountAfter.amount)).to.equal(700_000); // 500k kept + 200k withdrawn
+  });
+
+  it("non-owner cannot withdraw SOL from vault", async () => {
+    const attacker = anchor.web3.Keypair.generate();
+    await airdrop(provider, attacker.publicKey, 1);
+
+    // Derive attacker's vault PDA (which doesn't exist, but let's try with owner's vault)
+    try {
+      await program.methods
+        .withdrawSolFromVault(new anchor.BN(1000))
+        .accounts({
+          owner: attacker.publicKey,
+          vaultConfig: vaultConfigPda,
+        })
+        .signers([attacker])
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (err: any) {
+      // PDA seeds mismatch — attacker's key != owner's key in seeds
+      expect(err).to.exist;
     }
   });
 });

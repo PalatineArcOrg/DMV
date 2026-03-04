@@ -8,6 +8,8 @@ pub mod execute_distribution;
 pub mod execute_sol_distribution;
 pub mod record_execution;
 pub mod update_vault;
+pub mod withdraw_from_vault;
+pub mod withdraw_sol_from_vault;
 
 pub use initialize_vault::*;
 pub use record_heartbeat::*;
@@ -18,3 +20,5 @@ pub use execute_distribution::*;
 pub use execute_sol_distribution::*;
 pub use record_execution::*;
 pub use update_vault::*;
+pub use withdraw_from_vault::*;
+pub use withdraw_sol_from_vault::*;

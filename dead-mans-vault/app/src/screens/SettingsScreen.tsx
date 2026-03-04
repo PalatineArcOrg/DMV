@@ -65,7 +65,7 @@ export function SettingsScreen() {
 
     Alert.alert(
       'Revoke Vault?',
-      'This will deactivate your vault on-chain and clear all local data. This action cannot be undone.',
+      'This will withdraw all deposited assets, deactivate your vault on-chain, and clear all local data. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -84,10 +84,56 @@ export function SettingsScreen() {
               }
 
               if (vault && vault.active && !vault.executed) {
-                // Active mutable vault — revoke on-chain
+                const connection = txService.getConnection();
+                const [vaultPda] = txService.getVaultPDA(publicKey);
+
+                // --- Auto-withdraw all vault assets before revoking ---
+                // Withdraw SPL tokens (continue on individual failure)
+                const vaultTokens = await txService.getVaultTokenBalances(vaultPda);
+                let withdrawnCount = 0;
+                for (const token of vaultTokens) {
+                  try {
+                    const withdrawTx = await txService.buildWithdrawTokenTx(publicKey, token.mint, token.amount);
+                    withdrawTx.feePayer = publicKey;
+                    const { blockhash: wBh, lastValidBlockHeight: wH } = await connection.getLatestBlockhash('confirmed');
+                    withdrawTx.recentBlockhash = wBh;
+                    const signedW = await signTransaction(withdrawTx);
+                    const wSig = await connection.sendRawTransaction(signedW.serialize(), {
+                      skipPreflight: false, preflightCommitment: 'confirmed',
+                    });
+                    await connection.confirmTransaction({ signature: wSig, blockhash: wBh, lastValidBlockHeight: wH }, 'confirmed');
+                    withdrawnCount++;
+                  } catch {
+                    // Individual token withdrawal failed — continue with others
+                  }
+                }
+
+                // Withdraw SOL (above rent exemption)
+                const vaultInfo = await connection.getAccountInfo(vaultPda);
+                if (vaultInfo) {
+                  const rent = await connection.getMinimumBalanceForRentExemption(vaultInfo.data.length);
+                  const availableSol = vaultInfo.lamports - rent;
+                  if (availableSol > 0) {
+                    try {
+                      const solTx = await txService.buildWithdrawSolTx(publicKey, availableSol);
+                      solTx.feePayer = publicKey;
+                      const { blockhash: sBh, lastValidBlockHeight: sH } = await connection.getLatestBlockhash('confirmed');
+                      solTx.recentBlockhash = sBh;
+                      const signedS = await signTransaction(solTx);
+                      const sSig = await connection.sendRawTransaction(signedS.serialize(), {
+                        skipPreflight: false, preflightCommitment: 'confirmed',
+                      });
+                      await connection.confirmTransaction({ signature: sSig, blockhash: sBh, lastValidBlockHeight: sH }, 'confirmed');
+                      withdrawnCount++;
+                    } catch {
+                      // SOL withdrawal failed — continue with revoke
+                    }
+                  }
+                }
+
+                // --- Now revoke the vault ---
                 const tx = await txService.buildRevokeVaultTx(publicKey);
                 tx.feePayer = publicKey;
-                const connection = txService.getConnection();
                 const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
                 tx.recentBlockhash = blockhash;
 
@@ -105,7 +151,10 @@ export function SettingsScreen() {
                 useHeartbeatStore.getState().reset();
                 useEscalationStore.getState().reset();
 
-                Alert.alert('Vault Revoked', `Vault closed and rent reclaimed.\n\nTx: ${txSig.slice(0, 20)}...`, [
+                const revokeMsg = withdrawnCount > 0
+                  ? `Vault closed. ${withdrawnCount} asset(s) returned to your wallet.\n\nTx: ${txSig.slice(0, 20)}...`
+                  : `Vault closed and rent reclaimed.\n\nTx: ${txSig.slice(0, 20)}...`;
+                Alert.alert('Vault Revoked', revokeMsg, [
                   { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
                   { text: 'OK' },
                 ]);

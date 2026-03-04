@@ -70,4 +70,18 @@ pub mod dead_mans_vault {
     ) -> Result<()> {
         instructions::rotate_agent::handler(ctx, new_agent_pubkey)
     }
+
+    pub fn withdraw_from_vault(
+        ctx: Context<WithdrawFromVault>,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::withdraw_from_vault::handler(ctx, amount)
+    }
+
+    pub fn withdraw_sol_from_vault(
+        ctx: Context<WithdrawSolFromVault>,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::withdraw_sol_from_vault::handler(ctx, amount)
+    }
 }
