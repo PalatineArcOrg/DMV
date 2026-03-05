@@ -489,8 +489,8 @@ export function DashboardScreen() {
               : 'Deposit assets to enable distribution to your beneficiaries'}
           </Text>
           <TouchableOpacity style={styles.depositBtn} onPress={() => setShowDepositModal(true)}>
-            <MaterialCommunityIcons name="plus-circle" size={16} color={COLORS.bg} />
-            <Text style={styles.depositBtnText}>{vaultBalance > 0 || vaultTokenBalances.length > 0 ? 'Deposit More' : 'Deposit Assets'}</Text>
+            <MaterialCommunityIcons name="swap-vertical" size={16} color={COLORS.bg} />
+            <Text style={styles.depositBtnText}>Deposit / Withdraw</Text>
           </TouchableOpacity>
         </View>
       )}

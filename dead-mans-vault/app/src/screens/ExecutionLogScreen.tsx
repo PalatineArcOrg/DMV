@@ -11,6 +11,7 @@ import { getExecutionSteps } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepStatus } from '../types/execution';
 import { truncateAddress, formatTimestamp } from '../utils/formatting';
 import { COLORS, FONTS } from '../utils/constants';
+import { useWallet } from '../hooks/useWallet';
 
 const STATUS_COLORS: Record<ExecutionStepStatus, string> = {
   completed: COLORS.healthy,
@@ -29,20 +30,22 @@ const STATUS_ICONS: Record<ExecutionStepStatus, string> = {
 };
 
 export function ExecutionLogScreen() {
+  const { publicKey } = useWallet();
   const [steps, setSteps] = useState<ExecutionStep[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadSteps = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await getExecutionSteps();
+      const ownerWallet = publicKey?.toString();
+      const data = await getExecutionSteps(ownerWallet);
       setSteps(data);
     } catch {
       // Non-fatal
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [publicKey]);
 
   useEffect(() => {
     loadSteps();

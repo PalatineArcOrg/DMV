@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useMemo, useState } from 'react';
+import React, { useCallback, useRef, useMemo, useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Linking, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -45,6 +45,88 @@ export function SetupWizardScreen() {
   const hasPartialState = beneficiaries.length > 0 || heartbeatDone;
 
   const [isRevoking, setIsRevoking] = useState(false);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [hasVaultAssets, setHasVaultAssets] = useState(false);
+
+  // Check if vault has withdrawable assets
+  useEffect(() => {
+    if (!isActuallySetup || !publicKey) {
+      setHasVaultAssets(false);
+      return;
+    }
+    (async () => {
+      try {
+        const { VaultTransactionService } = require('../services/VaultTransactionService');
+        const txService = new VaultTransactionService();
+        const [vPda] = txService.getVaultPDA(publicKey);
+        const tokens = await txService.getVaultTokenBalances(vPda);
+        const info = await txService.getConnection().getAccountInfo(vPda);
+        const rent = info ? await txService.getConnection().getMinimumBalanceForRentExemption(info.data.length) : 0;
+        const availableSol = info ? info.lamports - rent : 0;
+        setHasVaultAssets(tokens.length > 0 || availableSol > 0);
+      } catch {
+        setHasVaultAssets(false);
+      }
+    })();
+  }, [isActuallySetup, publicKey]);
+
+  const handleWithdrawAll = useCallback(async () => {
+    if (!publicKey) return;
+    Alert.alert(
+      'Withdraw All Assets?',
+      'This will return all deposited assets (tokens + SOL) from your vault to your wallet. The vault will remain active.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Withdraw All',
+          onPress: async () => {
+            setIsWithdrawing(true);
+            try {
+              const { VaultTransactionService } = require('../services/VaultTransactionService');
+              const txService = new VaultTransactionService();
+              const connection = txService.getConnection();
+
+              const { instructions: withdrawIxs, assetCount } = await txService.buildWithdrawAllInstructions(publicKey);
+              if (assetCount === 0) {
+                Alert.alert('Nothing to Withdraw', 'Vault has no withdrawable assets.');
+                return;
+              }
+
+              const txs = await txService.buildBatchedTxs(publicKey, withdrawIxs);
+              let lastSig = '';
+              for (const batchTx of txs) {
+                batchTx.feePayer = publicKey;
+                const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+                batchTx.recentBlockhash = blockhash;
+                const signed = await signTransaction(batchTx);
+                lastSig = await connection.sendRawTransaction(signed.serialize(), {
+                  skipPreflight: false, preflightCommitment: 'confirmed',
+                });
+                await connection.confirmTransaction(
+                  { signature: lastSig, blockhash, lastValidBlockHeight }, 'confirmed',
+                );
+              }
+
+              setHasVaultAssets(false);
+              Alert.alert('Assets Withdrawn', `${assetCount} asset(s) returned to your wallet.\n\nTx: ${lastSig.slice(0, 20)}...`, [
+                { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${lastSig}?cluster=devnet`) },
+                { text: 'OK' },
+              ]);
+            } catch (err: any) {
+              const msg = err.message || String(err);
+              if (msg.includes('CancellationException') || msg.includes('cancelled')) {
+                Alert.alert('Cancelled', 'Wallet signing was cancelled.');
+              } else {
+                Alert.alert('Error', msg);
+              }
+            } finally {
+              setIsWithdrawing(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [publicKey, signTransaction]);
 
   const handleStartOver = useCallback(() => {
     skipAutoSync.current = true;
@@ -57,7 +139,7 @@ export function SetupWizardScreen() {
     if (!publicKey) return;
     Alert.alert(
       'Revoke Vault?',
-      'This will deactivate your vault on-chain and clear all local data. This action cannot be undone.',
+      'This will withdraw all deposited assets, deactivate your vault on-chain, and clear all local data. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -68,27 +150,33 @@ export function SetupWizardScreen() {
             try {
               const { VaultTransactionService } = require('../services/VaultTransactionService');
               const txService = new VaultTransactionService();
-              const tx = await txService.buildRevokeVaultTx(publicKey);
-              tx.feePayer = publicKey;
               const connection = txService.getConnection();
-              const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-              tx.recentBlockhash = blockhash;
 
-              const signedTx = await signTransaction(tx);
-              const txSig = await connection.sendRawTransaction(signedTx.serialize(), {
-                skipPreflight: false,
-                preflightCommitment: 'confirmed',
-              });
-              await connection.confirmTransaction(
-                { signature: txSig, blockhash, lastValidBlockHeight },
-                'confirmed',
-              );
+              const { instructions: withdrawIxs, assetCount } = await txService.buildWithdrawAllInstructions(publicKey);
+              const txs = await txService.buildBatchedTxs(publicKey, withdrawIxs, { includeRevoke: true });
+
+              let txSig = '';
+              for (const batchTx of txs) {
+                batchTx.feePayer = publicKey;
+                const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+                batchTx.recentBlockhash = blockhash;
+                const signed = await signTransaction(batchTx);
+                txSig = await connection.sendRawTransaction(signed.serialize(), {
+                  skipPreflight: false, preflightCommitment: 'confirmed',
+                });
+                await connection.confirmTransaction(
+                  { signature: txSig, blockhash, lastValidBlockHeight }, 'confirmed',
+                );
+              }
 
               useVaultStore.getState().reset();
               useHeartbeatStore.getState().reset();
               useEscalationStore.getState().reset();
 
-              Alert.alert('Vault Revoked', `Vault closed and rent reclaimed.\n\nTx: ${txSig.slice(0, 20)}...`, [
+              const revokeMsg = assetCount > 0
+                ? `Vault closed. ${assetCount} asset(s) returned to your wallet.\n\nTx: ${txSig.slice(0, 20)}...`
+                : `Vault closed and rent reclaimed.\n\nTx: ${txSig.slice(0, 20)}...`;
+              Alert.alert('Vault Revoked', revokeMsg, [
                 { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
                 { text: 'OK' },
               ]);
@@ -251,6 +339,23 @@ export function SetupWizardScreen() {
           >
             <MaterialCommunityIcons name="account-edit" size={16} color={COLORS.solanaPurple} />
             <Text style={[styles.execLogBtnText, { color: COLORS.solanaPurple }]}>Edit Beneficiaries</Text>
+            <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+        )}
+
+        {/* Withdraw All */}
+        {vaultConfig && vaultConfig.active && !vaultConfig.executed && hasVaultAssets && (
+          <TouchableOpacity
+            style={[styles.execLogBtn, styles.withdrawBtn]}
+            onPress={handleWithdrawAll}
+            disabled={isWithdrawing || isRevoking}
+          >
+            {isWithdrawing ? (
+              <ActivityIndicator size="small" color={COLORS.warning} />
+            ) : (
+              <MaterialCommunityIcons name="bank-transfer-out" size={16} color={COLORS.warning} />
+            )}
+            <Text style={[styles.execLogBtnText, { color: COLORS.warning }]}>Withdraw All Assets</Text>
             <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
           </TouchableOpacity>
         )}
@@ -558,6 +663,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.accent,
     fontFamily: FONTS.primaryMedium,
+  },
+  withdrawBtn: {
+    borderColor: 'rgba(245,158,11,0.15)',
   },
   revokeBtn: {
     borderColor: 'rgba(239,68,68,0.15)',

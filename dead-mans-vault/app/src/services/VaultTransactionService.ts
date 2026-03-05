@@ -3,6 +3,7 @@ import {
   PublicKey,
   Keypair,
   Transaction,
+  TransactionInstruction,
   SystemProgram,
   ComputeBudgetProgram,
   sendAndConfirmTransaction,
@@ -360,6 +361,37 @@ export class VaultTransactionService {
     };
   }
 
+  /**
+   * Fetch the on-chain execution deadline: last_heartbeat + heartbeat_interval + grace_period.
+   * Returns the Unix timestamp after which on-chain execution instructions will be accepted.
+   * Returns null if accounts can't be read.
+   */
+  async getOnChainDeadline(owner: PublicKey): Promise<number | null> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+
+    try {
+      const [vaultInfo, hbInfo] = await Promise.all([
+        this.connection.getAccountInfo(vaultPda),
+        this.connection.getAccountInfo(heartbeatPda),
+      ]);
+      if (!vaultInfo || !hbInfo) return null;
+
+      // Parse heartbeat_interval and grace_period from VaultConfig
+      // Layout: 8 disc | 32 owner | 32 agent | 8 interval | 8 grace ...
+      const interval = Number(new BN(vaultInfo.data.subarray(72, 80), 'le'));
+      const grace = Number(new BN(vaultInfo.data.subarray(80, 88), 'le'));
+
+      // Parse last_heartbeat from HeartbeatRecord
+      // Layout: 8 disc | 32 vault | 8 last_heartbeat ...
+      const lastHeartbeat = Number(new BN(hbInfo.data.subarray(40, 48), 'le'));
+
+      return lastHeartbeat + interval + grace;
+    } catch {
+      return null;
+    }
+  }
+
   async buildRevokeVaultTx(owner: PublicKey): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
@@ -690,6 +722,142 @@ export class VaultTransactionService {
         };
       })
       .filter((t): t is NonNullable<typeof t> => t !== null);
+  }
+
+  /**
+   * Build individual instructions to withdraw ALL assets from the vault PDA.
+   * Returns [splWithdrawIxs, solWithdrawIx?] — caller packs into transactions.
+   */
+  async buildWithdrawAllInstructions(
+    owner: PublicKey,
+  ): Promise<{ instructions: TransactionInstruction[]; assetCount: number }> {
+    const [vaultPda] = this.getVaultPDA(owner);
+
+    const readonlyWallet = {
+      publicKey: owner,
+      signTransaction: async (tx: Transaction) => tx,
+      signAllTransactions: async (txs: Transaction[]) => txs,
+    };
+    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+      commitment: 'confirmed',
+    });
+    const program = new Program<DeadMansVault>(idl as any, provider);
+
+    const instructions: TransactionInstruction[] = [];
+    let assetCount = 0;
+
+    // SPL token withdrawals
+    const vaultTokens = await this.getVaultTokenBalances(vaultPda);
+    for (const token of vaultTokens) {
+      const ownerAta = await getAssociatedTokenAddress(token.mint, owner);
+      const vaultAta = await getAssociatedTokenAddress(token.mint, vaultPda, true);
+
+      // Create owner's ATA if it doesn't exist
+      try {
+        await getAccount(this.connection, ownerAta);
+      } catch {
+        instructions.push(
+          createAssociatedTokenAccountInstruction(owner, ownerAta, owner, token.mint),
+        );
+      }
+
+      const ix = await program.methods
+        .withdrawFromVault(new BN(token.amount))
+        .accountsPartial({
+          owner,
+          vaultConfig: vaultPda,
+          sourceTokenAccount: vaultAta,
+          destinationTokenAccount: ownerAta,
+          vaultAuthority: vaultPda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .instruction();
+      instructions.push(ix);
+      assetCount++;
+    }
+
+    // SOL withdrawal (above rent exemption)
+    const vaultInfo = await this.connection.getAccountInfo(vaultPda);
+    if (vaultInfo) {
+      const rent = await this.connection.getMinimumBalanceForRentExemption(vaultInfo.data.length);
+      const availableSol = vaultInfo.lamports - rent;
+      if (availableSol > 0) {
+        const ix = await program.methods
+          .withdrawSolFromVault(new BN(availableSol))
+          .accountsPartial({
+            owner,
+            vaultConfig: vaultPda,
+          })
+          .instruction();
+        instructions.push(ix);
+        assetCount++;
+      }
+    }
+
+    return { instructions, assetCount };
+  }
+
+  /**
+   * Pack withdrawal instructions (and optionally revoke) into minimal transactions.
+   * ~8 withdraw instructions fit per TX within the 1232-byte limit.
+   */
+  async buildBatchedTxs(
+    owner: PublicKey,
+    withdrawIxs: TransactionInstruction[],
+    options?: { includeRevoke?: boolean },
+  ): Promise<Transaction[]> {
+    const MAX_IXS_PER_TX = 8;
+    const [vaultPda] = this.getVaultPDA(owner);
+
+    // Split withdrawal instructions into chunks
+    const chunks: TransactionInstruction[][] = [];
+    for (let i = 0; i < withdrawIxs.length; i += MAX_IXS_PER_TX) {
+      chunks.push(withdrawIxs.slice(i, i + MAX_IXS_PER_TX));
+    }
+
+    // If no withdrawals but revoke requested, create an empty chunk
+    if (chunks.length === 0 && options?.includeRevoke) {
+      chunks.push([]);
+    }
+
+    // Append revoke instruction to the last chunk
+    if (options?.includeRevoke && chunks.length > 0) {
+      const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+      const readonlyWallet = {
+        publicKey: owner,
+        signTransaction: async (tx: Transaction) => tx,
+        signAllTransactions: async (txs: Transaction[]) => txs,
+      };
+      const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+        commitment: 'confirmed',
+      });
+      const program = new Program<DeadMansVault>(idl as any, provider);
+
+      const revokeIx = await program.methods
+        .revokeVault()
+        .accountsPartial({
+          owner,
+          vaultConfig: vaultPda,
+          heartbeatRecord: heartbeatPda,
+        })
+        .instruction();
+      chunks[chunks.length - 1].push(revokeIx);
+    }
+
+    // Build transactions from chunks
+    const txs: Transaction[] = [];
+    for (const chunk of chunks) {
+      const tx = new Transaction();
+      for (const ix of chunk) {
+        tx.add(ix);
+      }
+      // CU estimate: 30k per instruction + 50k base
+      const cuLimit = 50_000 + chunk.length * 30_000;
+      const priorityTx = await this.addPriorityFee(tx, [owner, vaultPda], cuLimit);
+      txs.push(priorityTx);
+    }
+
+    return txs;
   }
 
   async buildRotateAgentTx(

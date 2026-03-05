@@ -51,10 +51,16 @@ export class ExecutionService {
     globalExecutionInProgress = true;
 
     try {
-      const lastCompleted = await getLastCompletedStep();
+      // Wait for the on-chain grace period to fully elapse before attempting execution.
+      // The client-side escalation may fire Stage 4 slightly before the on-chain deadline
+      // due to clock drift or TX confirmation delays on heartbeat recording.
+      await this.waitForOnChainDeadline();
+
+      const ownerWallet = this.ownerPubkey.toString();
+      const lastCompleted = await getLastCompletedStep(ownerWallet);
 
       // Scan vault PDA's token balances (or recover from snapshot)
-      let tokenSnapshot = await getTokenSnapshot();
+      let tokenSnapshot = await getTokenSnapshot(ownerWallet);
       if (!tokenSnapshot) {
         const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
         const vaultTokens = await this.txService.getVaultTokenBalances(vaultPda);
@@ -65,7 +71,7 @@ export class ExecutionService {
           symbol: '',
         }));
         if (tokenSnapshot.length > 0) {
-          await saveTokenSnapshot(tokenSnapshot);
+          await saveTokenSnapshot(tokenSnapshot, ownerWallet);
         }
       }
       this.vaultTokens = tokenSnapshot;
@@ -75,7 +81,7 @@ export class ExecutionService {
       // Save all steps to SQLite
       for (const step of steps) {
         if (step.order > lastCompleted) {
-          await saveExecutionStep(step);
+          await saveExecutionStep(step, ownerWallet);
         }
       }
 
@@ -84,7 +90,7 @@ export class ExecutionService {
       this.totalSolDistributed = new BN(0);
       for (const step of steps) {
         if (step.order <= lastCompleted && step.type === 'distribute_sol' && step.metadata?.shareBps) {
-          const snapshot = await getDistributableSnapshot();
+          const snapshot = await getDistributableSnapshot(ownerWallet);
           if (snapshot !== null) {
             const amount = Math.floor(snapshot * (step.metadata.shareBps as number) / 10000);
             this.totalSolDistributed = this.totalSolDistributed.add(new BN(amount));
@@ -99,31 +105,32 @@ export class ExecutionService {
       // Execute sequentially, skip completed and pre-skipped steps
       for (const step of steps) {
         if (step.order <= lastCompleted) continue;
+        const scopedId = `${ownerWallet}_${step.id}`;
         if (step.status === 'skipped') {
-          await updateStepStatus(step.id, 'completed');
+          await updateStepStatus(scopedId, 'completed');
           continue;
         }
 
         // If a distribution failed, skip record_execution and self_terminate
         // to preserve the agent key for manual recovery
         if (hasDistributionFailure && (step.type === 'record_execution_log' || step.type === 'self_terminate')) {
-          await updateStepStatus(step.id, 'failed', undefined,
+          await updateStepStatus(scopedId, 'failed', undefined,
             'Skipped: prior distribution step failed. Agent key preserved for recovery.');
           continue;
         }
 
         // Defense in depth: never destroy agent key unless record_execution succeeded
         if (step.type === 'self_terminate' && !recordExecutionSucceeded) {
-          await updateStepStatus(step.id, 'failed', undefined,
+          await updateStepStatus(scopedId, 'failed', undefined,
             'Skipped: record_execution did not succeed. Agent key preserved for recovery.');
           continue;
         }
 
-        await updateStepStatus(step.id, 'in_progress');
+        await updateStepStatus(scopedId, 'in_progress');
 
         try {
           const txSig = await this.executeStep(step);
-          await updateStepStatus(step.id, 'completed', txSig);
+          await updateStepStatus(scopedId, 'completed', txSig);
           if (step.type === 'record_execution_log') {
             recordExecutionSucceeded = true;
           }
@@ -134,7 +141,7 @@ export class ExecutionService {
             hasDistributionFailure = true;
           }
           try {
-            await updateStepStatus(step.id, 'failed', undefined, err.message);
+            await updateStepStatus(scopedId, 'failed', undefined, err.message);
           } catch {
             // DB write failed — hasDistributionFailure is already set above
           }
@@ -143,6 +150,36 @@ export class ExecutionService {
     } finally {
       globalExecutionInProgress = false;
     }
+  }
+
+  /**
+   * Poll the on-chain deadline until it has passed, with a small buffer.
+   * Uses the Solana cluster clock (via getBlockTime) as the reference,
+   * not the local device clock, to match what the program sees.
+   */
+  private async waitForOnChainDeadline(): Promise<void> {
+    const MAX_WAIT_MS = 120_000;
+    const POLL_INTERVAL_MS = 5_000;
+    const BUFFER_SECONDS = 2;
+    const start = Date.now();
+
+    while (Date.now() - start < MAX_WAIT_MS) {
+      const deadline = await this.txService.getOnChainDeadline(this.ownerPubkey);
+      if (deadline === null) return; // Can't read accounts — proceed anyway
+
+      // Use cluster clock: get latest slot's block time
+      const slot = await this.txService.getConnection().getSlot('confirmed');
+      const blockTime = await this.txService.getConnection().getBlockTime(slot);
+      if (blockTime === null) return; // Can't get cluster time — proceed anyway
+
+      if (blockTime > deadline + BUFFER_SECONDS) {
+        return; // On-chain deadline has passed — safe to execute
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+    // Max wait exceeded — proceed anyway (execution will fail on-chain if too early,
+    // and the failure guards will preserve the agent key)
   }
 
   private buildExecutionPlan(): ExecutionStep[] {
@@ -322,14 +359,15 @@ export class ExecutionService {
     const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
 
     // Get or create distributable snapshot for consistent amounts
-    let distributable = await getDistributableSnapshot();
+    const ownerWallet = this.ownerPubkey.toString();
+    let distributable = await getDistributableSnapshot(ownerWallet);
     if (distributable === null) {
       const vaultBalance = await connection.getBalance(vaultPda);
       const vaultAccountInfo = await connection.getAccountInfo(vaultPda);
       const dataLen = vaultAccountInfo?.data.length ?? 800;
       const rent = await connection.getMinimumBalanceForRentExemption(dataLen);
       distributable = Math.max(0, vaultBalance - rent);
-      await saveDistributableSnapshot(distributable);
+      await saveDistributableSnapshot(distributable, ownerWallet);
     }
 
     // No SOL deposited — skip gracefully (vault may only have SPL tokens)
@@ -394,8 +432,9 @@ export class ExecutionService {
   }
 
   private async executeSelfTerminate(): Promise<void> {
-    await clearDistributableSnapshot();
-    await clearTokenSnapshot();
+    const ownerWallet = this.ownerPubkey.toString();
+    await clearDistributableSnapshot(ownerWallet);
+    await clearTokenSnapshot(ownerWallet);
     await this.keyManager.destroyKey();
   }
 }
