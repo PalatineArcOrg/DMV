@@ -111,16 +111,16 @@ export class ExecutionService {
           continue;
         }
 
-        // If a distribution failed, skip record_execution and self_terminate
+        // If a distribution failed, skip record_execution, close_executed_vault, and self_terminate
         // to preserve the agent key for manual recovery
-        if (hasDistributionFailure && (step.type === 'record_execution_log' || step.type === 'self_terminate')) {
+        if (hasDistributionFailure && (step.type === 'record_execution_log' || step.type === 'close_executed_vault' || step.type === 'self_terminate')) {
           await updateStepStatus(scopedId, 'failed', undefined,
             'Skipped: prior distribution step failed. Agent key preserved for recovery.');
           continue;
         }
 
-        // Defense in depth: never destroy agent key unless record_execution succeeded
-        if (step.type === 'self_terminate' && !recordExecutionSucceeded) {
+        // Defense in depth: never close vault or destroy agent key unless record_execution succeeded
+        if ((step.type === 'close_executed_vault' || step.type === 'self_terminate') && !recordExecutionSucceeded) {
           await updateStepStatus(scopedId, 'failed', undefined,
             'Skipped: record_execution did not succeed. Agent key preserved for recovery.');
           continue;
@@ -265,6 +265,9 @@ export class ExecutionService {
     // Record execution log on-chain
     steps.push(this.makeStep(order++, 'record_execution_log', 'Record execution on-chain', 'pending'));
 
+    // Close executed vault PDAs (return rent to owner)
+    steps.push(this.makeStep(order++, 'close_executed_vault', 'Close vault PDAs, return rent', 'pending'));
+
     // Self-terminate agent key
     steps.push(this.makeStep(order++, 'self_terminate', 'Destroy agent key', 'pending'));
 
@@ -307,6 +310,9 @@ export class ExecutionService {
 
       case 'record_execution_log':
         return this.executeRecordExecution();
+
+      case 'close_executed_vault':
+        return this.executeCloseExecutedVault();
 
       case 'self_terminate':
         await this.executeSelfTerminate();
@@ -429,6 +435,11 @@ export class ExecutionService {
       attestationHash,
       completed: true,
     });
+  }
+
+  private async executeCloseExecutedVault(): Promise<string> {
+    const agentKeypair = await this.keyManager.getKeypair();
+    return this.txService.closeExecutedVault(agentKeypair, this.ownerPubkey);
   }
 
   private async executeSelfTerminate(): Promise<void> {

@@ -10,6 +10,7 @@ pub mod record_execution;
 pub mod update_vault;
 pub mod withdraw_from_vault;
 pub mod withdraw_sol_from_vault;
+pub mod close_executed_vault;
 
 pub use initialize_vault::*;
 pub use record_heartbeat::*;
@@ -22,3 +23,4 @@ pub use record_execution::*;
 pub use update_vault::*;
 pub use withdraw_from_vault::*;
 pub use withdraw_sol_from_vault::*;
+pub use close_executed_vault::*;

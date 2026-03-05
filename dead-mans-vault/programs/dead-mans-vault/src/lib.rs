@@ -84,4 +84,8 @@ pub mod dead_mans_vault {
     ) -> Result<()> {
         instructions::withdraw_sol_from_vault::handler(ctx, amount)
     }
+
+    pub fn close_executed_vault(ctx: Context<CloseExecutedVault>) -> Result<()> {
+        instructions::close_executed_vault::handler(ctx)
+    }
 }

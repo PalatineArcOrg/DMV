@@ -14,6 +14,107 @@ export type DeadMansVault = {
   },
   "instructions": [
     {
+      "name": "closeExecutedVault",
+      "discriminator": [
+        194,
+        143,
+        104,
+        253,
+        159,
+        57,
+        16,
+        130
+      ],
+      "accounts": [
+        {
+          "name": "agent",
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "relations": [
+            "vaultConfig"
+          ]
+        },
+        {
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executionLog",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "closeRevokedVault",
       "discriminator": [
         133,
@@ -1016,6 +1117,11 @@ export type DeadMansVault = {
       "code": 6017,
       "name": "vaultStillActive",
       "msg": "Vault is still active — revoke it first"
+    },
+    {
+      "code": 6018,
+      "name": "vaultNotExecuted",
+      "msg": "Vault has not been executed yet"
     }
   ],
   "types": [

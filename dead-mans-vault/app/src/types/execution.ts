@@ -7,6 +7,7 @@ export type ExecutionStepType =
   | 'burn_asset'
   | 'close_accounts'
   | 'record_execution_log'
+  | 'close_executed_vault'
   | 'self_terminate';
 
 export type ExecutionStepStatus =

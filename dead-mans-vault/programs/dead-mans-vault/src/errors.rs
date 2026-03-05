@@ -55,4 +55,7 @@ pub enum VaultError {
 
     #[msg("Vault is still active — revoke it first")]
     VaultStillActive,
+
+    #[msg("Vault has not been executed yet")]
+    VaultNotExecuted,
 }

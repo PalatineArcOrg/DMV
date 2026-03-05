@@ -253,6 +253,42 @@ export class VaultTransactionService {
     return sig;
   }
 
+  async closeExecutedVault(
+    agentKeypair: Keypair,
+    ownerPubkey: PublicKey,
+  ): Promise<string> {
+    const program = this.getProgram(agentKeypair);
+    const [vaultPda] = this.getVaultPDA(ownerPubkey);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+    const [executionPda] = this.getExecutionPDA(vaultPda);
+
+    const tx = await program.methods
+      .closeExecutedVault()
+      .accountsPartial({
+        agent: agentKeypair.publicKey,
+        owner: ownerPubkey,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+        executionLog: executionPda,
+      })
+      .transaction();
+
+    const priorityTx = await this.addPriorityFee(tx, [
+      vaultPda, heartbeatPda, executionPda, agentKeypair.publicKey,
+    ]);
+
+    priorityTx.feePayer = agentKeypair.publicKey;
+    const { blockhash } = await this.connection.getLatestBlockhash();
+    priorityTx.recentBlockhash = blockhash;
+
+    const sig = await sendAndConfirmTransaction(this.connection, priorityTx, [agentKeypair], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    });
+
+    return sig;
+  }
+
   async recordHeartbeatOnChain(
     agentKeypair: Keypair,
     ownerPubkey: PublicKey,
