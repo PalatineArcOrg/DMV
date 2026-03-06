@@ -109,7 +109,6 @@ export class ExecutionService {
         if (step.order <= lastCompleted) continue;
         const scopedId = `${ownerWallet}_${step.id}`;
         if (step.status === 'skipped') {
-          await updateStepStatus(scopedId, 'completed');
           continue;
         }
 

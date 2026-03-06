@@ -51,10 +51,19 @@ export function ExecutionLogScreen() {
     loadSteps();
   }, [loadSteps]);
 
-  const completedSteps = steps.filter((s) => s.status === 'completed');
-  const failedSteps = steps.filter((s) => s.status === 'failed');
+  // Filter out skipped MVP placeholder steps — they did no real work
+  const visibleSteps = steps.filter((s) => s.status !== 'skipped');
+  const completedSteps = visibleSteps.filter((s) => s.status === 'completed');
+  const failedSteps = visibleSteps.filter((s) => s.status === 'failed');
+  // DeFi closures with mock "sim_" signatures are simulated, not real
+  const realCompleted = completedSteps.filter(
+    (s) => !(s.type === 'close_defi_position' && s.txSignature?.startsWith('sim_')),
+  );
+  const simulatedSteps = completedSteps.filter(
+    (s) => s.type === 'close_defi_position' && s.txSignature?.startsWith('sim_'),
+  );
 
-  if (!isLoading && steps.length === 0) {
+  if (!isLoading && visibleSteps.length === 0) {
     return (
       <View style={styles.emptyContainer}>
         <View style={styles.emptyIcon}>
@@ -71,7 +80,7 @@ export function ExecutionLogScreen() {
   return (
     <FlatList
       style={styles.container}
-      data={steps}
+      data={visibleSteps}
       keyExtractor={(item) => item.id}
       refreshControl={
         <RefreshControl
@@ -81,12 +90,12 @@ export function ExecutionLogScreen() {
         />
       }
       renderItem={({ item, index }) => (
-        <StepCard step={item} isLast={index === steps.length - 1} />
+        <StepCard step={item} isLast={index === visibleSteps.length - 1} />
       )}
       ListHeaderComponent={
         <View>
           {/* Status Banner */}
-          {steps.length > 0 && (
+          {visibleSteps.length > 0 && (
             <View style={[styles.statusBanner, failedSteps.length > 0 ? styles.statusBannerError : styles.statusBannerSuccess]}>
               <MaterialCommunityIcons
                 name={failedSteps.length > 0 ? 'alert-octagon' : 'check-circle'}
@@ -100,7 +109,9 @@ export function ExecutionLogScreen() {
                 <Text style={[styles.statusBannerSub, { color: failedSteps.length > 0 ? 'rgba(220,38,38,0.6)' : 'rgba(0,255,163,0.5)' }]}>
                   {failedSteps.length > 0
                     ? `${failedSteps.length} step(s) failed`
-                    : `${completedSteps.length} transfers completed`}
+                    : simulatedSteps.length > 0
+                      ? `${realCompleted.length} transfers completed, ${simulatedSteps.length} simulated`
+                      : `${realCompleted.length} transfers completed`}
                 </Text>
               </View>
             </View>
@@ -108,7 +119,7 @@ export function ExecutionLogScreen() {
 
           {/* Section Label */}
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionLabel}>TRANSACTIONS ({steps.length})</Text>
+            <Text style={styles.sectionLabel}>TRANSACTIONS ({visibleSteps.length})</Text>
           </View>
         </View>
       }
@@ -119,8 +130,10 @@ export function ExecutionLogScreen() {
 }
 
 function StepCard({ step, isLast }: { step: ExecutionStep; isLast: boolean }) {
-  const statusColor = STATUS_COLORS[step.status];
-  const statusIcon = STATUS_ICONS[step.status] as any;
+  const isSimulated = step.type === 'close_defi_position' && step.txSignature?.startsWith('sim_');
+  const displayStatus = isSimulated ? 'SIMULATED' : step.status.toUpperCase();
+  const statusColor = isSimulated ? COLORS.warning : STATUS_COLORS[step.status];
+  const statusIcon = (isSimulated ? 'flask-outline' : STATUS_ICONS[step.status]) as any;
 
   return (
     <View style={[styles.stepCard, !isLast && styles.stepCardBorder]}>
@@ -135,18 +148,22 @@ function StepCard({ step, isLast }: { step: ExecutionStep; isLast: boolean }) {
         <View style={styles.stepHeader}>
           <View style={[styles.statusPill, { backgroundColor: statusColor + '15', borderColor: statusColor + '30' }]}>
             <MaterialCommunityIcons name={statusIcon} size={10} color={statusColor} />
-            <Text style={[styles.statusPillText, { color: statusColor }]}>{step.status.toUpperCase()}</Text>
+            <Text style={[styles.statusPillText, { color: statusColor }]}>{displayStatus}</Text>
           </View>
           <Text style={styles.stepType}>{step.type.replace(/_/g, ' ')}</Text>
         </View>
 
         <Text style={styles.stepDescription}>{step.description}</Text>
 
-        {step.txSignature && (
+        {step.txSignature && !isSimulated && (
           <View style={styles.txRow}>
             <MaterialCommunityIcons name="link-variant" size={10} color={COLORS.accent} />
             <Text style={styles.txSignature}>{truncateAddress(step.txSignature, 8)}</Text>
           </View>
+        )}
+
+        {isSimulated && (
+          <Text style={styles.simulatedNote}>Devnet only — real closure on mainnet</Text>
         )}
 
         {step.error && (
@@ -351,5 +368,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: 'rgba(255,255,255,0.25)',
     fontFamily: FONTS.mono,
+  },
+  simulatedNote: {
+    fontSize: 10,
+    color: COLORS.warning,
+    fontFamily: FONTS.primary,
+    fontStyle: 'italic',
+    marginTop: 4,
   },
 });
