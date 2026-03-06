@@ -41,6 +41,7 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
   const heartbeatServiceRef = useRef<HeartbeatService | null>(null);
   const escalationServiceRef = useRef<EscalationService | null>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -130,12 +131,21 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
     refreshStatus();
     refreshIntervalRef.current = setInterval(refreshStatus, 10_000);
 
+    // 1-second ticker for smooth countdown display
+    tickIntervalRef.current = setInterval(() => {
+      setSecondsRemaining((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+
     return () => {
       escService.stop();
       hbService.destroy();
       if (refreshIntervalRef.current) {
         clearInterval(refreshIntervalRef.current);
         refreshIntervalRef.current = null;
+      }
+      if (tickIntervalRef.current) {
+        clearInterval(tickIntervalRef.current);
+        tickIntervalRef.current = null;
       }
       setIsMonitoring(false);
     };

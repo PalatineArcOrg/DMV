@@ -228,7 +228,8 @@ export function SetupWizardScreen() {
 
   if (isActuallySetup) {
     const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
-    const gracePeriod = ESCALATION_DEFAULTS.stage1 + ESCALATION_DEFAULTS.stage2 + ESCALATION_DEFAULTS.stage3;
+    const gracePeriod = vaultConfig?.gracePeriod?.toNumber?.()
+      ?? (ESCALATION_DEFAULTS.stage1 + ESCALATION_DEFAULTS.stage2 + ESCALATION_DEFAULTS.stage3);
 
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -283,7 +284,7 @@ export function SetupWizardScreen() {
             <View style={[styles.gridCell, styles.gridCellBorder]}>
               <Text style={styles.gridLabel}>Every</Text>
               <Text style={styles.gridValue}>
-                {heartbeatConfig ? `${heartbeatConfig.intervalSeconds / 86400}d` : vaultConfig ? `${vaultConfig.heartbeatInterval.toNumber() / 86400}d` : '-'}
+                {heartbeatConfig ? formatDuration(heartbeatConfig.intervalSeconds) : vaultConfig ? formatDuration(vaultConfig.heartbeatInterval.toNumber()) : '-'}
               </Text>
             </View>
             <View style={styles.gridCell}>
