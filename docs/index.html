@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dead Man's Vault — Autonomous Crypto Inheritance for Solana</title>
+  <meta name="description" content="An autonomous crypto inheritance protocol for Solana Seeker. Your crypto should outlive you.">
+  <meta property="og:title" content="Dead Man's Vault">
+  <meta property="og:description" content="Autonomous crypto inheritance protocol for Solana Seeker. Monitor liveness, escalate warnings, distribute assets — no backend, no intermediaries.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://dmv.palatinearc.com">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #07090F;
+      --surface: #0F1521;
+      --surface-hover: #151d2e;
+      --accent: #00FFA3;
+      --accent-dim: rgba(0, 255, 163, 0.12);
+      --purple: #9945FF;
+      --purple-dim: rgba(153, 69, 255, 0.12);
+      --warning: #F59E0B;
+      --critical: #EF4444;
+      --text: #FFFFFF;
+      --text-secondary: rgba(255, 255, 255, 0.55);
+      --text-muted: rgba(255, 255, 255, 0.3);
+      --border: rgba(255, 255, 255, 0.08);
+      --font: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* --- NAV --- */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(7, 9, 15, 0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+    }
+    .nav-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+    .nav-logo-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(0, 255, 163, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .nav-logo-text {
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--text);
+    }
+    .nav-links {
+      display: flex;
+      gap: 32px;
+      list-style: none;
+    }
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--accent); }
+    .nav-cta {
+      background: var(--accent);
+      color: var(--bg);
+      padding: 8px 20px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 13px;
+      text-decoration: none;
+      transition: transform 0.2s, opacity 0.2s;
+    }
+    .nav-cta:hover { transform: translateY(-1px); opacity: 0.9; }
+
+    /* --- HERO --- */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 120px 24px 80px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, rgba(0, 255, 163, 0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      background: var(--purple-dim);
+      border: 1px solid rgba(153, 69, 255, 0.25);
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--purple);
+      margin-bottom: 32px;
+      letter-spacing: 0.5px;
+    }
+    .hero h1 {
+      font-size: clamp(40px, 7vw, 72px);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -1.5px;
+      margin-bottom: 24px;
+      max-width: 800px;
+    }
+    .hero h1 .accent { color: var(--accent); }
+    .hero p {
+      font-size: clamp(16px, 2vw, 20px);
+      color: var(--text-secondary);
+      max-width: 600px;
+      margin-bottom: 48px;
+      line-height: 1.7;
+    }
+    .hero-buttons {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent);
+      color: var(--bg);
+      padding: 14px 32px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 15px;
+      text-decoration: none;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(0, 255, 163, 0.2);
+    }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      color: var(--text);
+      padding: 14px 32px;
+      border-radius: 14px;
+      font-weight: 600;
+      font-size: 15px;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      transition: border-color 0.2s;
+    }
+    .btn-secondary:hover { border-color: rgba(255, 255, 255, 0.2); }
+
+    /* --- SECTIONS --- */
+    section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 100px 24px;
+    }
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 16px;
+    }
+    .section-desc {
+      font-size: 16px;
+      color: var(--text-secondary);
+      max-width: 600px;
+      line-height: 1.7;
+      margin-bottom: 48px;
+    }
+
+    /* --- PROBLEM --- */
+    .problem-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      margin-bottom: 48px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+    }
+    .stat-number {
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .stat-number.warning { color: var(--warning); }
+    .stat-number.critical { color: var(--critical); }
+    .stat-label {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* --- HOW IT WORKS --- */
+    .stages {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+    }
+    .stage-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.3s;
+    }
+    .stage-card:hover { border-color: rgba(255, 255, 255, 0.15); }
+    .stage-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+    }
+    .stage-card.s0::before { background: var(--accent); }
+    .stage-card.s1::before { background: var(--warning); }
+    .stage-card.s2::before { background: #F97316; }
+    .stage-card.s3::before { background: var(--critical); }
+    .stage-card.s4::before { background: #991B1B; }
+    .stage-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+    .s0 .stage-num { background: rgba(0, 255, 163, 0.15); color: var(--accent); }
+    .s1 .stage-num { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+    .s2 .stage-num { background: rgba(249, 115, 22, 0.15); color: #F97316; }
+    .s3 .stage-num { background: rgba(239, 68, 68, 0.15); color: var(--critical); }
+    .s4 .stage-num { background: rgba(153, 27, 27, 0.2); color: #FCA5A5; }
+    .stage-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .stage-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+    .stage-timing {
+      margin-top: 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 500;
+      letter-spacing: 0.5px;
+    }
+
+    /* --- FEATURES --- */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      transition: border-color 0.3s;
+    }
+    .feature-card:hover { border-color: rgba(0, 255, 163, 0.2); }
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--accent-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+    .feature-icon.purple { background: var(--purple-dim); }
+    .feature-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .feature-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* --- ARCHITECTURE --- */
+    .arch-layers {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .arch-layer {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+    }
+    .arch-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .arch-layer-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .arch-layer-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* --- TECH STACK --- */
+    .tech-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .tech-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+    .tech-pill .ver {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* --- DOWNLOAD / CTA --- */
+    .download-section {
+      text-align: center;
+      padding: 120px 24px;
+    }
+    .download-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      max-width: 900px;
+      margin: 0 auto;
+      margin-top: 48px;
+    }
+    .download-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 40px 32px;
+      text-align: center;
+      transition: border-color 0.3s;
+    }
+    .download-card:hover { border-color: rgba(0, 255, 163, 0.2); }
+    .download-card-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    .download-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .download-card p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+    .download-card .badge {
+      display: inline-block;
+      padding: 6px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .badge-live {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid rgba(0, 255, 163, 0.2);
+    }
+    .badge-soon {
+      background: var(--purple-dim);
+      color: var(--purple);
+      border: 1px solid rgba(153, 69, 255, 0.2);
+    }
+    .qr-placeholder {
+      width: 160px;
+      height: 160px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 2px dashed rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 20px auto;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* --- FOOTER --- */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 48px 24px;
+      text-align: center;
+    }
+    .footer-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .footer-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: var(--accent); }
+    .footer-copy {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* --- DIVIDER --- */
+    .divider {
+      max-width: 1200px;
+      margin: 0 auto;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* --- RESPONSIVE --- */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .stages { grid-template-columns: 1fr; }
+      .features-grid { grid-template-columns: 1fr; }
+      .hero-buttons { flex-direction: column; align-items: center; }
+    }
+
+    /* --- ANIMATIONS --- */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .hero h1, .hero p, .hero-badge, .hero-buttons {
+      animation: fadeUp 0.8s ease-out backwards;
+    }
+    .hero-badge { animation-delay: 0s; }
+    .hero h1 { animation-delay: 0.1s; }
+    .hero p { animation-delay: 0.2s; }
+    .hero-buttons { animation-delay: 0.3s; }
+
+    /* ECG pulse line */
+    .ecg-container {
+      width: 100%;
+      max-width: 400px;
+      height: 60px;
+      margin: 0 auto 32px;
+      overflow: hidden;
+      opacity: 0.4;
+    }
+    .ecg-line {
+      stroke: var(--accent);
+      stroke-width: 2;
+      fill: none;
+      stroke-dasharray: 600;
+      stroke-dashoffset: 600;
+      animation: drawEcg 3s linear infinite;
+    }
+    @keyframes drawEcg {
+      to { stroke-dashoffset: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="nav-logo">
+      <div class="nav-logo-icon">&#x1F6E1;</div>
+      <span class="nav-logo-text">Dead Man's Vault</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#problem">Problem</a></li>
+      <li><a href="#how-it-works">How It Works</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#download">Download</a></li>
+    </ul>
+    <a href="https://github.com/PalatineArcOrg/DMV" target="_blank" class="nav-cta">GitHub</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-badge">Built for Solana Seeker &middot; Monolith Hackathon 2026</div>
+
+  <svg class="ecg-container" viewBox="0 0 400 60" preserveAspectRatio="none">
+    <path class="ecg-line" d="M0,30 L80,30 L90,30 L100,10 L110,50 L120,30 L160,30 L170,30 L180,5 L190,55 L200,30 L240,30 L250,30 L260,12 L270,48 L280,30 L320,30 L330,30 L340,8 L350,52 L360,30 L400,30" />
+  </svg>
+
+  <h1>Your crypto should<br><span class="accent">outlive you.</span></h1>
+  <p>Dead Man's Vault is an autonomous crypto inheritance protocol for Solana. Configure beneficiaries, confirm heartbeats, and know your assets are protected — no backend, no intermediaries, no trust required.</p>
+  <div class="hero-buttons">
+    <a href="#download" class="btn-primary">Get the App</a>
+    <a href="#how-it-works" class="btn-secondary">See How It Works</a>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- PROBLEM -->
+<section id="problem">
+  <div class="section-label">The Problem</div>
+  <div class="section-title">Lost forever.</div>
+  <div class="section-desc">Millions in crypto assets are lost every year because there's no decentralized way to pass them on. Traditional inheritance systems don't work for self-custodied wallets.</div>
+  <div class="problem-stats">
+    <div class="stat-card">
+      <div class="stat-number">$140B+</div>
+      <div class="stat-label">Estimated value of inaccessible Bitcoin alone. Crypto doesn't have a "next of kin" form.</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number warning">4M+</div>
+      <div class="stat-label">Bitcoin wallets with no activity in 5+ years. Many owners may no longer be alive.</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number critical">0</div>
+      <div class="stat-label">Decentralized inheritance solutions on Solana Mobile. Until now.</div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- HOW IT WORKS -->
+<section id="how-it-works">
+  <div class="section-label">How It Works</div>
+  <div class="section-title">Five stages. One tap to stay alive.</div>
+  <div class="section-desc">Set up your vault once. Then just confirm a heartbeat periodically. If you stop, the protocol takes over.</div>
+  <div class="stages">
+    <div class="stage-card s0">
+      <div class="stage-num">0</div>
+      <div class="stage-title">Normal</div>
+      <div class="stage-desc">Vault active. Heartbeat confirmed. All clear. Your assets are safe and your beneficiaries are on standby.</div>
+      <div class="stage-timing">Check in weekly, bi-weekly, or monthly</div>
+    </div>
+    <div class="stage-card s1">
+      <div class="stage-num">1</div>
+      <div class="stage-title">Reminder</div>
+      <div class="stage-desc">Heartbeat overdue. Push notifications sent to you. One tap resets everything back to normal.</div>
+      <div class="stage-timing">Duration: 3 days</div>
+    </div>
+    <div class="stage-card s2">
+      <div class="stage-num">2</div>
+      <div class="stage-title">Alert</div>
+      <div class="stage-desc">Still no response. Notifications increase in frequency. Emergency contacts alerted.</div>
+      <div class="stage-timing">Duration: 7 days</div>
+    </div>
+    <div class="stage-card s3">
+      <div class="stage-num">3</div>
+      <div class="stage-title">Warning</div>
+      <div class="stage-desc">Final countdown. Hourly notifications. This is your last chance to confirm liveness.</div>
+      <div class="stage-timing">Duration: 7 days</div>
+    </div>
+    <div class="stage-card s4">
+      <div class="stage-num">4</div>
+      <div class="stage-title">Execution</div>
+      <div class="stage-desc">Irreversible. The agent autonomously distributes SOL and tokens from your vault to each beneficiary via on-chain instructions. Vault closed. Agent key destroyed.</div>
+      <div class="stage-timing">Autonomous &middot; No wallet interaction</div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="section-label">Features</div>
+  <div class="section-title">Built for real-world crypto inheritance.</div>
+  <div class="section-desc">Every feature designed around one principle: your assets should be protected without relying on anyone else.</div>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F512;</div>
+      <div class="feature-title">TEE-Secured Agent Key</div>
+      <div class="feature-desc">A dedicated agent key stored in Seeker's hardware secure enclave handles heartbeats and execution autonomously. Your owner wallet stays untouched.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon purple">&#x1F4B0;</div>
+      <div class="feature-title">Vault PDA Asset Storage</div>
+      <div class="feature-desc">Deposit SOL and SPL tokens directly into your vault PDA. Withdraw anytime. At Stage 4, the agent distributes to each beneficiary via on-chain instructions.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F504;</div>
+      <div class="feature-title">Crash-Proof Execution</div>
+      <div class="feature-desc">Every execution step is checkpointed to SQLite before proceeding. App crashes, device restarts — execution resumes exactly where it left off.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon purple">&#x1F4CA;</div>
+      <div class="feature-title">Live Portfolio Tracking</div>
+      <div class="feature-desc">Token balances via Helius DAS API, USD prices from dual oracles (Pyth + Jupiter), 24h price changes, DeFi position detection across 10 protocols.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F91D;</div>
+      <div class="feature-title">On-Chain Beneficiary Whitelist</div>
+      <div class="feature-desc">The program only sends assets to wallets you've pre-approved. Up to 20 beneficiaries with basis-point share allocation.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon purple">&#x1F50D;</div>
+      <div class="feature-title">Full Transparency</div>
+      <div class="feature-desc">Every heartbeat, every distribution, every state change — all recorded on-chain. Execution logs with transaction signatures link directly to Solana Explorer.</div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="section-label">Architecture</div>
+  <div class="section-title">No backend. No intermediaries.</div>
+  <div class="section-desc">Everything runs on-device or on-chain. The mobile app orchestrates, the Anchor program enforces, and the TEE secures.</div>
+  <div class="arch-layers">
+    <div class="arch-layer">
+      <div class="arch-dot" style="background: var(--accent);"></div>
+      <div>
+        <div class="arch-layer-title">Anchor Program (Rust)</div>
+        <div class="arch-layer-desc">13 instructions &middot; On-chain constraint enforcement</div>
+      </div>
+    </div>
+    <div class="arch-layer">
+      <div class="arch-dot" style="background: var(--purple);"></div>
+      <div>
+        <div class="arch-layer-title">React Native (Expo SDK 52)</div>
+        <div class="arch-layer-desc">Orchestration, scanning, escalation, execution</div>
+      </div>
+    </div>
+    <div class="arch-layer">
+      <div class="arch-dot" style="background: var(--warning);"></div>
+      <div>
+        <div class="arch-layer-title">Zustand + SQLite</div>
+        <div class="arch-layer-desc">State management + crash recovery checkpoints</div>
+      </div>
+    </div>
+    <div class="arch-layer">
+      <div class="arch-dot" style="background: #14F195;"></div>
+      <div>
+        <div class="arch-layer-title">Solana Mobile MWA</div>
+        <div class="arch-layer-desc">Owner authorization via Seed Vault</div>
+      </div>
+    </div>
+    <div class="arch-layer">
+      <div class="arch-dot" style="background: var(--critical);"></div>
+      <div>
+        <div class="arch-layer-title">Seeker TEE</div>
+        <div class="arch-layer-desc">Agent key for autonomous operations</div>
+      </div>
+    </div>
+    <div class="arch-layer">
+      <div class="arch-dot" style="background: #60A5FA;"></div>
+      <div>
+        <div class="arch-layer-title">Helius + Pyth + Jupiter</div>
+        <div class="arch-layer-desc">Portfolio data, price oracles, priority fees</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 48px;">
+    <div class="section-label" style="margin-bottom: 20px;">Tech Stack</div>
+    <div class="tech-grid">
+      <div class="tech-pill">Anchor <span class="ver">0.32.1</span></div>
+      <div class="tech-pill">Solana CLI <span class="ver">3.0.15</span></div>
+      <div class="tech-pill">Rust <span class="ver">1.93</span></div>
+      <div class="tech-pill">Expo SDK <span class="ver">52</span></div>
+      <div class="tech-pill">React Native <span class="ver">0.76.9</span></div>
+      <div class="tech-pill">TypeScript <span class="ver">5.x</span></div>
+      <div class="tech-pill">Zustand <span class="ver">5</span></div>
+      <div class="tech-pill">@solana/web3.js <span class="ver">1.x</span></div>
+    </div>
+  </div>
+
+  <div style="margin-top: 48px;">
+    <div class="section-label" style="margin-bottom: 20px;">On-Chain Program</div>
+    <div class="arch-layers">
+      <div class="arch-layer">
+        <div class="arch-dot" style="background: var(--accent);"></div>
+        <div>
+          <div class="arch-layer-title" style="font-family: monospace; font-size: 12px; color: var(--text-muted);">Program ID</div>
+          <div class="arch-layer-desc" style="font-family: monospace; color: var(--accent); font-size: 11px; word-break: break-all;">GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb</div>
+        </div>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-dot" style="background: var(--purple);"></div>
+        <div>
+          <div class="arch-layer-title">34 Tests Passing</div>
+          <div class="arch-layer-desc">Happy paths, error cases, security guards, execution flow</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- DOWNLOAD -->
+<section id="download" class="download-section">
+  <div class="section-label">Get Started</div>
+  <div class="section-title">Download Dead Man's Vault</div>
+  <div class="section-desc" style="margin: 0 auto 0; max-width: 500px;">Currently available on Solana Devnet. Mainnet launch coming soon with full app store distribution.</div>
+  <div class="download-cards">
+    <div class="download-card">
+      <div class="download-card-icon">&#x1F4F1;</div>
+      <h3>Devnet APK</h3>
+      <p>Test the full flow on Solana Devnet. Requires a Solana Mobile wallet (Seed Vault or compatible MWA wallet).</p>
+      <a href="https://github.com/PalatineArcOrg/DMV/releases/latest" target="_blank" class="btn-primary" style="font-size: 13px; padding: 10px 24px;">Download APK</a>
+      <div class="badge badge-live" style="margin-top: 16px;">Available Now</div>
+    </div>
+    <div class="download-card">
+      <div class="download-card-icon">&#x1F680;</div>
+      <h3>Mainnet Release</h3>
+      <p>Full production release with mainnet deployment, Google Play distribution, and enhanced security audit.</p>
+      <div class="qr-placeholder">QR Code<br>Coming Soon</div>
+      <div class="badge badge-soon">Coming Soon</div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-links">
+      <a href="https://github.com/PalatineArcOrg/DMV" target="_blank">GitHub</a>
+      <a href="https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet" target="_blank">Program on Explorer</a>
+      <a href="https://palatinearc.com" target="_blank">Palatine Arc</a>
+    </div>
+    <div class="footer-copy">
+      &copy; 2026 Palatine Arc. Built for the Monolith &mdash; Solana Mobile Hackathon.
+      <br>Licensed under MIT.
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
