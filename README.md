@@ -35,7 +35,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Stage 4 is
 - **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
 - **Autonomous execution** -- Agent key (TEE-stored) handles distribution without user interaction at Stage 4
-- **Durable nonce pre-signed distribution** -- Owner pre-signs distribution TX during vault setup; agent submits atomically at Stage 4 with no wallet interaction
+- **Vault PDA asset storage** -- Owner deposits SOL/SPL tokens into vault PDA; agent distributes on-chain per beneficiary at Stage 4
 - **Idempotent crash recovery** -- Every execution step checkpointed to SQLite before proceeding
 - **Clean vault lifecycle** -- Revoking closes on-chain PDAs and reclaims rent; re-initialization on the same wallet works atomically
 
@@ -125,10 +125,15 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 | `initialize_vault` | Owner | Create vault with beneficiaries, intervals, agent key, and mutability flag |
 | `update_vault` | Owner | Modify estate plan (beneficiaries, intervals). Blocked on immutable vaults |
 | `record_heartbeat` | Agent | Record liveness confirmation on-chain |
-| `execute_distribution` | Agent | Transfer SOL to a beneficiary (BN precision arithmetic) |
+| `execute_sol_distribution` | Agent | Distribute SOL from vault PDA to a beneficiary |
+| `execute_distribution` | Agent | Distribute SPL tokens from vault PDA ATA to a beneficiary's ATA |
 | `record_execution` | Agent | Create immutable execution log, deactivate vault |
 | `rotate_agent` | Owner | Rotate agent key (device migration) with 5 security guards |
 | `revoke_vault` | Owner | Close vault + heartbeat PDAs, reclaim rent. Blocked on immutable vaults |
+| `withdraw_sol_from_vault` | Owner | Withdraw SOL from vault PDA back to owner |
+| `withdraw_from_vault` | Owner | Withdraw SPL tokens from vault PDA back to owner |
+| `close_executed_vault` | Agent | Close vault PDAs after execution, return rent to owner |
+| `close_executed_vault_by_owner` | Owner | Owner variant for manual post-execution cleanup |
 | `close_revoked_vault` | Owner | Clean up zombie vaults revoked under older program versions |
 
 All transactions include per-instruction compute unit limits and dynamic priority fees for reliable landing.
@@ -143,11 +148,11 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 ### Error Codes
 
-16 custom error codes covering: interval validation, share allocation, signer authorization, vault state guards, beneficiary whitelist enforcement, immutability protection, and vault lifecycle management.
+19 custom error codes covering: interval validation, share allocation, signer authorization, vault state guards, beneficiary whitelist enforcement, immutability protection, and vault lifecycle management.
 
 ### Tests
 
-30/30 tests passing -- covers happy paths, all error cases, rotate_agent security guards, execution flow, double-execution prevention, vault revoke/close lifecycle, and re-initialization after revoke.
+34/34 tests passing -- covers happy paths, all error cases, rotate_agent security guards, SOL/SPL distribution, vault withdraw, close_executed_vault, double-execution prevention, vault revoke/close lifecycle, and re-initialization after revoke.
 
 ---
 
@@ -159,7 +164,7 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 |-----|---------|---------|
 | **Status** | Dashboard, Execution Log | Heartbeat button, portfolio overview, vault status, escalation banner |
 | **Assets** | Assets Overview | Token list with live prices, DeFi positions grouped by protocol with closure strategies |
-| **Setup** | Welcome, Beneficiaries, Heartbeat Config, DeFi Positions, Estate Review | 4-step vault creation wizard with step indicator |
+| **Vault** | SetupWizard, Welcome, Beneficiaries, Heartbeat Config, DeFi Positions, Estate Review | 4-step vault creation wizard with step indicator |
 | **Settings** | Settings | Wallet info, vault contract details, edit/update vault, revoke, demo mode, app lock |
 
 Authentication screen guards app access with biometric/PIN when enabled.
@@ -171,9 +176,9 @@ Authentication screen guards app access with biometric/PIN when enabled.
 | **BackgroundAgent** | Singleton orchestrator for heartbeat monitoring and escalation evaluation |
 | **HeartbeatService** | Records confirmations to SQLite, tracks overdue status, monitors on-chain wallet activity |
 | **EscalationService** | Autonomous state machine evaluating every 60s (10s in demo), transitions through 4 stages |
-| **ExecutionService** | 8-step idempotent execution engine with pre-signed durable nonce distribution and SQLite checkpointing |
+| **ExecutionService** | 10-step idempotent execution engine with on-chain SOL/SPL distribution, vault closure, and SQLite checkpointing |
 | **VaultTransactionService** | Builds and sends all on-chain transactions with priority fees and raw byte parsing fallback |
-| **KeyManager** | Agent keypair + pre-signed TX + nonce account lifecycle via expo-secure-store (TEE on Seeker) |
+| **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker) |
 | **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX) with frequency caps |
 | **PortfolioScanner** | Token balances via Helius DAS, dual-oracle pricing (Pyth + Jupiter), DeFi detection |
 | **MigrationService** | Detects device migration and triggers on-chain agent rotation |
@@ -220,11 +225,11 @@ React Native's Hermes runtime requires several workarounds:
 ```
 dead-mans-vault/
 +-- programs/dead-mans-vault/src/    # Anchor program (Rust)
-|   +-- instructions/                # 8 instruction handlers
+|   +-- instructions/                # 13 instruction handlers
 |   +-- state/                       # Account definitions
-|   +-- errors.rs                    # 16 error codes
+|   +-- errors.rs                    # 19 error codes
 |   +-- constants.rs                 # On-chain constants
-+-- tests/                           # Anchor program tests (30/30 passing)
++-- tests/                           # Anchor program tests (34/34 passing)
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
         +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.
@@ -232,7 +237,7 @@ dead-mans-vault/
         +-- screens/                 # Dashboard, Assets, Setup wizard (5 screens), Settings, Auth
         +-- components/              # HeartbeatButton, EcgLine, StatusIndicator, StepIndicator, etc.
         +-- hooks/                   # useWallet, useHeartbeat, usePortfolio, useVaultProgram
-        +-- store/                   # Zustand stores (vault, heartbeat, escalation, demo, auth)
+        +-- store/                   # Zustand stores (vault, heartbeat, escalation, demo, auth, portfolio)
         +-- tee/                     # KeyManager (TEE agent key management)
         +-- db/                      # SQLite database layer (6 tables + repos)
         +-- defi/                    # DeFi protocol detectors + registry
