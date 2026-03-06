@@ -76,6 +76,7 @@ export function SettingsScreen() {
             try {
               const { VaultTransactionService } = require('../services/VaultTransactionService');
               const txService = new VaultTransactionService();
+              const connection = txService.getConnection();
               const vault = await txService.fetchVaultConfig(publicKey);
 
               if (vault && vault.owner && vault.owner.toBase58() !== publicKey.toBase58()) {
@@ -83,28 +84,30 @@ export function SettingsScreen() {
                 return;
               }
 
-              if (vault && vault.active && !vault.executed) {
-                const connection = txService.getConnection();
-
-                // Refund agent's remaining SOL back to owner before revoking
-                let agentRefunded = false;
-                let refundError = '';
-                try {
-                  const { KeyManager } = require('../tee/KeyManager');
-                  const keyManager = KeyManager.getInstance();
-                  if (await keyManager.hasAgentKey()) {
-                    const agentKeypair = await keyManager.getKeypair();
-                    const agentBal = await connection.getBalance(agentKeypair.publicKey);
-                    if (agentBal > 10000) {
-                      const refundSig = await txService.refundAgentSol(agentKeypair, publicKey);
-                      agentRefunded = refundSig !== null;
-                    }
+              // Always attempt agent SOL refund regardless of vault state
+              let agentRefunded = false;
+              let refundError = '';
+              try {
+                const { KeyManager } = require('../tee/KeyManager');
+                const keyManager = KeyManager.getInstance();
+                if (await keyManager.hasAgentKey()) {
+                  const agentKeypair = await keyManager.getKeypair();
+                  const agentBal = await connection.getBalance(agentKeypair.publicKey);
+                  if (agentBal > 10000) {
+                    const refundSig = await txService.refundAgentSol(agentKeypair, publicKey);
+                    agentRefunded = refundSig !== null;
                   }
-                } catch (e: any) {
-                  refundError = e?.message || 'Unknown error';
                 }
+              } catch (e: any) {
+                refundError = e?.message || 'Unknown error';
+              }
 
-                // Build batched withdraw-all + revoke transactions (minimal MWA approvals)
+              const refundNote = agentRefunded ? '\n\nAgent SOL refunded to your wallet.' : refundError
+                ? `\n\nAgent SOL refund failed: ${refundError}`
+                : '';
+
+              if (vault && vault.active && !vault.executed) {
+                // Active vault: withdraw assets + revoke on-chain
                 const { instructions: withdrawIxs, assetCount } = await txService.buildWithdrawAllInstructions(publicKey);
                 const txs = await txService.buildBatchedTxs(publicKey, withdrawIxs, { includeRevoke: true });
 
@@ -132,9 +135,6 @@ export function SettingsScreen() {
                 useHeartbeatStore.getState().reset();
                 useEscalationStore.getState().reset();
 
-                const refundNote = agentRefunded ? '' : refundError
-                  ? `\n\nAgent SOL refund failed: ${refundError}`
-                  : '\n\nNote: Agent SOL refund skipped — no agent key or zero balance.';
                 const revokeMsg = assetCount > 0
                   ? `Vault closed. ${assetCount} asset(s) returned to your wallet.${refundNote}\n\nTx: ${txSig.slice(0, 20)}...`
                   : `Vault closed and rent reclaimed.${refundNote}\n\nTx: ${txSig.slice(0, 20)}...`;
@@ -142,16 +142,21 @@ export function SettingsScreen() {
                   { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
                   { text: 'OK' },
                 ]);
-              } else if (vault?.executed) {
-                Alert.alert('Info', 'Vault already executed. Clearing local data.');
-                useVaultStore.getState().resetForWalletSwitch();
-                useHeartbeatStore.getState().reset();
-                useEscalationStore.getState().reset();
               } else {
-                // No vault on-chain — clear stale local state only
-                useVaultStore.getState().resetForWalletSwitch();
+                // Vault executed, inactive, or PDAs already closed — just clean up
+                try {
+                  const { KeyManager } = require('../tee/KeyManager');
+                  await KeyManager.getInstance().destroyKey();
+                } catch {}
+
+                useVaultStore.getState().reset();
                 useHeartbeatStore.getState().reset();
                 useEscalationStore.getState().reset();
+
+                const statusMsg = vault?.executed
+                  ? 'Vault already executed. Local data cleared.'
+                  : 'No active vault found on-chain. Local data cleared.';
+                Alert.alert('Vault Cleared', `${statusMsg}${refundNote}`);
               }
             } catch (err: any) {
               const msg = err.message || String(err);
