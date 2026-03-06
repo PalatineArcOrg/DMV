@@ -2,7 +2,7 @@
   "expo": {
     "name": "Dead Man's Vault",
     "slug": "dead-mans-vault",
-    "version": "1.4.5",
+    "version": "1.4.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -20,7 +20,7 @@
         "backgroundColor": "#080A0F"
       },
       "package": "com.romulusol.deadmansvault",
-      "versionCode": 45,
+      "versionCode": 46,
       "permissions": [
         "POST_NOTIFICATIONS",
         "INTERNET",

@@ -227,9 +227,67 @@ export function SetupWizardScreen() {
   );
 
   if (isActuallySetup) {
+    const isExecuted = vaultConfig?.executed === true;
     const stageCfg = STAGE_CONFIG[escalationStage] ?? STAGE_CONFIG[0];
     const gracePeriod = vaultConfig?.gracePeriod?.toNumber?.()
       ?? (ESCALATION_DEFAULTS.stage1 + ESCALATION_DEFAULTS.stage2 + ESCALATION_DEFAULTS.stage3);
+
+    // Executed vault: show clean summary
+    if (isExecuted) {
+      return (
+        <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {/* Executed Badge */}
+          <View style={styles.executedBadge}>
+            <MaterialCommunityIcons name="check-circle" size={24} color={COLORS.accent} />
+            <Text style={styles.executedBadgeText}>Vault Executed</Text>
+          </View>
+          <Text style={styles.executedSubtext}>
+            Your estate plan has been executed and assets distributed to your beneficiaries.
+          </Text>
+
+          {/* Beneficiaries (read-only) */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons name="account-group" size={14} color="rgba(255,255,255,0.4)" />
+              <Text style={styles.sectionLabel}>BENEFICIARIES</Text>
+            </View>
+            {beneficiaries.map((b, i) => (
+              <View key={i} style={[styles.beneficiaryRow, i < beneficiaries.length - 1 && styles.rowBorder]}>
+                <View style={styles.beneficiaryBadge}>
+                  <Text style={styles.beneficiaryBadgeText}>{i + 1}</Text>
+                </View>
+                <View style={styles.beneficiaryInfo}>
+                  <Text style={styles.beneficiaryName}>{b.label}</Text>
+                  <Text style={styles.beneficiaryAddr}>{truncateAddress(b.wallet.toString(), 6)}</Text>
+                </View>
+                <View style={styles.percentBadge}>
+                  <Text style={styles.percentText}>{(b.shareBps / 100).toFixed(1)}%</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* View Execution Log */}
+          <TouchableOpacity
+            style={styles.execLogBtn}
+            onPress={() => navigation.getParent()?.navigate('Status', { screen: 'ExecutionLog' })}
+          >
+            <MaterialCommunityIcons name="text-box-outline" size={16} color={COLORS.accent} />
+            <Text style={styles.execLogBtnText}>View Execution Log</Text>
+            <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+
+          {/* Set Up New Vault */}
+          <TouchableOpacity style={styles.newVaultBtn} onPress={handleStartOver}>
+            <MaterialCommunityIcons name="plus-circle-outline" size={16} color={COLORS.solanaPurple} />
+            <Text style={[styles.execLogBtnText, { color: COLORS.solanaPurple }]}>Set Up New Vault</Text>
+            <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+
+          <View style={{ height: SPACING.xxl }} />
+        </ScrollView>
+      );
+    }
 
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -670,6 +728,37 @@ const styles = StyleSheet.create({
   },
   revokeBtn: {
     borderColor: 'rgba(239,68,68,0.15)',
+  },
+  newVaultBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: 'rgba(153,69,255,0.2)',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 12,
+  },
+  executedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  executedBadgeText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.accent,
+    fontFamily: FONTS.primaryBold,
+  },
+  executedSubtext: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.primary,
+    marginBottom: 20,
+    lineHeight: 19,
   },
   // Pre-setup step cards
   stepCard: {

@@ -130,7 +130,9 @@ export function DashboardScreen() {
   const { balances, defiPositions: portfolioDefi, totalUsdValue, solBalance, isLoading, error, refresh } = usePortfolio();
   const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } = useVaultProgram();
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
+  const executionStarted = useEscalationStore((s) => s.state.executionStarted);
   const [vaultData, setVaultData] = useState<any>(null);
+  const [executionCompleted, setExecutionCompleted] = useState(false);
   const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
   const storeDefiPositions = useVaultStore((s) => s.defiPositions);
@@ -163,7 +165,19 @@ export function DashboardScreen() {
     try {
       const vault: any = await fetchVaultConfig(publicKey);
       setVaultData(vault);
+      if (!vault) {
+        // Vault PDAs closed — check if execution completed
+        const escState = useEscalationStore.getState().state;
+        if (escState.executionStarted) {
+          setExecutionCompleted(true);
+          useEscalationStore.getState().reset();
+        }
+      }
       if (vault) {
+        if (vault.executed) {
+          setExecutionCompleted(true);
+          useEscalationStore.getState().reset();
+        }
         useVaultStore.getState().setVaultConfig(vault);
         const [vaultPda] = getVaultPDA(publicKey);
         const hb = await fetchHeartbeatRecord(vaultPda);
@@ -533,7 +547,7 @@ export function DashboardScreen() {
       )}
 
       {/* Execution In Progress */}
-      {escalationStage === 4 && (
+      {escalationStage === 4 && !vaultData?.executed && !executionCompleted && (
         <TouchableOpacity style={styles.executionCard} onPress={() => navigation.navigate('ExecutionLog')}>
           <MaterialCommunityIcons name="alert-octagon" size={20} color={COLORS.critical} />
           <View style={{ flex: 1, marginLeft: 12 }}>
@@ -545,14 +559,15 @@ export function DashboardScreen() {
       )}
 
       {/* Vault Executed */}
-      {vaultData?.executed && (
-        <View style={styles.executedCard}>
+      {(vaultData?.executed || executionCompleted) && (
+        <TouchableOpacity style={styles.executedCard} onPress={() => navigation.navigate('ExecutionLog')}>
           <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.accent} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={styles.executedTitle}>Vault Executed</Text>
-            <Text style={styles.executedSubtitle}>Estate plan executed. Assets distributed.</Text>
+            <Text style={styles.executedSubtitle}>Estate plan executed. Assets distributed to beneficiaries.</Text>
           </View>
-        </View>
+          <MaterialCommunityIcons name="chevron-right" size={18} color="rgba(255,255,255,0.3)" />
+        </TouchableOpacity>
       )}
 
       {/* === PORTFOLIO + TOKENS MERGED === */}

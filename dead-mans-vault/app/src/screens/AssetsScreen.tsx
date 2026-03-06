@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
+import { useNavigation } from '@react-navigation/native';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useVaultStore } from '../store/useVaultStore';
@@ -52,18 +54,54 @@ function TokenIcon({ symbol, logoUri }: { symbol: string; logoUri?: string | nul
 }
 
 export function AssetsScreen() {
+  const navigation = useNavigation<any>();
   const { publicKey, connected } = useWallet();
   const { balances, defiPositions: portfolioDefiPositions, totalUsdValue, isLoading: portfolioLoading, refresh } = usePortfolio();
   const isSetupComplete = useVaultStore((s) => s.isSetupComplete);
+  const vaultConfig = useVaultStore((s) => s.vaultConfig);
 
   const [activeTab, setActiveTab] = useState<Tab>('tokens');
   const [positions, setPositions] = useState<DeFiPosition[]>([]);
+  const [vaultSolBalance, setVaultSolBalance] = useState(0);
+  const [vaultTokenCount, setVaultTokenCount] = useState(0);
+  const [vaultTokenLabels, setVaultTokenLabels] = useState<string[]>([]);
 
   // Sync DeFi positions from usePortfolio (handles both new data and wallet-switch clear)
   useEffect(() => {
     setPositions(portfolioDefiPositions);
   }, [portfolioDefiPositions]);
 
+
+  // Fetch vault PDA balances
+  useEffect(() => {
+    if (!isSetupComplete || !publicKey || vaultConfig?.executed) {
+      setVaultSolBalance(0);
+      setVaultTokenCount(0);
+      setVaultTokenLabels([]);
+      return;
+    }
+    (async () => {
+      try {
+        const { VaultTransactionService } = require('../services/VaultTransactionService');
+        const txService = new VaultTransactionService();
+        const [vaultPda] = txService.getVaultPDA(publicKey);
+        const connection = txService.getConnection();
+        const accountInfo = await connection.getAccountInfo(vaultPda);
+        if (accountInfo) {
+          const rent = await connection.getMinimumBalanceForRentExemption(accountInfo.data.length);
+          setVaultSolBalance(Math.max(0, accountInfo.lamports - rent));
+        }
+        const tokens = await txService.getVaultTokenBalances(vaultPda);
+        setVaultTokenCount(tokens.length);
+        setVaultTokenLabels(tokens.map((t: any) => {
+          const match = balances.find((b) => b.mint.toString() === t.mint.toString());
+          return match?.symbol ?? t.mint.toString().slice(0, 6);
+        }));
+      } catch {
+        // Non-fatal
+      }
+    })();
+  }, [isSetupComplete, publicKey, vaultConfig?.executed, balances]);
 
   const updateAction = useCallback((index: number, action: DeFiPositionAction) => {
     setPositions((prev) => {
@@ -120,6 +158,26 @@ export function AssetsScreen() {
           <MaterialCommunityIcons name="shield-off" size={14} color={COLORS.warning} />
           <Text style={styles.unprotectedText}>Not Protected</Text>
         </View>
+      )}
+
+      {/* Vault Deposits */}
+      {isSetupComplete && !vaultConfig?.executed && (vaultSolBalance > 0 || vaultTokenCount > 0) && (
+        <TouchableOpacity
+          style={styles.vaultDepositsCard}
+          onPress={() => navigation.getParent()?.navigate('Status')}
+        >
+          <View style={styles.vaultDepositsIcon}>
+            <MaterialCommunityIcons name="safe-square-outline" size={18} color={COLORS.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.vaultDepositsTitle}>Vault Deposits</Text>
+            <Text style={styles.vaultDepositsValue}>
+              {(vaultSolBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL
+              {vaultTokenCount > 0 ? ` + ${vaultTokenCount} token${vaultTokenCount > 1 ? 's' : ''} (${vaultTokenLabels.join(', ')})` : ''}
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={16} color="rgba(255,255,255,0.3)" />
+        </TouchableOpacity>
       )}
 
       {/* Segment Tabs */}
@@ -284,6 +342,12 @@ const styles = StyleSheet.create({
   protectionText: { fontSize: 12, color: COLORS.accent, fontWeight: '600', fontFamily: FONTS.primarySemiBold },
   unprotectedBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 20, marginTop: 8, marginBottom: 12 },
   unprotectedText: { fontSize: 12, color: COLORS.warning, fontWeight: '600', fontFamily: FONTS.primarySemiBold },
+
+  // Vault deposits card
+  vaultDepositsCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: COLORS.surface, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(0,255,163,0.15)', padding: 14, marginHorizontal: 16, marginBottom: 12 },
+  vaultDepositsIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(0,255,163,0.1)', alignItems: 'center', justifyContent: 'center' },
+  vaultDepositsTitle: { fontSize: 12, fontWeight: '600', color: COLORS.accent, fontFamily: FONTS.primarySemiBold },
+  vaultDepositsValue: { fontSize: 11, color: 'rgba(255,255,255,0.5)', fontFamily: FONTS.primary, marginTop: 2 },
 
   // Segment tabs
   segmentContainer: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 12, backgroundColor: COLORS.surface, borderRadius: 12, padding: 3 },

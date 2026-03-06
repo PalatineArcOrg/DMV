@@ -18,6 +18,7 @@ import { ExecutionStep, ExecutionStepType } from '../types/execution';
 import { Beneficiary } from '../types/vault';
 import { DeFiPosition } from '../types/defi';
 import { DeFiClosureService } from '../defi/closer';
+import { useEscalationStore } from '../store/useEscalationStore';
 
 // Module-level guard prevents concurrent execution across multiple instances
 let globalExecutionInProgress = false;
@@ -141,6 +142,7 @@ export class ExecutionService {
           await updateStepStatus(scopedId, 'completed', txSig);
           if (step.type === 'record_execution_log') {
             recordExecutionSucceeded = true;
+            useEscalationStore.getState().reset();
           }
           if (step.type === 'close_executed_vault') {
             closeVaultSucceeded = true;
