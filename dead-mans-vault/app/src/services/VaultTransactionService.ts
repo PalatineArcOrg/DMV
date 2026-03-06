@@ -293,12 +293,21 @@ export class VaultTransactionService {
     agentKeypair: Keypair,
     ownerPubkey: PublicKey,
   ): Promise<string | null> {
-    const balance = await this.connection.getBalance(agentKeypair.publicKey);
-    const FEE_RESERVE = 10000; // 10k lamports reserve for TX fee
+    const balance = await this.connection.getBalance(agentKeypair.publicKey, 'confirmed');
+    // Reserve enough for base fee (5000) + priority fee + safety margin
+    const FEE_RESERVE = 50000;
     const refundAmount = balance - FEE_RESERVE;
     if (refundAmount <= 0) return null;
 
-    const tx = new Transaction().add(
+    const tx = new Transaction();
+
+    // Add compute budget for priority fee
+    tx.add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 200 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }),
+    );
+
+    tx.add(
       SystemProgram.transfer({
         fromPubkey: agentKeypair.publicKey,
         toPubkey: ownerPubkey,

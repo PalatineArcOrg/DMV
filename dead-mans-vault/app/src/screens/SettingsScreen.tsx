@@ -88,16 +88,20 @@ export function SettingsScreen() {
 
                 // Refund agent's remaining SOL back to owner before revoking
                 let agentRefunded = false;
+                let refundError = '';
                 try {
                   const { KeyManager } = require('../tee/KeyManager');
                   const keyManager = KeyManager.getInstance();
                   if (await keyManager.hasAgentKey()) {
                     const agentKeypair = await keyManager.getKeypair();
-                    const refundSig = await txService.refundAgentSol(agentKeypair, publicKey);
-                    agentRefunded = refundSig !== null;
+                    const agentBal = await connection.getBalance(agentKeypair.publicKey);
+                    if (agentBal > 10000) {
+                      const refundSig = await txService.refundAgentSol(agentKeypair, publicKey);
+                      agentRefunded = refundSig !== null;
+                    }
                   }
-                } catch {
-                  // Agent refund failed — continue with revoke, user keeps vault rent
+                } catch (e: any) {
+                  refundError = e?.message || 'Unknown error';
                 }
 
                 // Build batched withdraw-all + revoke transactions (minimal MWA approvals)
@@ -128,7 +132,9 @@ export function SettingsScreen() {
                 useHeartbeatStore.getState().reset();
                 useEscalationStore.getState().reset();
 
-                const refundNote = agentRefunded ? '' : '\n\nNote: Agent SOL refund failed — check agent wallet.';
+                const refundNote = agentRefunded ? '' : refundError
+                  ? `\n\nAgent SOL refund failed: ${refundError}`
+                  : '\n\nNote: Agent SOL refund skipped — no agent key or zero balance.';
                 const revokeMsg = assetCount > 0
                   ? `Vault closed. ${assetCount} asset(s) returned to your wallet.${refundNote}\n\nTx: ${txSig.slice(0, 20)}...`
                   : `Vault closed and rent reclaimed.${refundNote}\n\nTx: ${txSig.slice(0, 20)}...`;
