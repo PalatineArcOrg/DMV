@@ -289,6 +289,35 @@ export class VaultTransactionService {
     return sig;
   }
 
+  async refundAgentSol(
+    agentKeypair: Keypair,
+    ownerPubkey: PublicKey,
+  ): Promise<string | null> {
+    const balance = await this.connection.getBalance(agentKeypair.publicKey);
+    const FEE_RESERVE = 5000; // 5000 lamports for the transfer TX fee
+    const refundAmount = balance - FEE_RESERVE;
+    if (refundAmount <= 0) return null;
+
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: agentKeypair.publicKey,
+        toPubkey: ownerPubkey,
+        lamports: refundAmount,
+      }),
+    );
+
+    tx.feePayer = agentKeypair.publicKey;
+    const { blockhash } = await this.connection.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+
+    const sig = await sendAndConfirmTransaction(this.connection, tx, [agentKeypair], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    });
+
+    return sig;
+  }
+
   async recordHeartbeatOnChain(
     agentKeypair: Keypair,
     ownerPubkey: PublicKey,

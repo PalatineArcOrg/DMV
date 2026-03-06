@@ -86,6 +86,16 @@ export function SettingsScreen() {
               if (vault && vault.active && !vault.executed) {
                 const connection = txService.getConnection();
 
+                // Refund agent's remaining SOL back to owner before revoking
+                try {
+                  const { KeyManager } = require('../tee/KeyManager');
+                  const keyManager = KeyManager.getInstance();
+                  if (await keyManager.hasAgentKey()) {
+                    const agentKeypair = await keyManager.getKeypair();
+                    await txService.refundAgentSol(agentKeypair, publicKey);
+                  }
+                } catch {}
+
                 // Build batched withdraw-all + revoke transactions (minimal MWA approvals)
                 const { instructions: withdrawIxs, assetCount } = await txService.buildWithdrawAllInstructions(publicKey);
                 const txs = await txService.buildBatchedTxs(publicKey, withdrawIxs, { includeRevoke: true });
@@ -103,6 +113,12 @@ export function SettingsScreen() {
                     { signature: txSig, blockhash, lastValidBlockHeight }, 'confirmed',
                   );
                 }
+
+                // Destroy agent key — vault is gone, agent no longer needed
+                try {
+                  const { KeyManager } = require('../tee/KeyManager');
+                  await KeyManager.getInstance().destroyKey();
+                } catch {}
 
                 useVaultStore.getState().reset();
                 useHeartbeatStore.getState().reset();
