@@ -535,6 +535,67 @@ export class VaultTransactionService {
     return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 350_000);
   }
 
+  /**
+   * Atomic close-then-reinit for an executed vault: closes VaultConfig,
+   * HeartbeatRecord, and ExecutionLog PDAs, then re-initializes the vault.
+   * Single MWA approval required.
+   */
+  async buildCloseExecutedAndReinitVaultTx(
+    owner: PublicKey,
+    agentPubkey: PublicKey,
+    heartbeatInterval: number,
+    gracePeriod: number,
+    beneficiaries: { wallet: PublicKey; shareBps: number; hasSpecificAssets: boolean }[],
+    isMutable: boolean = true,
+  ): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+    const [executionPda] = this.getExecutionPDA(vaultPda);
+
+    const readonlyWallet = {
+      publicKey: owner,
+      signTransaction: async (tx: Transaction) => tx,
+      signAllTransactions: async (txs: Transaction[]) => txs,
+    };
+    const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
+      commitment: 'confirmed',
+    });
+    const program = new Program<DeadMansVault>(idl as any, provider);
+
+    const closeIx = await program.methods
+      .closeExecutedVaultByOwner()
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+        executionLog: executionPda,
+      })
+      .instruction();
+
+    const initIx = await program.methods
+      .initializeVault({
+        agentPubkey,
+        heartbeatInterval: new BN(heartbeatInterval),
+        gracePeriod: new BN(gracePeriod),
+        beneficiaries: beneficiaries.map((b) => ({
+          wallet: b.wallet,
+          shareBps: b.shareBps,
+          hasSpecificAssets: b.hasSpecificAssets,
+        })),
+        isMutable,
+      })
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction();
+
+    const tx = new Transaction().add(closeIx, initIx);
+    return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda, executionPda], 400_000);
+  }
+
   async buildUpdateVaultTx(
     owner: PublicKey,
     params: {

@@ -101,14 +101,14 @@ export function EstateReviewScreen() {
             ]);
             return;
           } else if (existingVault.executed) {
-            Alert.alert('Vault Executed', 'This vault has already been executed and cannot be re-used.', [
-              { text: 'OK', onPress: () => navigation.popToTop() },
-            ]);
-            return;
+            vaultTx = await txService.buildCloseExecutedAndReinitVaultTx(
+              publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
+            );
+          } else {
+            vaultTx = await txService.buildCloseAndReinitVaultTx(
+              publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
+            );
           }
-          vaultTx = await txService.buildCloseAndReinitVaultTx(
-            publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,
-          );
         } else {
           vaultTx = await txService.buildInitializeVaultTx(
             publicKey, agentPubkey, heartbeatConfig.intervalSeconds, gracePeriod, onChainBeneficiaries, isMutable,

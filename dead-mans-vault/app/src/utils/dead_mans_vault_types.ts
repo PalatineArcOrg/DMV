@@ -115,6 +115,104 @@ export type DeadMansVault = {
       "args": []
     },
     {
+      "name": "closeExecutedVaultByOwner",
+      "discriminator": [
+        150,
+        87,
+        101,
+        17,
+        65,
+        196,
+        81,
+        153
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vaultConfig"
+          ]
+        },
+        {
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executionLog",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "closeRevokedVault",
       "discriminator": [
         133,

@@ -88,4 +88,8 @@ pub mod dead_mans_vault {
     pub fn close_executed_vault(ctx: Context<CloseExecutedVault>) -> Result<()> {
         instructions::close_executed_vault::handler(ctx)
     }
+
+    pub fn close_executed_vault_by_owner(ctx: Context<CloseExecutedVaultByOwner>) -> Result<()> {
+        instructions::close_executed_vault_by_owner::handler(ctx)
+    }
 }
