@@ -101,6 +101,7 @@ export class ExecutionService {
       // Track failures to protect agent key for recovery
       let hasDistributionFailure = false;
       let recordExecutionSucceeded = false;
+      let closeVaultSucceeded = false;
 
       // Execute sequentially, skip completed and pre-skipped steps
       for (const step of steps) {
@@ -126,6 +127,13 @@ export class ExecutionService {
           continue;
         }
 
+        // Never destroy agent key unless close_executed_vault succeeded (or was skipped)
+        if (step.type === 'self_terminate' && !closeVaultSucceeded) {
+          await updateStepStatus(scopedId, 'failed', undefined,
+            'Skipped: close_executed_vault did not succeed. Agent key preserved for retry.');
+          continue;
+        }
+
         await updateStepStatus(scopedId, 'in_progress');
 
         try {
@@ -133,6 +141,9 @@ export class ExecutionService {
           await updateStepStatus(scopedId, 'completed', txSig);
           if (step.type === 'record_execution_log') {
             recordExecutionSucceeded = true;
+          }
+          if (step.type === 'close_executed_vault') {
+            closeVaultSucceeded = true;
           }
         } catch (err: any) {
           // Set failure flag BEFORE updateStepStatus to guarantee it's always set

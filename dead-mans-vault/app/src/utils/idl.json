@@ -8,6 +8,211 @@
   },
   "instructions": [
     {
+      "name": "close_executed_vault",
+      "discriminator": [
+        194,
+        143,
+        104,
+        253,
+        159,
+        57,
+        16,
+        130
+      ],
+      "accounts": [
+        {
+          "name": "agent",
+          "docs": [
+            "Agent signer — must match vault's registered agent"
+          ],
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "Owner wallet — receives rent refund (does not need to sign)"
+          ],
+          "writable": true,
+          "relations": [
+            "vault_config"
+          ]
+        },
+        {
+          "name": "vault_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeat_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "execution_log",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_executed_vault_by_owner",
+      "discriminator": [
+        150,
+        87,
+        101,
+        17,
+        65,
+        196,
+        81,
+        153
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vault_config"
+          ]
+        },
+        {
+          "name": "vault_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeat_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "execution_log",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "close_revoked_vault",
       "discriminator": [
         133,
@@ -1010,6 +1215,11 @@
       "code": 6017,
       "name": "VaultStillActive",
       "msg": "Vault is still active — revoke it first"
+    },
+    {
+      "code": 6018,
+      "name": "VaultNotExecuted",
+      "msg": "Vault has not been executed yet"
     }
   ],
   "types": [
