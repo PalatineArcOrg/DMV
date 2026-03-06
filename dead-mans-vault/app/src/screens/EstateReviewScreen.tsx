@@ -121,13 +121,18 @@ export function EstateReviewScreen() {
       }
 
       // Fund agent key so it can pay TX fees for heartbeats + execution
-      vaultTx.add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: agentPubkey,
-          lamports: AGENT_FUNDING_LAMPORTS,
-        }),
-      );
+      // Skip if agent already has sufficient balance (e.g. reusing key after revoke)
+      const agentBalance = await connection.getBalance(agentPubkey);
+      const fundingNeeded = Math.max(0, AGENT_FUNDING_LAMPORTS - agentBalance);
+      if (fundingNeeded > 0) {
+        vaultTx.add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: agentPubkey,
+            lamports: fundingNeeded,
+          }),
+        );
+      }
 
       vaultTx.feePayer = publicKey;
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');

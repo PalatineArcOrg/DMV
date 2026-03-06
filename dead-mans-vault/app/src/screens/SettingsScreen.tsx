@@ -87,14 +87,18 @@ export function SettingsScreen() {
                 const connection = txService.getConnection();
 
                 // Refund agent's remaining SOL back to owner before revoking
+                let agentRefunded = false;
                 try {
                   const { KeyManager } = require('../tee/KeyManager');
                   const keyManager = KeyManager.getInstance();
                   if (await keyManager.hasAgentKey()) {
                     const agentKeypair = await keyManager.getKeypair();
-                    await txService.refundAgentSol(agentKeypair, publicKey);
+                    const refundSig = await txService.refundAgentSol(agentKeypair, publicKey);
+                    agentRefunded = refundSig !== null;
                   }
-                } catch {}
+                } catch {
+                  // Agent refund failed — continue with revoke, user keeps vault rent
+                }
 
                 // Build batched withdraw-all + revoke transactions (minimal MWA approvals)
                 const { instructions: withdrawIxs, assetCount } = await txService.buildWithdrawAllInstructions(publicKey);
@@ -124,9 +128,10 @@ export function SettingsScreen() {
                 useHeartbeatStore.getState().reset();
                 useEscalationStore.getState().reset();
 
+                const refundNote = agentRefunded ? '' : '\n\nNote: Agent SOL refund failed — check agent wallet.';
                 const revokeMsg = assetCount > 0
-                  ? `Vault closed. ${assetCount} asset(s) returned to your wallet.\n\nTx: ${txSig.slice(0, 20)}...`
-                  : `Vault closed and rent reclaimed.\n\nTx: ${txSig.slice(0, 20)}...`;
+                  ? `Vault closed. ${assetCount} asset(s) returned to your wallet.${refundNote}\n\nTx: ${txSig.slice(0, 20)}...`
+                  : `Vault closed and rent reclaimed.${refundNote}\n\nTx: ${txSig.slice(0, 20)}...`;
                 Alert.alert('Vault Revoked', revokeMsg, [
                   { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
                   { text: 'OK' },

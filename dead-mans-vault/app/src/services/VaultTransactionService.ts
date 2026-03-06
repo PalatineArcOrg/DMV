@@ -294,7 +294,7 @@ export class VaultTransactionService {
     ownerPubkey: PublicKey,
   ): Promise<string | null> {
     const balance = await this.connection.getBalance(agentKeypair.publicKey);
-    const FEE_RESERVE = 5000; // 5000 lamports for the transfer TX fee
+    const FEE_RESERVE = 10000; // 10k lamports reserve for TX fee
     const refundAmount = balance - FEE_RESERVE;
     if (refundAmount <= 0) return null;
 
@@ -307,13 +307,18 @@ export class VaultTransactionService {
     );
 
     tx.feePayer = agentKeypair.publicKey;
-    const { blockhash } = await this.connection.getLatestBlockhash();
+    const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
     tx.recentBlockhash = blockhash;
+    tx.sign(agentKeypair);
 
-    const sig = await sendAndConfirmTransaction(this.connection, tx, [agentKeypair], {
-      commitment: 'confirmed',
-      maxRetries: 3,
+    const sig = await this.connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
     });
+    await this.connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed',
+    );
 
     return sig;
   }
