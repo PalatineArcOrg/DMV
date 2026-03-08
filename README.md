@@ -49,6 +49,13 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Stage 4 is
 - **Wallet isolation** -- Automatic state reset on wallet change to prevent cross-wallet vault access
 - **Device migration** -- Detects missing agent key and triggers on-chain `rotate_agent` with 5 security guards
 
+### Notifications
+- **Stage-aware push notifications** -- Each escalation stage triggers specific notifications with contextual details (time overdue, beneficiary count, time remaining)
+- **Background delivery** -- OS-scheduled notifications fire even when the app is killed, using per-stage throttle intervals (8h/4h/1h)
+- **Execution progress** -- Real-time notifications for each distribution step, completion summary, and failure alerts
+- **Heartbeat confirmation** -- Notification confirms heartbeat with next due date
+- **Foreground display** -- Notifications render in-app via foreground notification handler
+
 ### UX
 - **Heart monitor animation** -- ECG-style line that changes speed with escalation stage
 - **Explorer integration** -- All on-chain transactions link directly to Solana Explorer
@@ -233,7 +240,7 @@ dead-mans-vault/
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
         +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.
-        +-- notifications/           # NotificationService (3 Android channels)
+        +-- notifications/           # NotificationService (push notifications, 3 Android channels, background scheduling)
         +-- screens/                 # Dashboard, Assets, Setup wizard (5 screens), Settings, Auth
         +-- components/              # HeartbeatButton, EcgLine, StatusIndicator, StepIndicator, etc.
         +-- hooks/                   # useWallet, useHeartbeat, usePortfolio, useVaultProgram
