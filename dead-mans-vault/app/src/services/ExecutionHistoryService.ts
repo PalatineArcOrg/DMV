@@ -61,7 +61,14 @@ interface HeliusTx {
 export async function getExecutionHistory(wallet: PublicKey): Promise<ExecutionSummary[]> {
   if (!HELIUS_API_KEY) return [];
 
-  const walletStr = wallet.toString();
+  // Query the vault PDA — it's an account in ALL vault transactions
+  // (init, heartbeat, distributions, record, close)
+  const programId = new PublicKey(PROGRAM_ID);
+  const [vaultPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('vault'), wallet.toBuffer()],
+    programId,
+  );
+  const walletStr = vaultPda.toString();
   const allTxs: HeliusTx[] = [];
   let beforeSig: string | undefined;
   const MAX_PAGES = 5;
