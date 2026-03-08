@@ -20,6 +20,7 @@ import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { clearHeartbeatHistory, recordHeartbeat } from '../db/heartbeatRepo';
+import { clearExecutionSteps, clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, PROGRAM_ID } from '../utils/constants';
 import { StepIndicator } from '../components/StepIndicator';
@@ -149,10 +150,14 @@ export function EstateReviewScreen() {
         'confirmed',
       );
 
-      // Reset stale heartbeat/escalation state from any previous vault session
+      // Reset ALL stale state from any previous vault session
       // This prevents the EscalationService from immediately jumping to Stage 4
-      // when the Dashboard starts monitoring with leftover SQLite heartbeat data
+      // and prevents old execution log entries from showing for the new vault
+      const ownerWallet = publicKey.toString();
       await clearHeartbeatHistory();
+      await clearExecutionSteps(ownerWallet);
+      await clearDistributableSnapshot(ownerWallet);
+      await clearTokenSnapshot(ownerWallet);
       await recordHeartbeat('active_tap');
       useEscalationStore.getState().reset();
 

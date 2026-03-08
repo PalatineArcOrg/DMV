@@ -130,6 +130,19 @@ export async function clearTokenSnapshot(ownerWallet: string): Promise<void> {
   );
 }
 
+/**
+ * Clear all execution steps for a wallet. Must be called when starting a fresh
+ * execution to prevent stale steps from a previous vault run from being shown
+ * or from causing getLastCompletedStep to skip all new steps.
+ */
+export async function clearExecutionSteps(ownerWallet: string): Promise<void> {
+  const db = getDb();
+  await db.runAsync(
+    `DELETE FROM execution_steps WHERE id LIKE ?`,
+    [`${ownerWallet}_%`],
+  );
+}
+
 export async function updateStepStatus(
   id: string,
   status: ExecutionStepStatus,

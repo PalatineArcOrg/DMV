@@ -12,6 +12,7 @@ import {
   saveTokenSnapshot,
   getTokenSnapshot,
   clearTokenSnapshot,
+  clearExecutionSteps,
   TokenSnapshotEntry,
 } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepType } from '../types/execution';
@@ -58,7 +59,20 @@ export class ExecutionService {
       await this.waitForOnChainDeadline();
 
       const ownerWallet = this.ownerPubkey.toString();
-      const lastCompleted = await getLastCompletedStep(ownerWallet);
+
+      // Guard against stale execution data from a previous vault:
+      // If the on-chain vault is not yet executed but we have completed steps
+      // from a prior run, clear them to start fresh.
+      const resumeAfter = await getLastCompletedStep(ownerWallet);
+      if (resumeAfter >= 0) {
+        const vaultConfig = await this.txService.fetchVaultConfig(this.ownerPubkey);
+        if (vaultConfig && !vaultConfig.executed) {
+          await clearExecutionSteps(ownerWallet);
+          await clearDistributableSnapshot(ownerWallet);
+          await clearTokenSnapshot(ownerWallet);
+        }
+      }
+      const resumePoint = await getLastCompletedStep(ownerWallet);
 
       // Scan vault PDA's token balances (or recover from snapshot)
       let tokenSnapshot = await getTokenSnapshot(ownerWallet);
@@ -81,7 +95,7 @@ export class ExecutionService {
 
       // Save all steps to SQLite
       for (const step of steps) {
-        if (step.order > lastCompleted) {
+        if (step.order > resumePoint) {
           await saveExecutionStep(step, ownerWallet);
         }
       }
@@ -90,7 +104,7 @@ export class ExecutionService {
       // so crash recovery doesn't reset the running total to zero
       this.totalSolDistributed = new BN(0);
       for (const step of steps) {
-        if (step.order <= lastCompleted && step.type === 'distribute_sol' && step.metadata?.shareBps) {
+        if (step.order <= resumePoint && step.type === 'distribute_sol' && step.metadata?.shareBps) {
           const snapshot = await getDistributableSnapshot(ownerWallet);
           if (snapshot !== null) {
             const amount = Math.floor(snapshot * (step.metadata.shareBps as number) / 10000);
@@ -106,7 +120,7 @@ export class ExecutionService {
 
       // Execute sequentially, skip completed and pre-skipped steps
       for (const step of steps) {
-        if (step.order <= lastCompleted) continue;
+        if (step.order <= resumePoint) continue;
         const scopedId = `${ownerWallet}_${step.id}`;
         if (step.status === 'skipped') {
           continue;
