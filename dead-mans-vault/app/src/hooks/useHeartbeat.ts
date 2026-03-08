@@ -8,7 +8,6 @@ import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { useVaultStore } from '../store/useVaultStore';
 import { useDemoStore } from '../store/useDemoStore';
-import { getDefiPositions } from '../db/defiPositionRepo';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS } from '../utils/constants';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
@@ -85,21 +84,9 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
       escService.setExecutionCallback(async () => {
         try {
           const currentState = useVaultStore.getState();
-          let defiPositions = currentState.defiPositions;
-
-          // Recover from SQLite if memory is empty (app restart scenario)
-          if (defiPositions.length === 0) {
-            const persisted = await getDefiPositions(ownerPubkey.toString());
-            if (persisted.length > 0) {
-              defiPositions = persisted;
-              currentState.setDefiPositions(persisted);
-            }
-          }
-
           const executionService = new ExecutionService(
             ownerPubkey,
             currentState.beneficiaries,
-            defiPositions,
           );
           await executionService.execute();
         } catch {

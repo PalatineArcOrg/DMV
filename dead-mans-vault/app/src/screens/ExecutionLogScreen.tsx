@@ -55,13 +55,6 @@ export function ExecutionLogScreen() {
   const visibleSteps = steps.filter((s) => s.status !== 'skipped');
   const completedSteps = visibleSteps.filter((s) => s.status === 'completed');
   const failedSteps = visibleSteps.filter((s) => s.status === 'failed');
-  // DeFi closures with mock "sim_" signatures are simulated, not real
-  const realCompleted = completedSteps.filter(
-    (s) => !(s.type === 'close_defi_position' && s.txSignature?.startsWith('sim_')),
-  );
-  const simulatedSteps = completedSteps.filter(
-    (s) => s.type === 'close_defi_position' && s.txSignature?.startsWith('sim_'),
-  );
 
   if (!isLoading && visibleSteps.length === 0) {
     return (
@@ -109,9 +102,7 @@ export function ExecutionLogScreen() {
                 <Text style={[styles.statusBannerSub, { color: failedSteps.length > 0 ? 'rgba(220,38,38,0.6)' : 'rgba(0,255,163,0.5)' }]}>
                   {failedSteps.length > 0
                     ? `${failedSteps.length} step(s) failed`
-                    : simulatedSteps.length > 0
-                      ? `${realCompleted.length} transfers completed, ${simulatedSteps.length} simulated`
-                      : `${realCompleted.length} transfers completed`}
+                    : `${completedSteps.length} steps completed`}
                 </Text>
               </View>
             </View>
@@ -130,10 +121,9 @@ export function ExecutionLogScreen() {
 }
 
 function StepCard({ step, isLast }: { step: ExecutionStep; isLast: boolean }) {
-  const isSimulated = step.type === 'close_defi_position' && step.txSignature?.startsWith('sim_');
-  const displayStatus = isSimulated ? 'SIMULATED' : step.status.toUpperCase();
-  const statusColor = isSimulated ? COLORS.warning : STATUS_COLORS[step.status];
-  const statusIcon = (isSimulated ? 'flask-outline' : STATUS_ICONS[step.status]) as any;
+  const displayStatus = step.status.toUpperCase();
+  const statusColor = STATUS_COLORS[step.status];
+  const statusIcon = STATUS_ICONS[step.status] as any;
 
   return (
     <View style={[styles.stepCard, !isLast && styles.stepCardBorder]}>
@@ -155,15 +145,11 @@ function StepCard({ step, isLast }: { step: ExecutionStep; isLast: boolean }) {
 
         <Text style={styles.stepDescription}>{step.description}</Text>
 
-        {step.txSignature && !isSimulated && (
+        {step.txSignature && (
           <View style={styles.txRow}>
             <MaterialCommunityIcons name="link-variant" size={10} color={COLORS.accent} />
             <Text style={styles.txSignature}>{truncateAddress(step.txSignature, 8)}</Text>
           </View>
-        )}
-
-        {isSimulated && (
-          <Text style={styles.simulatedNote}>Devnet only — real closure on mainnet</Text>
         )}
 
         {step.error && (
@@ -368,12 +354,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: 'rgba(255,255,255,0.25)',
     fontFamily: FONTS.mono,
-  },
-  simulatedNote: {
-    fontSize: 10,
-    color: COLORS.warning,
-    fontFamily: FONTS.primary,
-    fontStyle: 'italic',
-    marginTop: 4,
   },
 });

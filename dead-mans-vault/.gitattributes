@@ -1,0 +1,12 @@
+# Mark lock files as generated so GitHub excludes them from language stats
+Cargo.lock linguist-generated=true
+yarn.lock linguist-generated=true
+app/yarn.lock linguist-generated=true
+
+# Mark auto-generated Anchor IDL/types as generated
+app/src/utils/idl.json linguist-generated=true
+app/src/utils/dead_mans_vault.ts linguist-generated=true
+app/src/utils/dead_mans_vault_types.ts linguist-generated=true
+
+# Mark docs assets as documentation
+docs/** linguist-documentation=true

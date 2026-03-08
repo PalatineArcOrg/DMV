@@ -10,6 +10,7 @@ import { useEscalationStore } from '../store/useEscalationStore';
 import { validateBeneficiaryShares } from '../utils/validation';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, SPACING, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
+import { getExecutionSteps, clearExecutionSteps, clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
 
 export function SetupWizardScreen() {
   const navigation = useNavigation<any>();
@@ -47,6 +48,24 @@ export function SetupWizardScreen() {
   const [isRevoking, setIsRevoking] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [hasVaultAssets, setHasVaultAssets] = useState(false);
+  const [hasPastExecution, setHasPastExecution] = useState<boolean | null>(null);
+
+  // Check if a past execution exists (vault PDAs closed but execution log in DB)
+  useEffect(() => {
+    if (isActuallySetup || !publicKey) {
+      setHasPastExecution(false);
+      return;
+    }
+    (async () => {
+      try {
+        const steps = await getExecutionSteps(publicKey.toString());
+        const completed = steps.filter((s) => s.status === 'completed');
+        setHasPastExecution(completed.length > 0);
+      } catch {
+        setHasPastExecution(false);
+      }
+    })();
+  }, [isActuallySetup, publicKey]);
 
   // Check if vault has withdrawable assets
   useEffect(() => {
@@ -128,12 +147,18 @@ export function SetupWizardScreen() {
     );
   }, [publicKey, signTransaction]);
 
-  const handleStartOver = useCallback(() => {
+  const handleStartOver = useCallback(async () => {
     skipAutoSync.current = true;
     useVaultStore.getState().resetForWalletSwitch();
     useHeartbeatStore.getState().reset();
     useEscalationStore.getState().reset();
-  }, []);
+    if (publicKey) {
+      await clearExecutionSteps(publicKey.toString());
+      await clearDistributableSnapshot(publicKey.toString());
+      await clearTokenSnapshot(publicKey.toString());
+    }
+    setHasPastExecution(false);
+  }, [publicKey]);
 
   const handleRevoke = useCallback(async () => {
     if (!publicKey) return;
@@ -199,7 +224,7 @@ export function SetupWizardScreen() {
   // On every focus: sync on-chain vault state + reset stack if needed
   useFocusEffect(
     useCallback(() => {
-      if (!isActuallySetup) {
+      if (!isActuallySetup && hasPastExecution === false) {
         navigation.popToTop();
       }
 
@@ -223,7 +248,7 @@ export function SetupWizardScreen() {
           }
         })();
       }
-    }, [isActuallySetup, publicKey, navigation, setVaultConfig]),
+    }, [isActuallySetup, hasPastExecution, publicKey, navigation, setVaultConfig]),
   );
 
   if (isActuallySetup) {
@@ -435,6 +460,38 @@ export function SetupWizardScreen() {
             <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
           </TouchableOpacity>
         )}
+
+        <View style={{ height: SPACING.xxl }} />
+      </ScrollView>
+    );
+  }
+
+  // Vault PDAs closed after execution — show executed summary with log link
+  if (hasPastExecution) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.executedBadge}>
+          <MaterialCommunityIcons name="check-circle" size={24} color={COLORS.accent} />
+          <Text style={styles.executedBadgeText}>Vault Executed</Text>
+        </View>
+        <Text style={styles.executedSubtext}>
+          Your estate plan has been executed and assets distributed to your beneficiaries.
+        </Text>
+
+        <TouchableOpacity
+          style={styles.execLogBtn}
+          onPress={() => navigation.getParent()?.navigate('Status', { screen: 'ExecutionLog' })}
+        >
+          <MaterialCommunityIcons name="text-box-outline" size={16} color={COLORS.accent} />
+          <Text style={styles.execLogBtnText}>View Execution Log</Text>
+          <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.newVaultBtn} onPress={handleStartOver}>
+          <MaterialCommunityIcons name="plus-circle-outline" size={16} color={COLORS.solanaPurple} />
+          <Text style={[styles.execLogBtnText, { color: COLORS.solanaPurple }]}>Set Up New Vault</Text>
+          <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
+        </TouchableOpacity>
 
         <View style={{ height: SPACING.xxl }} />
       </ScrollView>

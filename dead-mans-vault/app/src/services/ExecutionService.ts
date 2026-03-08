@@ -17,8 +17,6 @@ import {
 } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepType } from '../types/execution';
 import { Beneficiary } from '../types/vault';
-import { DeFiPosition } from '../types/defi';
-import { DeFiClosureService } from '../defi/closer';
 import { useEscalationStore } from '../store/useEscalationStore';
 
 // Module-level guard prevents concurrent execution across multiple instances
@@ -27,8 +25,6 @@ let globalExecutionInProgress = false;
 export class ExecutionService {
   private ownerPubkey: PublicKey;
   private beneficiaries: Beneficiary[];
-  private defiPositions: DeFiPosition[];
-
   private txService: VaultTransactionService;
   private keyManager: KeyManager;
 
@@ -39,11 +35,9 @@ export class ExecutionService {
   constructor(
     ownerPubkey: PublicKey,
     beneficiaries: Beneficiary[],
-    defiPositions: DeFiPosition[] = [],
   ) {
     this.ownerPubkey = ownerPubkey;
     this.beneficiaries = beneficiaries;
-    this.defiPositions = defiPositions;
     this.txService = new VaultTransactionService();
     this.keyManager = KeyManager.getInstance();
   }
@@ -103,10 +97,10 @@ export class ExecutionService {
       // Reconstitute totalSolDistributed from already-completed distribute_sol steps
       // so crash recovery doesn't reset the running total to zero
       this.totalSolDistributed = new BN(0);
-      for (const step of steps) {
-        if (step.order <= resumePoint && step.type === 'distribute_sol' && step.metadata?.shareBps) {
-          const snapshot = await getDistributableSnapshot(ownerWallet);
-          if (snapshot !== null) {
+      const snapshot = await getDistributableSnapshot(ownerWallet);
+      if (snapshot !== null) {
+        for (const step of steps) {
+          if (step.order <= resumePoint && step.type === 'distribute_sol' && step.metadata?.shareBps) {
             const amount = Math.floor(snapshot * (step.metadata.shareBps as number) / 10000);
             this.totalSolDistributed = this.totalSolDistributed.add(new BN(amount));
           }
@@ -163,7 +157,7 @@ export class ExecutionService {
         } catch (err: any) {
           // Set failure flag BEFORE updateStepStatus to guarantee it's always set
           // even if the DB write throws
-          if (step.type === 'distribute_sol' || step.type === 'distribute_token' || step.type === 'close_defi_position') {
+          if (step.type === 'distribute_sol' || step.type === 'distribute_token') {
             hasDistributionFailure = true;
           }
           try {
@@ -212,34 +206,8 @@ export class ExecutionService {
     const steps: ExecutionStep[] = [];
     let order = 0;
 
-    // Step 0: Revoke approvals (skipped for MVP)
-    steps.push(this.makeStep(order++, 'revoke_approvals', 'Revoke token approvals', 'skipped'));
-
-    // Steps: Close each DeFi position with action === 'close'
-    const closablePositions = this.defiPositions.filter((p) => p.action === 'close');
-    if (closablePositions.length === 0) {
-      steps.push(this.makeStep(order++, 'close_defi_position', 'No DeFi positions to close', 'skipped'));
-    } else {
-      for (const position of closablePositions) {
-        const desc = position.closureStrategy === 'unsupported'
-          ? `Detected ${position.protocol} ${position.type} (closure unsupported)`
-          : `Close ${position.protocol}: ${position.description}`;
-        const status = position.closureStrategy === 'unsupported' ? 'skipped' : 'pending';
-        steps.push(
-          this.makeStep(order++, 'close_defi_position', desc, status, {
-            protocol: position.protocol,
-            closureStrategy: position.closureStrategy,
-            tokenMint: position.tokenMint,
-            tokenAmount: position.tokenAmount,
-            tokenDecimals: position.tokenDecimals,
-            accountAddress: position.accountAddress.toString(),
-          }),
-        );
-      }
-    }
-
-    // Distribute specific assets (skipped for MVP)
-    steps.push(this.makeStep(order++, 'distribute_specific_asset', 'Distribute specific assets', 'skipped'));
+    // DeFi closure and specific-asset distribution are future features.
+    // The vault PDA only holds deposited SOL + SPL tokens — distribute those.
 
     // Distribute SOL from vault PDA to each beneficiary
     for (const b of this.beneficiaries) {
@@ -282,12 +250,6 @@ export class ExecutionService {
       }
     }
 
-    // Burn assets (skipped for MVP)
-    steps.push(this.makeStep(order++, 'burn_asset', 'Burn designated assets', 'skipped'));
-
-    // Close accounts (skipped for MVP)
-    steps.push(this.makeStep(order++, 'close_accounts', 'Close empty accounts', 'skipped'));
-
     // Record execution log on-chain
     steps.push(this.makeStep(order++, 'record_execution_log', 'Record execution on-chain', 'pending'));
 
@@ -323,10 +285,8 @@ export class ExecutionService {
       case 'distribute_specific_asset':
       case 'burn_asset':
       case 'close_accounts':
-        return undefined;
-
       case 'close_defi_position':
-        return this.executeCloseDeFiPosition(step);
+        return undefined;
 
       case 'distribute_sol':
         return this.executeDistributeSol(step);
@@ -347,37 +307,6 @@ export class ExecutionService {
       default:
         return undefined;
     }
-  }
-
-  private async executeCloseDeFiPosition(step: ExecutionStep): Promise<string | undefined> {
-    const strategy = step.metadata?.closureStrategy as string;
-    if (strategy === 'unsupported') return undefined;
-
-    const agentKeypair = await this.keyManager.getKeypair();
-
-    const position: DeFiPosition = {
-      protocol: step.metadata?.protocol as any,
-      type: '',
-      description: step.description,
-      estimatedValueUsd: 0,
-      estimatedValueSol: 0,
-      tokens: [],
-      action: 'close',
-      accountAddress: new PublicKey(step.metadata?.accountAddress as string),
-      closureStrategy: strategy as any,
-      tokenMint: step.metadata?.tokenMint as string | undefined,
-      tokenAmount: step.metadata?.tokenAmount as number | undefined,
-      tokenDecimals: step.metadata?.tokenDecimals as number | undefined,
-    };
-
-    const closureService = new DeFiClosureService(this.txService.getConnection());
-    const result = await closureService.closePosition(position, agentKeypair);
-
-    if (!result.success) {
-      throw new Error(result.error || 'DeFi position closure failed');
-    }
-
-    return result.txSignature;
   }
 
   /**
