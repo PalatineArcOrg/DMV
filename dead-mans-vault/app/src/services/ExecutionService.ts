@@ -434,6 +434,13 @@ export class ExecutionService {
     const ownerWallet = this.ownerPubkey.toString();
     await clearDistributableSnapshot(ownerWallet);
     await clearTokenSnapshot(ownerWallet);
+
+    // Refund remaining agent SOL back to owner before destroying the key
+    try {
+      const agentKeypair = await this.keyManager.getKeypair();
+      await this.txService.refundAgentSol(agentKeypair, this.ownerPubkey);
+    } catch {}
+
     await this.keyManager.destroyKey();
   }
 }

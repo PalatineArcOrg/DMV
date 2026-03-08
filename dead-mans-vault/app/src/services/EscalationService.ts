@@ -1,6 +1,6 @@
 import { EscalationStage, EscalationConfig } from '../types';
 import { HeartbeatService } from './HeartbeatService';
-import { NotificationService } from '../notifications/NotificationService';
+import { NotificationService, formatDuration } from '../notifications/NotificationService';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { useDemoStore } from '../store/useDemoStore';
 
@@ -234,9 +234,7 @@ export class EscalationService {
       );
     } else if (stage === 3) {
       const futureRemaining = Math.max(0, totalGrace - secondsOverdue - delaySeconds);
-      const days = Math.floor(futureRemaining / 86400);
-      const hours = Math.floor((futureRemaining % 86400) / 3600);
-      const timeText = days > 0 ? `${days}d ${hours}h` : `${Math.max(1, hours)}h`;
+      const timeText = formatDuration(Math.round(futureRemaining));
       NotificationService.scheduleNotification(
         'FINAL WARNING',
         `Estate plan executes in ${timeText}. Confirm heartbeat NOW.`,

@@ -303,7 +303,7 @@ export class VaultTransactionService {
 
     // Add compute budget for priority fee
     tx.add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 200 }),
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }),
     );
 
