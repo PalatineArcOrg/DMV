@@ -76,7 +76,7 @@ export async function getExecutionHistory(wallet: PublicKey): Promise<ExecutionS
   for (let page = 0; page < MAX_PAGES; page++) {
     let url = `${HELIUS_ENHANCED_API}/addresses/${walletStr}/transactions/?api-key=${HELIUS_API_KEY}&limit=50&commitment=confirmed`;
     if (beforeSig) {
-      url += `&before-signature=${beforeSig}`;
+      url += `&before=${beforeSig}`;
     }
 
     try {
@@ -116,7 +116,7 @@ export async function getExecutionHistory(wallet: PublicKey): Promise<ExecutionS
   }));
 
   // Group into execution sessions: RecordExecution marks the end of each session
-  return groupIntoSessions(parsedTxs, walletStr);
+  return groupIntoSessions(parsedTxs);
 }
 
 function parseInstructionType(tx: HeliusTx): string {
@@ -151,7 +151,7 @@ interface ParsedTx extends HeliusTx {
   instructionType: string;
 }
 
-function groupIntoSessions(txs: ParsedTx[], wallet: string): ExecutionSummary[] {
+function groupIntoSessions(txs: ParsedTx[]): ExecutionSummary[] {
   // Sort by timestamp ascending (oldest first)
   const sorted = [...txs].sort((a, b) => a.timestamp - b.timestamp);
 
@@ -159,7 +159,7 @@ function groupIntoSessions(txs: ParsedTx[], wallet: string): ExecutionSummary[] 
   let currentSteps: HistoryStep[] = [];
 
   for (const tx of sorted) {
-    const step = buildStep(tx, wallet);
+    const step = buildStep(tx);
 
     if (tx.instructionType === 'CloseExecutedVault') {
       // Append to the most recent session if one exists
@@ -199,7 +199,7 @@ function groupIntoSessions(txs: ParsedTx[], wallet: string): ExecutionSummary[] 
   return executions.reverse();
 }
 
-function buildStep(tx: ParsedTx, wallet: string): HistoryStep {
+function buildStep(tx: ParsedTx): HistoryStep {
   let solAmount: number | undefined;
   let tokenMint: string | undefined;
   let tokenAmount: number | undefined;

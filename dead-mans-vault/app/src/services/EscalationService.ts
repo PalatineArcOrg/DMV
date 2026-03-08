@@ -24,6 +24,7 @@ export class EscalationService {
   private evaluationInterval: ReturnType<typeof setInterval> | null = null;
   private currentStage: EscalationStage = 0;
   private executionCallback: (() => void) | null = null;
+  private beneficiaryCount: number = 0;
 
   constructor(heartbeatService: HeartbeatService, config: EscalationConfig) {
     this.heartbeatService = heartbeatService;
@@ -37,6 +38,10 @@ export class EscalationService {
 
   setExecutionCallback(callback: () => void): void {
     this.executionCallback = callback;
+  }
+
+  setBeneficiaryCount(count: number): void {
+    this.beneficiaryCount = count;
   }
 
   start(): void {
@@ -113,10 +118,12 @@ export class EscalationService {
       case 1:
         NotificationService.sendHeartbeatReminder();
         store.recordNotification();
+        this.scheduleNextNotification(1, secondsOverdue);
         break;
       case 2:
-        NotificationService.sendEmergencyAlert();
+        NotificationService.sendUrgentReminder(secondsOverdue, this.beneficiaryCount);
         store.recordNotification();
+        this.scheduleNextNotification(2, secondsOverdue);
         break;
       case 3: {
         const totalGrace =
@@ -126,11 +133,13 @@ export class EscalationService {
         const secondsRemaining = Math.max(0, totalGrace - secondsOverdue);
         NotificationService.sendFinalWarning(secondsRemaining);
         store.recordNotification();
+        this.scheduleNextNotification(3, secondsOverdue);
         break;
       }
       case 4:
         // Stop the evaluation loop — Stage 4 is terminal, no further evaluation needed.
         this.stop();
+        NotificationService.cancelScheduled('escalation-next');
 
         // Guard against double execution: if Stage 4 was already started (e.g. useEffect
         // re-ran and created a new EscalationService), do NOT fire the callback again.
@@ -171,7 +180,7 @@ export class EscalationService {
         NotificationService.sendHeartbeatReminder();
         break;
       case 2:
-        NotificationService.sendUrgentReminder(secondsOverdue);
+        NotificationService.sendUrgentReminder(secondsOverdue, this.beneficiaryCount);
         break;
       case 3: {
         const totalGrace =
@@ -185,6 +194,57 @@ export class EscalationService {
     }
 
     store.recordNotification();
+    this.scheduleNextNotification(stage, secondsOverdue);
+  }
+
+  /**
+   * Schedule the next notification for delivery even if the app is backgrounded/killed.
+   * Uses expo-notifications scheduled trigger so the OS delivers it on time.
+   */
+  private scheduleNextNotification(stage: EscalationStage, secondsOverdue: number): void {
+    if (stage === 0 || stage === 4) return;
+
+    const useDevTimers = __DEV__ || useDemoStore.getState().isDemoMode;
+    const intervals = useDevTimers ? DEV_NOTIFICATION_INTERVALS : NOTIFICATION_INTERVALS;
+    const delaySeconds = intervals[stage] ?? 3600;
+
+    const totalGrace =
+      this.config.stage1Duration +
+      this.config.stage2Duration +
+      this.config.stage3Duration;
+
+    if (stage === 1) {
+      NotificationService.scheduleNotification(
+        'Heartbeat Due',
+        'Your vault heartbeat is still overdue. Open the app to confirm.',
+        'heartbeat',
+        delaySeconds,
+        'escalation-next',
+      );
+    } else if (stage === 2) {
+      const bText = this.beneficiaryCount > 0
+        ? ` ${this.beneficiaryCount} beneficiar${this.beneficiaryCount !== 1 ? 'ies' : 'y'} affected.`
+        : '';
+      NotificationService.scheduleNotification(
+        'Heartbeat Overdue',
+        `Emergency escalation active.${bText} Confirm heartbeat to cancel.`,
+        'escalation',
+        delaySeconds,
+        'escalation-next',
+      );
+    } else if (stage === 3) {
+      const futureRemaining = Math.max(0, totalGrace - secondsOverdue - delaySeconds);
+      const days = Math.floor(futureRemaining / 86400);
+      const hours = Math.floor((futureRemaining % 86400) / 3600);
+      const timeText = days > 0 ? `${days}d ${hours}h` : `${Math.max(1, hours)}h`;
+      NotificationService.scheduleNotification(
+        'FINAL WARNING',
+        `Estate plan executes in ${timeText}. Confirm heartbeat NOW.`,
+        'execution',
+        delaySeconds,
+        'escalation-next',
+      );
+    }
   }
 
   resetEscalation(): void {

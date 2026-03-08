@@ -8,6 +8,7 @@ import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { useVaultStore } from '../store/useVaultStore';
 import { useDemoStore } from '../store/useDemoStore';
+import { NotificationService } from '../notifications/NotificationService';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS } from '../utils/constants';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
@@ -77,6 +78,7 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
         };
 
     const escService = new EscalationService(hbService, escConfig);
+    escService.setBeneficiaryCount(useVaultStore.getState().beneficiaries.length);
     escalationServiceRef.current = escService;
 
     // Wire execution callback — fires when Stage 4 is reached
@@ -148,11 +150,16 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
           escalationServiceRef.current.resetEscalation();
         }
         setSecondsRemaining(0);
+
+        // Notify user of successful heartbeat with next due date
+        const intervalSeconds = heartbeatConfig?.intervalSeconds ?? 86400;
+        const nextDue = new Date(Date.now() + intervalSeconds * 1000);
+        NotificationService.sendHeartbeatConfirmed(nextDue);
       } finally {
         setIsConfirming(false);
       }
     },
-    [],
+    [heartbeatConfig],
   );
 
   return {

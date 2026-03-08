@@ -16,8 +16,13 @@ import { getExecutionHistory, ExecutionSummary } from '../services/ExecutionHist
 import { getExecutionSteps } from '../db/executionRepo';
 
 const STEP_TYPE_MAP: Record<string, string> = {
+  revoke_approvals: 'RevokeApprovals',
+  close_defi_position: 'CloseDeFiPosition',
+  distribute_specific_asset: 'DistributeSpecificAsset',
   distribute_sol: 'ExecuteSolDistribution',
   distribute_token: 'ExecuteDistribution',
+  burn_asset: 'BurnAsset',
+  close_accounts: 'CloseAccounts',
   record_execution_log: 'RecordExecution',
   close_executed_vault: 'CloseExecutedVault',
   self_terminate: 'SelfTerminate',

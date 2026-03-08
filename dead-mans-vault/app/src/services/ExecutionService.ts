@@ -1,6 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { KeyManager } from '../tee/KeyManager';
+import { NotificationService } from '../notifications/NotificationService';
 import { VaultTransactionService } from './VaultTransactionService';
 import {
   saveExecutionStep,
@@ -113,6 +114,13 @@ export class ExecutionService {
       let recordExecutionSucceeded = false;
       let closeVaultSucceeded = false;
 
+      // Count distribution steps for progress notifications
+      const distributionSteps = steps.filter(
+        (s) => s.type === 'distribute_sol' || s.type === 'distribute_token',
+      );
+      const totalDistributionSteps = distributionSteps.length;
+      let completedDistributionSteps = 0;
+
       // Execute sequentially, skip completed and pre-skipped steps
       for (const step of steps) {
         if (step.order <= resumePoint) continue;
@@ -148,19 +156,42 @@ export class ExecutionService {
         try {
           const txSig = await this.executeStep(step);
           await updateStepStatus(scopedId, 'completed', txSig);
+
+          // Distribution progress notification
+          if (step.type === 'distribute_sol' || step.type === 'distribute_token') {
+            completedDistributionSteps++;
+            try {
+              NotificationService.sendDistributionProgress(
+                completedDistributionSteps,
+                totalDistributionSteps,
+                step.description,
+              );
+            } catch {}
+          }
+
           if (step.type === 'record_execution_log') {
             recordExecutionSucceeded = true;
             useEscalationStore.getState().reset();
+
+            // Execution complete summary notification
+            try {
+              const totalSolDisplay = (this.totalSolDistributed.toNumber() / 1e9).toFixed(4);
+              NotificationService.sendExecutionComplete(
+                completedDistributionSteps,
+                totalSolDisplay,
+              );
+            } catch {}
           }
           if (step.type === 'close_executed_vault') {
             closeVaultSucceeded = true;
-            useVaultStore.getState().resetForWalletSwitch();
+            useVaultStore.getState().markExecutionCompleted();
           }
         } catch (err: any) {
           // Set failure flag BEFORE updateStepStatus to guarantee it's always set
           // even if the DB write throws
           if (step.type === 'distribute_sol' || step.type === 'distribute_token') {
             hasDistributionFailure = true;
+            try { NotificationService.sendExecutionFailed(step.description); } catch {}
           }
           try {
             await updateStepStatus(scopedId, 'failed', undefined, err.message);

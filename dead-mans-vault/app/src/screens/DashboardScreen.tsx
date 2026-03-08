@@ -135,6 +135,7 @@ export function DashboardScreen() {
   const [executionCompleted, setExecutionCompleted] = useState(false);
   const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
+  const executionJustCompleted = useVaultStore((s) => s.executionJustCompleted);
   const storeDefiPositions = useVaultStore((s) => s.defiPositions);
   const storeBeneficiaryCount = useVaultStore((s) => s.beneficiaries.length);
   const defiPositions = portfolioDefi.length > 0 ? portfolioDefi : storeDefiPositions;
@@ -175,6 +176,9 @@ export function DashboardScreen() {
           setExecutionCompleted(true);
           useEscalationStore.getState().reset();
         }
+      } else if (!vault && !useVaultStore.getState().vaultConfig) {
+        // No vault on-chain and none in store — clear any stale execution state
+        setExecutionCompleted(false);
       }
       if (vault) {
         if (vault.executed) {
@@ -305,15 +309,28 @@ export function DashboardScreen() {
     if (prevPublicKey.current && currentKey && prevPublicKey.current !== currentKey) {
       setVaultData(null);
       setHeartbeatData(null);
+      setExecutionCompleted(false);
     }
     prevPublicKey.current = currentKey;
   }, [publicKey]);
+
+  // Immediately update UI when execution completes
+  useEffect(() => {
+    if (executionJustCompleted) {
+      setVaultData(null);
+      setHeartbeatData(null);
+      setExecutionCompleted(true);
+      setVaultBalance(0);
+      setVaultTokenBalances([]);
+      useVaultStore.getState().clearExecutionCompleted();
+    }
+  }, [executionJustCompleted]);
 
   useEffect(() => {
     if (connected && publicKey) {
       loadVaultState();
     }
-  }, [connected, publicKey]);
+  }, [connected, publicKey, loadVaultState]);
 
   useFocusEffect(
     useCallback(() => {

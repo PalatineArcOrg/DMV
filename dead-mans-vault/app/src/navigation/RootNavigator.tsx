@@ -140,6 +140,7 @@ export function RootNavigator() {
         useVaultStore.getState().resetForWalletSwitch();
         useHeartbeatStore.getState().reset();
         useEscalationStore.getState().reset();
+        migrationCheckedRef.current = false;
       }
       prevPkRef.current = '';
       return;
@@ -150,6 +151,7 @@ export function RootNavigator() {
       useVaultStore.getState().resetForWalletSwitch();
       useHeartbeatStore.getState().reset();
       useEscalationStore.getState().reset();
+      migrationCheckedRef.current = false;
     }
 
     // Fetch vault config for the connected wallet

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import * as ExpoClipboard from 'expo-clipboard';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as Notifications from 'expo-notifications';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { PublicKey } from '@solana/web3.js';
@@ -35,6 +36,13 @@ export function SettingsScreen() {
   const { isAuthEnabled, setAuthEnabled } = useAuthStore();
   const [copied, setCopied] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
+  const [notifStatus, setNotifStatus] = useState<string>('...');
+
+  useFocusEffect(useCallback(() => {
+    Notifications.getPermissionsAsync().then(({ status }) => {
+      setNotifStatus(status === 'granted' ? 'Enabled' : 'Disabled');
+    });
+  }, []));
 
   const isOwner = vaultConfig?.owner && publicKey
     ? vaultConfig.owner.toBase58() === publicKey.toBase58()
@@ -241,6 +249,15 @@ export function SettingsScreen() {
             value={isAuthEnabled}
             onChange={handleAuthToggle}
           />
+          <View style={styles.rowDivider} />
+          <TouchableOpacity onPress={() => { if (notifStatus === 'Disabled') Linking.openSettings(); }}>
+            <SettingRow
+              icon="bell-outline"
+              iconColor={notifStatus === 'Enabled' ? COLORS.accent : COLORS.warning}
+              label="Notifications"
+              value={notifStatus}
+            />
+          </TouchableOpacity>
         </View>
       </View>
 

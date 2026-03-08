@@ -12,6 +12,7 @@ import { useHeartbeatStore } from './useHeartbeatStore';
 interface VaultStore {
   isInitialized: boolean;
   isRevoked: boolean;
+  executionJustCompleted: boolean;
   vaultConfig: VaultConfig | null;
   isSetupComplete: boolean;
   beneficiaries: Beneficiary[];
@@ -22,6 +23,8 @@ interface VaultStore {
   setRevoked: (revoked: boolean) => void;
   setInitialized: (initialized: boolean) => void;
   setSetupComplete: (complete: boolean) => void;
+  markExecutionCompleted: () => void;
+  clearExecutionCompleted: () => void;
   addBeneficiary: (b: Beneficiary) => void;
   removeBeneficiary: (wallet: string) => void;
   updateBeneficiary: (wallet: string, updates: Partial<Beneficiary>) => void;
@@ -42,6 +45,7 @@ const initialEscalationConfig: EscalationConfig = {
 export const useVaultStore = create<VaultStore>((set) => ({
   isInitialized: false,
   isRevoked: false,
+  executionJustCompleted: false,
   vaultConfig: null,
   isSetupComplete: false,
   beneficiaries: [],
@@ -100,10 +104,13 @@ export const useVaultStore = create<VaultStore>((set) => ({
   setBeneficiaries: (beneficiaries) => set({ beneficiaries }),
   setDefiPositions: (positions) => set({ defiPositions: positions }),
   setEscalationConfig: (config) => set({ escalationConfig: config }),
+  markExecutionCompleted: () => set({ executionJustCompleted: true }),
+  clearExecutionCompleted: () => set({ executionJustCompleted: false }),
   reset: () =>
     set({
       isInitialized: false,
       isRevoked: true,
+      executionJustCompleted: false,
       vaultConfig: null,
       isSetupComplete: false,
       beneficiaries: [],
@@ -114,6 +121,7 @@ export const useVaultStore = create<VaultStore>((set) => ({
     set({
       isInitialized: false,
       isRevoked: false,
+      executionJustCompleted: false,
       vaultConfig: null,
       isSetupComplete: false,
       beneficiaries: [],
