@@ -65,8 +65,8 @@ Dead Man's Vault turns your Solana Seeker into an autonomous estate executor:
 │  ┌─────────────────────┐  ┌───────────────────────────┐  │
 │  │   React Native App  │  │   Seed Vault / MWA        │  │
 │  │                     │  │   (Owner Wallet)           │  │
-│  │  • 9 Screens        │  └───────────┬───────────────┘  │
-│  │  • 7 Services       │              │ signs config txs  │
+│  │  • 11 Screens       │  └───────────┬───────────────┘  │
+│  │  • 6 Services       │              │ signs config txs  │
 │  │  • Zustand Stores   │              │                   │
 │  │  • SQLite DB        │  ┌───────────┴───────────────┐  │
 │  │                     │  │   TEE Agent Key            │  │
@@ -92,10 +92,12 @@ Dead Man's Vault turns your Solana Seeker into an autonomous estate executor:
 │  │  • HeartbeatRecord ["heartbeat", vault]             │ │
 │  │  • ExecutionLog    ["execution", vault]             │ │
 │  │                                                     │ │
-│  │  7 Instructions:                                    │ │
+│  │  13 Instructions:                                   │ │
 │  │  initialize_vault · update_vault · record_heartbeat │ │
-│  │  execute_distribution · record_execution            │ │
-│  │  rotate_agent · revoke_vault                        │ │
+│  │  execute_sol_distribution · execute_distribution    │ │
+│  │  record_execution · rotate_agent · revoke_vault     │ │
+│  │  withdraw_sol · withdraw_token · close_executed     │ │
+│  │  close_executed_by_owner · close_revoked_vault      │ │
 │  └─────────────────────────────────────────────────────┘ │
 │                                                          │
 │  External APIs: Helius DAS (tokens) · Jupiter (prices)   │
@@ -114,8 +116,8 @@ Dead Man's Vault turns your Solana Seeker into an autonomous estate executor:
 
 | Key | Storage | Signs | Purpose |
 |-----|---------|-------|---------|
-| **Owner** | Seed Vault (MWA) | `initialize_vault`, `update_vault`, `revoke_vault`, `rotate_agent` | Full control over estate configuration |
-| **Agent** | expo-secure-store (TEE) | `record_heartbeat`, `execute_distribution`, `record_execution` | Autonomous operations without owner approval |
+| **Owner** | Seed Vault (MWA) | `initialize_vault`, `update_vault`, `revoke_vault`, `rotate_agent`, `withdraw_sol`, `withdraw_token`, `close_executed_by_owner` | Full control over estate configuration |
+| **Agent** | expo-secure-store (TEE) | `record_heartbeat`, `execute_sol_distribution`, `execute_distribution`, `record_execution`, `close_executed_vault` | Autonomous operations without owner approval |
 
 The agent key can execute distributions **only** to addresses whitelisted in VaultConfig, and **only** after the on-chain grace period has elapsed. Even if the TEE is compromised, the program prevents unauthorized transfers.
 
@@ -162,11 +164,9 @@ The agent key can execute distributions **only** to addresses whitelisted in Vau
 
 ---
 
-## Demo Video
+## Demo
 
-> **[TODO: Insert YouTube/Loom link after recording]**
-
-The demo shows the complete flow on a physical Solana Seeker device:
+The app runs the complete flow on a physical Solana Seeker device:
 1. Portfolio dashboard with live token balances and 24h price changes
 2. Setup wizard: beneficiaries → heartbeat config → estate review → on-chain activation
 3. Heartbeat confirmation with visual feedback
@@ -189,7 +189,7 @@ The demo shows the complete flow on a physical Solana Seeker device:
 ### Clone & Install
 
 ```bash
-git clone https://github.com/Romulus-Sol/DMV.git
+git clone https://github.com/PalatineArcOrg/DMV.git
 cd DMV/dead-mans-vault
 
 # Install program dependencies
@@ -219,7 +219,7 @@ cd android && ./gradlew assembleRelease
 # Build the Anchor program
 anchor build
 
-# Run program tests (23/23 passing)
+# Run program tests (34/34 passing)
 anchor test
 
 # Deploy to devnet
@@ -236,7 +236,7 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **Tests** | 23/23 passing |
+| **Tests** | 34/34 passing |
 
 ---
 
@@ -244,22 +244,22 @@ anchor deploy --provider.cluster devnet
 
 | Metric | Value |
 |--------|-------|
-| Anchor program (Rust) | 737 lines |
-| Mobile app (TypeScript) | 6,606 lines |
-| **Total code** | **7,343 lines** |
-| Program instructions | 7 |
-| Program error codes | 15 |
-| App screens | 9 |
-| App services | 7 |
-| Zustand stores | 4 |
-| SQLite tables | 5 |
-| Program tests | 23/23 passing |
+| Anchor program (Rust) | 1,164 lines |
+| Mobile app (TypeScript) | 15,883 lines |
+| **Total code** | **17,047 lines** |
+| Program instructions | 13 |
+| Program error codes | 19 |
+| App screens | 11 |
+| App services | 6 |
+| Zustand stores | 6 |
+| SQLite tables | 6 |
+| Program tests | 34/34 passing |
 
 ---
 
 ## Team
 
-> **[TODO: Add team member names, roles, and links]**
+**Romulus** — Solo builder ([PalatineArcOrg](https://github.com/PalatineArcOrg))
 
 ---
 
