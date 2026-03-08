@@ -242,6 +242,8 @@ export function SetupWizardScreen() {
             const vault = await txService.fetchVaultConfig(publicKey);
             if (vault && vault.active) {
               setVaultConfig(vault);
+            } else if (!vault) {
+              setVaultConfig(null);
             }
           } catch {
             // Non-fatal
@@ -295,7 +297,7 @@ export function SetupWizardScreen() {
           {/* View Execution Log */}
           <TouchableOpacity
             style={styles.execLogBtn}
-            onPress={() => navigation.getParent()?.navigate('Status', { screen: 'ExecutionLog' })}
+            onPress={() => navigation.getParent()?.navigate('Status', { screen: 'ExecutionLogs' })}
           >
             <MaterialCommunityIcons name="text-box-outline" size={16} color={COLORS.accent} />
             <Text style={styles.execLogBtnText}>View Execution Log</Text>
@@ -408,7 +410,7 @@ export function SetupWizardScreen() {
         {/* View Execution Log */}
         <TouchableOpacity
           style={styles.execLogBtn}
-          onPress={() => navigation.getParent()?.navigate('Status', { screen: 'ExecutionLog' })}
+          onPress={() => navigation.getParent()?.navigate('Status', { screen: 'ExecutionLogs' })}
         >
           <MaterialCommunityIcons name="text-box-outline" size={16} color={COLORS.accent} />
           <Text style={styles.execLogBtnText}>View Execution Log</Text>
@@ -480,7 +482,7 @@ export function SetupWizardScreen() {
 
         <TouchableOpacity
           style={styles.execLogBtn}
-          onPress={() => navigation.getParent()?.navigate('Status', { screen: 'ExecutionLog' })}
+          onPress={() => navigation.getParent()?.navigate('Status', { screen: 'ExecutionLogs' })}
         >
           <MaterialCommunityIcons name="text-box-outline" size={16} color={COLORS.accent} />
           <Text style={styles.execLogBtnText}>View Execution Log</Text>

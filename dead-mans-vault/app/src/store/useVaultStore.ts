@@ -50,7 +50,7 @@ export const useVaultStore = create<VaultStore>((set) => ({
 
   setVaultConfig: (config) =>
     set((state) => {
-      if (state.isRevoked) return {};
+      if (state.isRevoked && config !== null) return {};
       const onChain = config?.beneficiaries ?? [];
       const merged = onChain.map((ob: any, i: number) => {
         const localMatch = state.beneficiaries.find(

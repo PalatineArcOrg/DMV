@@ -18,6 +18,7 @@ import {
 import { ExecutionStep, ExecutionStepType } from '../types/execution';
 import { Beneficiary } from '../types/vault';
 import { useEscalationStore } from '../store/useEscalationStore';
+import { useVaultStore } from '../store/useVaultStore';
 
 // Module-level guard prevents concurrent execution across multiple instances
 let globalExecutionInProgress = false;
@@ -153,6 +154,7 @@ export class ExecutionService {
           }
           if (step.type === 'close_executed_vault') {
             closeVaultSucceeded = true;
+            useVaultStore.getState().resetForWalletSwitch();
           }
         } catch (err: any) {
           // Set failure flag BEFORE updateStepStatus to guarantee it's always set

@@ -5,7 +5,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { DashboardScreen } from '../screens/DashboardScreen';
-import { ExecutionLogScreen } from '../screens/ExecutionLogScreen';
+import { ExecutionLogsScreen } from '../screens/ExecutionLogsScreen';
+import { ExecutionDetailScreen } from '../screens/ExecutionDetailScreen';
 import { SetupWizardScreen } from '../screens/SetupWizardScreen';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { HeartbeatConfigScreen } from '../screens/HeartbeatConfigScreen';
@@ -41,9 +42,14 @@ function DashboardStackScreen() {
         options={{ headerShown: false }}
       />
       <DashboardStack.Screen
-        name="ExecutionLog"
-        component={ExecutionLogScreen}
-        options={{ title: 'Execution Log' }}
+        name="ExecutionLogs"
+        component={ExecutionLogsScreen}
+        options={{ title: 'Execution Logs' }}
+      />
+      <DashboardStack.Screen
+        name="ExecutionDetail"
+        component={ExecutionDetailScreen}
+        options={{ title: 'Execution Detail' }}
       />
     </DashboardStack.Navigator>
   );

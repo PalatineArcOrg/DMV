@@ -166,7 +166,9 @@ export function DashboardScreen() {
       const vault: any = await fetchVaultConfig(publicKey);
       setVaultData(vault);
       if (!vault) {
-        // Vault PDAs closed — check if execution completed
+        // Vault PDAs closed — sync Zustand so Vault tab reflects this
+        useVaultStore.getState().setVaultConfig(null);
+        // Check if execution completed
         const escState = useEscalationStore.getState().state;
         if (escState.executionStarted) {
           setExecutionCompleted(true);
@@ -548,7 +550,7 @@ export function DashboardScreen() {
 
       {/* Execution In Progress */}
       {escalationStage === 4 && !vaultData?.executed && !executionCompleted && (
-        <TouchableOpacity style={styles.executionCard} onPress={() => navigation.navigate('ExecutionLog')}>
+        <TouchableOpacity style={styles.executionCard} onPress={() => navigation.navigate('ExecutionLogs')}>
           <MaterialCommunityIcons name="alert-octagon" size={20} color={COLORS.critical} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={styles.executionTitle}>Distribution In Progress</Text>
@@ -560,7 +562,7 @@ export function DashboardScreen() {
 
       {/* Vault Executed */}
       {(vaultData?.executed || executionCompleted) && (
-        <TouchableOpacity style={styles.executedCard} onPress={() => navigation.navigate('ExecutionLog')}>
+        <TouchableOpacity style={styles.executedCard} onPress={() => navigation.navigate('ExecutionLogs')}>
           <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.accent} />
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={styles.executedTitle}>Vault Executed</Text>
