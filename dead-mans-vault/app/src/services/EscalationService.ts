@@ -113,15 +113,15 @@ export class EscalationService {
     // Fire stage-entry notification
     switch (newStage) {
       case 0:
-        NotificationService.cancelAll();
+        NotificationService.cancelAll().catch(() => {});
         break;
       case 1:
-        NotificationService.sendHeartbeatReminder();
+        NotificationService.sendHeartbeatReminder().catch(() => {});
         store.recordNotification();
         this.scheduleNextNotification(1, secondsOverdue);
         break;
       case 2:
-        NotificationService.sendUrgentReminder(secondsOverdue, this.beneficiaryCount);
+        NotificationService.sendUrgentReminder(secondsOverdue, this.beneficiaryCount).catch(() => {});
         store.recordNotification();
         this.scheduleNextNotification(2, secondsOverdue);
         break;
@@ -131,7 +131,7 @@ export class EscalationService {
           this.config.stage2Duration +
           this.config.stage3Duration;
         const secondsRemaining = Math.max(0, totalGrace - secondsOverdue);
-        NotificationService.sendFinalWarning(secondsRemaining);
+        NotificationService.sendFinalWarning(secondsRemaining).catch(() => {});
         store.recordNotification();
         this.scheduleNextNotification(3, secondsOverdue);
         break;
@@ -139,7 +139,7 @@ export class EscalationService {
       case 4:
         // Stop the evaluation loop — Stage 4 is terminal, no further evaluation needed.
         this.stop();
-        NotificationService.cancelScheduled('escalation-next');
+        NotificationService.cancelScheduled('escalation-next').catch(() => {});
 
         // Guard against double execution: if Stage 4 was already started (e.g. useEffect
         // re-ran and created a new EscalationService), do NOT fire the callback again.
@@ -148,7 +148,7 @@ export class EscalationService {
         }
 
         store.setExecutionStarted(true);
-        NotificationService.sendExecutionStarted();
+        NotificationService.sendExecutionStarted().catch(() => {});
         store.recordNotification();
         if (this.executionCallback) {
           this.executionCallback();
@@ -177,10 +177,10 @@ export class EscalationService {
 
     switch (stage) {
       case 1:
-        NotificationService.sendHeartbeatReminder();
+        NotificationService.sendHeartbeatReminder().catch(() => {});
         break;
       case 2:
-        NotificationService.sendUrgentReminder(secondsOverdue, this.beneficiaryCount);
+        NotificationService.sendUrgentReminder(secondsOverdue, this.beneficiaryCount).catch(() => {});
         break;
       case 3: {
         const totalGrace =
@@ -188,7 +188,7 @@ export class EscalationService {
           this.config.stage2Duration +
           this.config.stage3Duration;
         const secondsRemaining = Math.max(0, totalGrace - secondsOverdue);
-        NotificationService.sendFinalWarning(secondsRemaining);
+        NotificationService.sendFinalWarning(secondsRemaining).catch(() => {});
         break;
       }
     }

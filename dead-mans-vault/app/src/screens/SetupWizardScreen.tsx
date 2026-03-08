@@ -395,14 +395,14 @@ export function SetupWizardScreen() {
               label="Program"
               value={truncateAddress(PROGRAM_ID, 4)}
               mono
-              onPress={() => Linking.openURL(`https://solscan.io/account/${PROGRAM_ID}?cluster=devnet`)}
+              onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID}?cluster=devnet`)}
             />
             {vaultPda && (
               <DetailRow
                 label="Your Vault"
                 value={truncateAddress(vaultPda.toBase58(), 4)}
                 mono
-                onPress={() => Linking.openURL(`https://solscan.io/account/${vaultPda.toBase58()}?cluster=devnet`)}
+                onPress={() => Linking.openURL(`https://explorer.solana.com/address/${vaultPda.toBase58()}?cluster=devnet`)}
               />
             )}
             <DetailRow label="Execution" value="Agent Key (TEE)" />

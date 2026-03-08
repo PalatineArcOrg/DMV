@@ -154,7 +154,7 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
         // Notify user of successful heartbeat with next due date
         const intervalSeconds = heartbeatConfig?.intervalSeconds ?? 86400;
         const nextDue = new Date(Date.now() + intervalSeconds * 1000);
-        NotificationService.sendHeartbeatConfirmed(nextDue);
+        try { NotificationService.sendHeartbeatConfirmed(nextDue); } catch {}
       } finally {
         setIsConfirming(false);
       }

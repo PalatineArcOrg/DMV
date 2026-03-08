@@ -21,10 +21,10 @@ const TYPE_ICONS: Record<string, string> = {
   CloseExecutedVault: 'archive-check',
 };
 
-function openSolscan(signature: string) {
+function openExplorer(signature: string) {
   const url = IS_DEVNET
-    ? `https://solscan.io/tx/${signature}?cluster=devnet`
-    : `https://solscan.io/tx/${signature}`;
+    ? `https://explorer.solana.com/tx/${signature}?cluster=devnet`
+    : `https://explorer.solana.com/tx/${signature}`;
   Linking.openURL(url);
 }
 
@@ -113,12 +113,12 @@ function StepRow({ step, isLast }: { step: HistoryStep; isLast: boolean }) {
         <Text style={styles.stepDescription}>{step.description}</Text>
 
         {step.txSignature ? (
-          <TouchableOpacity style={styles.txRow} onPress={() => openSolscan(step.txSignature)}>
+          <TouchableOpacity style={styles.txRow} onPress={() => openExplorer(step.txSignature)}>
             <MaterialCommunityIcons name="open-in-new" size={10} color={COLORS.accent} />
             <Text style={styles.txSignature}>
               {step.txSignature.slice(0, 8)}...{step.txSignature.slice(-8)}
             </Text>
-            <Text style={styles.solscanHint}>Solscan</Text>
+            <Text style={styles.explorerHint}>Explorer</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     flex: 1,
   },
-  solscanHint: {
+  explorerHint: {
     fontSize: 9,
     color: 'rgba(0,255,163,0.4)',
     fontFamily: FONTS.primary,

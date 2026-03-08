@@ -323,13 +323,13 @@ export function SettingsScreen() {
       <View style={styles.sectionBlock}>
         <Text style={styles.sectionLabel}>VAULT CONTRACT</Text>
         <View style={styles.card}>
-          <TouchableOpacity onPress={() => Linking.openURL(`https://solscan.io/account/${PROGRAM_ID}?cluster=devnet`)}>
+          <TouchableOpacity onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID}?cluster=devnet`)}>
             <SettingRow icon="shield-check" iconColor={COLORS.accent} label="Vault Program" value={truncateAddress(PROGRAM_ID, 4)} link />
           </TouchableOpacity>
           {vaultConfig && vaultPda && (
             <>
               <View style={styles.rowDivider} />
-              <TouchableOpacity onPress={() => Linking.openURL(`https://solscan.io/account/${vaultPda.toBase58()}?cluster=devnet`)}>
+              <TouchableOpacity onPress={() => Linking.openURL(`https://explorer.solana.com/address/${vaultPda.toBase58()}?cluster=devnet`)}>
                 <SettingRow icon="safe-square-outline" iconColor={COLORS.blueAccent} label="Your Vault" value={truncateAddress(vaultPda.toBase58(), 4)} link />
               </TouchableOpacity>
             </>
