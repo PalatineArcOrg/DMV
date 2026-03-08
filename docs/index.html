@@ -159,8 +159,18 @@
       font-size: clamp(16px, 2vw, 20px);
       color: var(--text-secondary);
       max-width: 600px;
-      margin-bottom: 48px;
+      margin-bottom: 16px;
       line-height: 1.7;
+    }
+    .hero-byline {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 48px;
+    }
+    .hero-byline a {
+      color: var(--text-secondary);
+      font-weight: 600;
+      text-decoration: none;
     }
     .hero-buttons {
       display: flex;
@@ -224,7 +234,7 @@
     .section-desc {
       font-size: 16px;
       color: var(--text-secondary);
-      max-width: 600px;
+      max-width: 700px;
       line-height: 1.7;
       margin-bottom: 48px;
     }
@@ -387,6 +397,42 @@
       margin-top: 2px;
     }
 
+    /* --- KEY POINTS --- */
+    .key-points {
+      list-style: none;
+      margin-top: 16px;
+    }
+    .key-points li {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .key-points li:last-child { border-bottom: none; }
+    .kp-bullet {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--accent-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .kp-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .kp-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
     /* --- TECH STACK --- */
     .tech-grid {
       display: flex;
@@ -411,6 +457,20 @@
       font-weight: 700;
     }
 
+    /* --- MONO / PROGRAM ID --- */
+    .mono-block {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      color: var(--accent);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      display: inline-block;
+      margin-top: 20px;
+      word-break: break-all;
+    }
+
     /* --- DOWNLOAD / CTA --- */
     .download-section {
       text-align: center;
@@ -418,9 +478,9 @@
     }
     .download-cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 24px;
-      max-width: 900px;
+      max-width: 960px;
       margin: 0 auto;
       margin-top: 48px;
     }
@@ -464,19 +524,6 @@
       background: var(--purple-dim);
       color: var(--purple);
       border: 1px solid rgba(153, 69, 255, 0.2);
-    }
-    .qr-placeholder {
-      width: 160px;
-      height: 160px;
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 2px dashed rgba(255, 255, 255, 0.1);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 20px auto;
-      font-size: 12px;
-      color: var(--text-muted);
     }
 
     /* --- FOOTER --- */
@@ -526,6 +573,7 @@
       .stages { grid-template-columns: 1fr; }
       .features-grid { grid-template-columns: 1fr; }
       .hero-buttons { flex-direction: column; align-items: center; }
+      .download-cards { grid-template-columns: 1fr; }
     }
 
     /* --- ANIMATIONS --- */
@@ -533,12 +581,13 @@
       from { opacity: 0; transform: translateY(24px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    .hero h1, .hero p, .hero-badge, .hero-buttons {
+    .hero h1, .hero p, .hero-badge, .hero-buttons, .hero-byline {
       animation: fadeUp 0.8s ease-out backwards;
     }
     .hero-badge { animation-delay: 0s; }
     .hero h1 { animation-delay: 0.1s; }
     .hero p { animation-delay: 0.2s; }
+    .hero-byline { animation-delay: 0.25s; }
     .hero-buttons { animation-delay: 0.3s; }
 
     /* ECG pulse line */
@@ -576,7 +625,8 @@
       <li><a href="#problem">Problem</a></li>
       <li><a href="#how-it-works">How It Works</a></li>
       <li><a href="#features">Features</a></li>
-      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#program">Program</a></li>
+      <li><a href="#why">Why DMV</a></li>
       <li><a href="#download">Download</a></li>
     </ul>
     <a href="https://github.com/PalatineArcOrg/DMV" target="_blank" class="nav-cta">GitHub</a>
@@ -585,14 +635,19 @@
 
 <!-- HERO -->
 <div class="hero">
-  <div class="hero-badge">Built for Solana Seeker &middot; Monolith Hackathon 2026</div>
+  <div class="hero-badge">Monolith &mdash; Solana Mobile Hackathon 2026</div>
 
   <svg class="ecg-container" viewBox="0 0 400 60" preserveAspectRatio="none">
     <path class="ecg-line" d="M0,30 L80,30 L90,30 L100,10 L110,50 L120,30 L160,30 L170,30 L180,5 L190,55 L200,30 L240,30 L250,30 L260,12 L270,48 L280,30 L320,30 L330,30 L340,8 L350,52 L360,30 L400,30" />
   </svg>
 
   <h1>Your crypto should<br><span class="accent">outlive you.</span></h1>
-  <p>Dead Man's Vault is an autonomous crypto inheritance protocol for Solana. Configure beneficiaries, confirm heartbeats, and know your assets are protected — no backend, no intermediaries, no trust required.</p>
+  <p>An autonomous crypto inheritance protocol for Solana Seeker. Configure beneficiaries, confirm heartbeats, and know your assets are protected &mdash; no backend, no intermediaries, no trust required.</p>
+  <div class="hero-byline">
+    by <a href="https://palatinearc.com" target="_blank">Palatine Arc</a>
+    &nbsp;&middot;&nbsp; dmv.palatinearc.com
+    &nbsp;&middot;&nbsp; github.com/PalatineArcOrg/DMV
+  </div>
   <div class="hero-buttons">
     <a href="#download" class="btn-primary">Get the App</a>
     <a href="#how-it-works" class="btn-secondary">See How It Works</a>
@@ -604,12 +659,12 @@
 <!-- PROBLEM -->
 <section id="problem">
   <div class="section-label">The Problem</div>
-  <div class="section-title">Lost forever.</div>
+  <div class="section-title">Crypto doesn't have a "next of kin" form.</div>
   <div class="section-desc">Millions in crypto assets are lost every year because there's no decentralized way to pass them on. Traditional inheritance systems don't work for self-custodied wallets.</div>
   <div class="problem-stats">
     <div class="stat-card">
       <div class="stat-number">$140B+</div>
-      <div class="stat-label">Estimated value of inaccessible Bitcoin alone. Crypto doesn't have a "next of kin" form.</div>
+      <div class="stat-label">Estimated value of inaccessible Bitcoin alone. Keys lost forever.</div>
     </div>
     <div class="stat-card">
       <div class="stat-number warning">4M+</div>
@@ -628,36 +683,36 @@
 <section id="how-it-works">
   <div class="section-label">How It Works</div>
   <div class="section-title">Five stages. One tap to stay alive.</div>
-  <div class="section-desc">Set up your vault once. Then just confirm a heartbeat periodically. If you stop, the protocol takes over.</div>
+  <div class="section-desc">Set up your vault once. Confirm a heartbeat periodically. If you stop, the protocol takes over.</div>
   <div class="stages">
     <div class="stage-card s0">
       <div class="stage-num">0</div>
       <div class="stage-title">Normal</div>
-      <div class="stage-desc">Vault active. Heartbeat confirmed. All clear. Your assets are safe and your beneficiaries are on standby.</div>
-      <div class="stage-timing">Check in weekly, bi-weekly, or monthly</div>
+      <div class="stage-desc">Heartbeat confirmed. All clear. Assets safe and beneficiaries on standby.</div>
+      <div class="stage-timing">Weekly / bi-weekly / monthly</div>
     </div>
     <div class="stage-card s1">
       <div class="stage-num">1</div>
       <div class="stage-title">Reminder</div>
-      <div class="stage-desc">Heartbeat overdue. Push notifications sent to you. One tap resets everything back to normal.</div>
+      <div class="stage-desc">Overdue. Push notifications sent to owner. One tap resets to normal.</div>
       <div class="stage-timing">Duration: 3 days</div>
     </div>
     <div class="stage-card s2">
       <div class="stage-num">2</div>
       <div class="stage-title">Alert</div>
-      <div class="stage-desc">Still no response. Notifications increase in frequency. Emergency contacts alerted.</div>
+      <div class="stage-desc">No response. Frequency increases. Emergency contacts alerted.</div>
       <div class="stage-timing">Duration: 7 days</div>
     </div>
     <div class="stage-card s3">
       <div class="stage-num">3</div>
       <div class="stage-title">Warning</div>
-      <div class="stage-desc">Final countdown. Hourly notifications. This is your last chance to confirm liveness.</div>
+      <div class="stage-desc">Final countdown. Hourly notifications. Last chance to confirm liveness.</div>
       <div class="stage-timing">Duration: 7 days</div>
     </div>
     <div class="stage-card s4">
       <div class="stage-num">4</div>
       <div class="stage-title">Execution</div>
-      <div class="stage-desc">Irreversible. The agent autonomously distributes SOL and tokens from your vault to each beneficiary via on-chain instructions. Vault closed. Agent key destroyed.</div>
+      <div class="stage-desc">Irreversible. Assets distributed autonomously on-chain. Vault closed. Agent key destroyed.</div>
       <div class="stage-timing">Autonomous &middot; No wallet interaction</div>
     </div>
   </div>
@@ -674,88 +729,164 @@
     <div class="feature-card">
       <div class="feature-icon">&#x1F512;</div>
       <div class="feature-title">TEE-Secured Agent Key</div>
-      <div class="feature-desc">A dedicated agent key stored in Seeker's hardware secure enclave handles heartbeats and execution autonomously. Your owner wallet stays untouched.</div>
+      <div class="feature-desc">Dedicated agent key in Seeker's hardware enclave. Handles heartbeats and execution autonomously. Owner wallet stays untouched.</div>
     </div>
     <div class="feature-card">
       <div class="feature-icon purple">&#x1F4B0;</div>
-      <div class="feature-title">Vault PDA Asset Storage</div>
-      <div class="feature-desc">Deposit SOL and SPL tokens directly into your vault PDA. Withdraw anytime. At Stage 4, the agent distributes to each beneficiary via on-chain instructions.</div>
+      <div class="feature-title">Vault PDA Storage</div>
+      <div class="feature-desc">Deposit SOL and SPL tokens into your vault PDA. Withdraw anytime. At Stage 4, agent distributes to each beneficiary on-chain.</div>
     </div>
     <div class="feature-card">
       <div class="feature-icon">&#x1F504;</div>
       <div class="feature-title">Crash-Proof Execution</div>
-      <div class="feature-desc">Every execution step is checkpointed to SQLite before proceeding. App crashes, device restarts — execution resumes exactly where it left off.</div>
+      <div class="feature-desc">Every execution step checkpointed to SQLite. App crashes, device restarts &mdash; execution resumes exactly where it left off.</div>
     </div>
     <div class="feature-card">
       <div class="feature-icon purple">&#x1F4CA;</div>
       <div class="feature-title">Live Portfolio Tracking</div>
-      <div class="feature-desc">Token balances via Helius DAS API, USD prices from dual oracles (Pyth + Jupiter), 24h price changes, DeFi position detection across 10 protocols.</div>
+      <div class="feature-desc">Token balances via Helius DAS, dual-oracle USD pricing (Pyth + Jupiter), DeFi position detection across 10 protocols.</div>
     </div>
     <div class="feature-card">
       <div class="feature-icon">&#x1F91D;</div>
-      <div class="feature-title">On-Chain Beneficiary Whitelist</div>
-      <div class="feature-desc">The program only sends assets to wallets you've pre-approved. Up to 20 beneficiaries with basis-point share allocation.</div>
+      <div class="feature-title">On-Chain Whitelist</div>
+      <div class="feature-desc">Program only sends to pre-approved wallets. Up to 20 beneficiaries with basis-point share allocation.</div>
     </div>
     <div class="feature-card">
       <div class="feature-icon purple">&#x1F50D;</div>
       <div class="feature-title">Full Transparency</div>
-      <div class="feature-desc">Every heartbeat, every distribution, every state change — all recorded on-chain. Execution logs with transaction signatures link directly to Solana Explorer.</div>
+      <div class="feature-desc">Every heartbeat, distribution, and state change recorded on-chain. Execution logs link directly to Solana Explorer.</div>
     </div>
   </div>
 </section>
 
 <div class="divider"></div>
 
-<!-- ARCHITECTURE -->
-<section id="architecture">
-  <div class="section-label">Architecture</div>
-  <div class="section-title">No backend. No intermediaries.</div>
-  <div class="section-desc">Everything runs on-device or on-chain. The mobile app orchestrates, the Anchor program enforces, and the TEE secures.</div>
-  <div class="arch-layers">
-    <div class="arch-layer">
-      <div class="arch-dot" style="background: var(--accent);"></div>
+<!-- ON-CHAIN PROGRAM -->
+<section id="program">
+  <div class="section-label">On-Chain Program</div>
+  <div class="section-title">Minimal program. Maximum security.</div>
+  <div class="section-desc">The program only enforces <em>who</em> can transfer, <em>where</em> transfers go, and <em>when</em> they're allowed. All complex logic lives in the mobile app.</div>
+  <ul class="key-points">
+    <li>
+      <div class="kp-bullet">&#x1F6E1;</div>
       <div>
-        <div class="arch-layer-title">Anchor Program (Rust)</div>
-        <div class="arch-layer-desc">13 instructions &middot; On-chain constraint enforcement</div>
+        <div class="kp-title">13 Instructions</div>
+        <div class="kp-desc">Initialize, update, heartbeat, SOL/SPL distribution, record execution, rotate agent, revoke, withdraw, close &mdash; all with strict signer and state guards.</div>
       </div>
-    </div>
-    <div class="arch-layer">
-      <div class="arch-dot" style="background: var(--purple);"></div>
+    </li>
+    <li>
+      <div class="kp-bullet">&#x1F512;</div>
       <div>
-        <div class="arch-layer-title">React Native (Expo SDK 52)</div>
-        <div class="arch-layer-desc">Orchestration, scanning, escalation, execution</div>
+        <div class="kp-title">19 Error Codes</div>
+        <div class="kp-desc">Covering interval validation, share allocation, signer authorization, vault state guards, beneficiary whitelist, immutability protection, and lifecycle management.</div>
       </div>
-    </div>
-    <div class="arch-layer">
-      <div class="arch-dot" style="background: var(--warning);"></div>
+    </li>
+    <li>
+      <div class="kp-bullet">&#x2705;</div>
       <div>
-        <div class="arch-layer-title">Zustand + SQLite</div>
-        <div class="arch-layer-desc">State management + crash recovery checkpoints</div>
+        <div class="kp-title">34 Tests Passing</div>
+        <div class="kp-desc">Happy paths, all error cases, rotate_agent security guards, SOL/SPL distribution, vault withdraw, close_executed_vault, double-execution prevention, revoke/close lifecycle.</div>
       </div>
-    </div>
-    <div class="arch-layer">
-      <div class="arch-dot" style="background: #14F195;"></div>
+    </li>
+    <li>
+      <div class="kp-bullet">&#x1F527;</div>
       <div>
-        <div class="arch-layer-title">Solana Mobile MWA</div>
-        <div class="arch-layer-desc">Owner authorization via Seed Vault</div>
+        <div class="kp-title">Mutable or Immutable</div>
+        <div class="kp-desc">Choose whether your vault can be updated/revoked, or make it permanent. Agent rotation is always allowed for device migration.</div>
       </div>
-    </div>
-    <div class="arch-layer">
-      <div class="arch-dot" style="background: var(--critical);"></div>
+    </li>
+  </ul>
+  <div class="mono-block">Program ID: GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb (Devnet)</div>
+</section>
+
+<div class="divider"></div>
+
+<!-- WHY DMV -->
+<section id="why">
+  <div class="section-label">Why Dead Man's Vault</div>
+  <div class="section-title">What makes us different.</div>
+  <ul class="key-points">
+    <li>
+      <div class="kp-bullet">&#x2693;</div>
       <div>
-        <div class="arch-layer-title">Seeker TEE</div>
-        <div class="arch-layer-desc">Agent key for autonomous operations</div>
+        <div class="kp-title">Truly Serverless</div>
+        <div class="kp-desc">No backend server, no cloud functions, no intermediaries. Everything runs on-device or on-chain. Zero infrastructure to maintain or trust.</div>
       </div>
-    </div>
-    <div class="arch-layer">
-      <div class="arch-dot" style="background: #60A5FA;"></div>
+    </li>
+    <li>
+      <div class="kp-bullet">&#x1F4F1;</div>
       <div>
-        <div class="arch-layer-title">Helius + Pyth + Jupiter</div>
-        <div class="arch-layer-desc">Portfolio data, price oracles, priority fees</div>
+        <div class="kp-title">Built for Seeker</div>
+        <div class="kp-desc">First-class Solana Mobile integration. Agent key secured in TEE hardware enclave. Owner signs via Seed Vault MWA. Designed for the mobile-first crypto user.</div>
+      </div>
+    </li>
+    <li>
+      <div class="kp-bullet">&#x1F6E1;</div>
+      <div>
+        <div class="kp-title">Owner Supremacy</div>
+        <div class="kp-desc">Owner can always override, withdraw, revoke, or rotate. The agent key operates within strict on-chain constraints. Even if the device is compromised, the program enforces the rules.</div>
+      </div>
+    </li>
+    <li>
+      <div class="kp-bullet">&#x1F4A1;</div>
+      <div>
+        <div class="kp-title">Graduated Escalation</div>
+        <div class="kp-desc">17+ days of warnings before execution. Multiple chances to confirm liveness. Any heartbeat at Stages 1&ndash;3 resets to normal. Stage 4 is the only irreversible action.</div>
+      </div>
+    </li>
+  </ul>
+
+  <!-- Architecture -->
+  <div style="margin-top: 64px;">
+    <div class="section-label" style="margin-bottom: 12px;">Architecture</div>
+    <div class="section-desc">Everything runs on-device or on-chain. The mobile app orchestrates, the Anchor program enforces, and the TEE secures.</div>
+    <div class="arch-layers">
+      <div class="arch-layer">
+        <div class="arch-dot" style="background: var(--accent);"></div>
+        <div>
+          <div class="arch-layer-title">Anchor Program (Rust)</div>
+          <div class="arch-layer-desc">13 instructions &middot; On-chain constraint enforcement</div>
+        </div>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-dot" style="background: var(--purple);"></div>
+        <div>
+          <div class="arch-layer-title">React Native (Expo SDK 52)</div>
+          <div class="arch-layer-desc">Orchestration, scanning, escalation, execution</div>
+        </div>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-dot" style="background: var(--warning);"></div>
+        <div>
+          <div class="arch-layer-title">Zustand + SQLite</div>
+          <div class="arch-layer-desc">State management + crash recovery checkpoints</div>
+        </div>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-dot" style="background: #14F195;"></div>
+        <div>
+          <div class="arch-layer-title">Solana Mobile MWA</div>
+          <div class="arch-layer-desc">Owner authorization via Seed Vault</div>
+        </div>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-dot" style="background: var(--critical);"></div>
+        <div>
+          <div class="arch-layer-title">Seeker TEE</div>
+          <div class="arch-layer-desc">Agent key for autonomous operations</div>
+        </div>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-dot" style="background: #60A5FA;"></div>
+        <div>
+          <div class="arch-layer-title">Helius + Pyth + Jupiter</div>
+          <div class="arch-layer-desc">Portfolio data, price oracles, priority fees</div>
+        </div>
       </div>
     </div>
   </div>
 
+  <!-- Tech Stack -->
   <div style="margin-top: 48px;">
     <div class="section-label" style="margin-bottom: 20px;">Tech Stack</div>
     <div class="tech-grid">
@@ -769,26 +900,6 @@
       <div class="tech-pill">@solana/web3.js <span class="ver">1.x</span></div>
     </div>
   </div>
-
-  <div style="margin-top: 48px;">
-    <div class="section-label" style="margin-bottom: 20px;">On-Chain Program</div>
-    <div class="arch-layers">
-      <div class="arch-layer">
-        <div class="arch-dot" style="background: var(--accent);"></div>
-        <div>
-          <div class="arch-layer-title" style="font-family: monospace; font-size: 12px; color: var(--text-muted);">Program ID</div>
-          <div class="arch-layer-desc" style="font-family: monospace; color: var(--accent); font-size: 11px; word-break: break-all;">GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb</div>
-        </div>
-      </div>
-      <div class="arch-layer">
-        <div class="arch-dot" style="background: var(--purple);"></div>
-        <div>
-          <div class="arch-layer-title">34 Tests Passing</div>
-          <div class="arch-layer-desc">Happy paths, error cases, security guards, execution flow</div>
-        </div>
-      </div>
-    </div>
-  </div>
 </section>
 
 <div class="divider"></div>
@@ -797,7 +908,7 @@
 <section id="download" class="download-section">
   <div class="section-label">Get Started</div>
   <div class="section-title">Download Dead Man's Vault</div>
-  <div class="section-desc" style="margin: 0 auto 0; max-width: 500px;">Currently available on Solana Devnet. Mainnet launch coming soon with full app store distribution.</div>
+  <div class="section-desc" style="margin: 0 auto 0; max-width: 500px;">Currently live on Solana Devnet. Mainnet launch with full app store distribution coming soon.</div>
   <div class="download-cards">
     <div class="download-card">
       <div class="download-card-icon">&#x1F4F1;</div>
@@ -807,11 +918,17 @@
       <div class="badge badge-live" style="margin-top: 16px;">Available Now</div>
     </div>
     <div class="download-card">
+      <div class="download-card-icon">&#x1F4BB;</div>
+      <h3>GitHub</h3>
+      <p>Open-source. MIT licensed. Full Anchor program + React Native app.</p>
+      <a href="https://github.com/PalatineArcOrg/DMV" target="_blank" class="btn-primary" style="font-size: 13px; padding: 10px 24px; background: var(--surface); color: var(--text); border: 1px solid var(--border);">View Source</a>
+      <div class="badge badge-live" style="margin-top: 16px;">Open Source</div>
+    </div>
+    <div class="download-card">
       <div class="download-card-icon">&#x1F680;</div>
-      <h3>Mainnet Release</h3>
-      <p>Full production release with mainnet deployment, Google Play distribution, and enhanced security audit.</p>
-      <div class="qr-placeholder">QR Code<br>Coming Soon</div>
-      <div class="badge badge-soon">Coming Soon</div>
+      <h3>Mainnet</h3>
+      <p>Production release with security audit and Google Play distribution.</p>
+      <div class="badge badge-soon" style="margin-top: 20px;">Coming Soon</div>
     </div>
   </div>
 </section>
