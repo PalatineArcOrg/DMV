@@ -49,44 +49,6 @@ function TokenIcon({ symbol, logoUri }: { symbol: string; logoUri?: string | nul
   );
 }
 
-function DemoControls({ stage }: { stage: EscalationStage }) {
-  const setEscalationStage = useEscalationStore((s) => s.setStage);
-  const stages: EscalationStage[] = [0, 1, 2, 3, 4];
-
-  return (
-    <View style={styles.demoControlsContainer}>
-      <Text style={styles.demoControlsLabel}>DEMO — ESCALATION STAGES</Text>
-      <View style={styles.demoControlsRow}>
-        {stages.map((s) => {
-          const c = STAGE_CONFIG[s];
-          const active = s === stage;
-          return (
-            <TouchableOpacity
-              key={s}
-              style={[
-                styles.demoControlsButton,
-                {
-                  backgroundColor: active ? c.dimColor : 'rgba(255,255,255,0.04)',
-                  borderColor: active ? c.borderColor : 'rgba(255,255,255,0.06)',
-                },
-              ]}
-              onPress={() => setEscalationStage(s)}
-            >
-              <Text
-                style={[
-                  styles.demoControlsButtonText,
-                  { color: active ? c.color : 'rgba(255,255,255,0.3)' },
-                ]}
-              >
-                S{s}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
 
 function SkeletonBar({ width, height, style }: { width: number | string; height: number; style?: any }) {
   const opacity = useRef(new Animated.Value(0.3)).current;
@@ -707,7 +669,6 @@ export function DashboardScreen() {
       )}
 
       {/* Demo Controls */}
-      {isDemoMode && <DemoControls stage={escalationStage} />}
 
       <View style={{ height: 48 }} />
     </ScrollView>
@@ -1158,41 +1119,6 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.primary,
   },
 
-  // Demo controls
-  demoControlsContainer: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  demoControlsLabel: {
-    color: 'rgba(255,255,255,0.25)',
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 1,
-    marginBottom: 6,
-    fontFamily: FONTS.primarySemiBold,
-  },
-  demoControlsRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  demoControlsButton: {
-    flex: 1,
-    borderRadius: 8,
-    paddingVertical: 4,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  demoControlsButtonText: {
-    fontSize: 10,
-    fontWeight: '600',
-    fontFamily: FONTS.primarySemiBold,
-  },
   vaultBalanceCard: {
     marginHorizontal: 16,
     marginBottom: 12,

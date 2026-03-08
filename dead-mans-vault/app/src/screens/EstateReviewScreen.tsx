@@ -72,11 +72,11 @@ export function EstateReviewScreen() {
         hasSpecificAssets: b.hasSpecificAssets,
       }));
 
-      // Pre-flight balance check — need enough for vault init + agent funding
+      // Pre-flight balance check — need enough for vault init rent (~0.015) + agent funding (~0.05)
       const ownerBalance = await connection.getBalance(publicKey);
-      const MIN_BALANCE = 0.015 * LAMPORTS_PER_SOL;
+      const MIN_BALANCE = 0.07 * LAMPORTS_PER_SOL;
       if (ownerBalance < MIN_BALANCE) {
-        Alert.alert('Insufficient Balance', `You need at least 0.015 SOL to activate the vault.\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+        Alert.alert('Insufficient Balance', `You need at least 0.07 SOL to activate the vault (0.015 rent + 0.05 agent funding).\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
         setIsRegistering(false);
         return;
       }
@@ -293,7 +293,9 @@ export function EstateReviewScreen() {
         <View style={styles.detailsBody}>
           <DetailRow label="Network" value="Devnet" />
           <DetailRow label="Program" value={truncateAddress(PROGRAM_ID, 4)} mono />
-          <DetailRow label="Est. Fee" value="~0.015 SOL" />
+          <DetailRow label="Vault Rent" value="~0.015 SOL" />
+          <DetailRow label="Agent Funding" value="~0.05 SOL" />
+          <DetailRow label="Total Est. Cost" value="~0.065 SOL" />
           <DetailRow label="Distribution" value="Per-beneficiary on-chain" />
         </View>
       </View>

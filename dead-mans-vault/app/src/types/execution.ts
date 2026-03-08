@@ -8,6 +8,7 @@ export type ExecutionStepType =
   | 'close_accounts'
   | 'record_execution_log'
   | 'close_executed_vault'
+  | 'refund_agent_sol'
   | 'self_terminate';
 
 export type ExecutionStepStatus =

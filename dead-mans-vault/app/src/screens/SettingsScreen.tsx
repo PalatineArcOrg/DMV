@@ -110,7 +110,7 @@ export function SettingsScreen() {
                 refundError = e?.message || 'Unknown error';
               }
 
-              const refundNote = agentRefunded ? '\n\nAgent SOL refunded to your wallet.' : refundError
+              const refundNote = agentRefunded ? '\n\nAgent SOL refunded to your wallet (separate transaction).' : refundError
                 ? `\n\nAgent SOL refund failed: ${refundError}`
                 : '';
 

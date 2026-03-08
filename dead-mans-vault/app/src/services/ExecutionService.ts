@@ -129,23 +129,23 @@ export class ExecutionService {
           continue;
         }
 
-        // If a distribution failed, skip record_execution, close_executed_vault, and self_terminate
+        // If a distribution failed, skip record_execution, close_executed_vault, refund, and self_terminate
         // to preserve the agent key for manual recovery
-        if (hasDistributionFailure && (step.type === 'record_execution_log' || step.type === 'close_executed_vault' || step.type === 'self_terminate')) {
+        if (hasDistributionFailure && (step.type === 'record_execution_log' || step.type === 'close_executed_vault' || step.type === 'refund_agent_sol' || step.type === 'self_terminate')) {
           await updateStepStatus(scopedId, 'failed', undefined,
             'Skipped: prior distribution step failed. Agent key preserved for recovery.');
           continue;
         }
 
-        // Defense in depth: never close vault or destroy agent key unless record_execution succeeded
-        if ((step.type === 'close_executed_vault' || step.type === 'self_terminate') && !recordExecutionSucceeded) {
+        // Defense in depth: never close vault, refund, or destroy agent key unless record_execution succeeded
+        if ((step.type === 'close_executed_vault' || step.type === 'refund_agent_sol' || step.type === 'self_terminate') && !recordExecutionSucceeded) {
           await updateStepStatus(scopedId, 'failed', undefined,
             'Skipped: record_execution did not succeed. Agent key preserved for recovery.');
           continue;
         }
 
-        // Never destroy agent key unless close_executed_vault succeeded (or was skipped)
-        if (step.type === 'self_terminate' && !closeVaultSucceeded) {
+        // Never refund or destroy agent key unless close_executed_vault succeeded
+        if ((step.type === 'refund_agent_sol' || step.type === 'self_terminate') && !closeVaultSucceeded) {
           await updateStepStatus(scopedId, 'failed', undefined,
             'Skipped: close_executed_vault did not succeed. Agent key preserved for retry.');
           continue;
@@ -289,6 +289,9 @@ export class ExecutionService {
     // Close executed vault PDAs (return rent to owner)
     steps.push(this.makeStep(order++, 'close_executed_vault', 'Close vault PDAs, return rent', 'pending'));
 
+    // Refund remaining agent SOL back to owner
+    steps.push(this.makeStep(order++, 'refund_agent_sol', 'Refund agent SOL to owner', 'pending'));
+
     // Self-terminate agent key
     steps.push(this.makeStep(order++, 'self_terminate', 'Destroy agent key', 'pending'));
 
@@ -332,6 +335,9 @@ export class ExecutionService {
 
       case 'close_executed_vault':
         return this.executeCloseExecutedVault();
+
+      case 'refund_agent_sol':
+        return this.executeRefundAgentSol();
 
       case 'self_terminate':
         await this.executeSelfTerminate();
@@ -430,17 +436,16 @@ export class ExecutionService {
     return this.txService.closeExecutedVault(agentKeypair, this.ownerPubkey);
   }
 
+  private async executeRefundAgentSol(): Promise<string | undefined> {
+    const agentKeypair = await this.keyManager.getKeypair();
+    const sig = await this.txService.refundAgentSol(agentKeypair, this.ownerPubkey);
+    return sig ?? undefined;
+  }
+
   private async executeSelfTerminate(): Promise<void> {
     const ownerWallet = this.ownerPubkey.toString();
     await clearDistributableSnapshot(ownerWallet);
     await clearTokenSnapshot(ownerWallet);
-
-    // Refund remaining agent SOL back to owner before destroying the key
-    try {
-      const agentKeypair = await this.keyManager.getKeypair();
-      await this.txService.refundAgentSol(agentKeypair, this.ownerPubkey);
-    } catch {}
-
     await this.keyManager.destroyKey();
   }
 }

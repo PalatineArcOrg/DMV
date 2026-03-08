@@ -25,6 +25,7 @@ const STEP_TYPE_MAP: Record<string, string> = {
   close_accounts: 'CloseAccounts',
   record_execution_log: 'RecordExecution',
   close_executed_vault: 'CloseExecutedVault',
+  refund_agent_sol: 'RefundAgentSol',
   self_terminate: 'SelfTerminate',
 };
 
