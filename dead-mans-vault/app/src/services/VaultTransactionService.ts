@@ -294,20 +294,14 @@ export class VaultTransactionService {
     ownerPubkey: PublicKey,
   ): Promise<string | null> {
     const balance = await this.connection.getBalance(agentKeypair.publicKey, 'confirmed');
-    // Reserve enough for base fee (5000) + priority fee + safety margin
-    const FEE_RESERVE = 50000;
+    // Reserve just enough for the base transaction fee
+    const FEE_RESERVE = 5000;
     const refundAmount = balance - FEE_RESERVE;
     if (refundAmount <= 0) return null;
 
-    const tx = new Transaction();
-
-    // Add compute budget for priority fee
-    tx.add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 1000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }),
-    );
-
-    tx.add(
+    // Simple SOL transfer — no ComputeBudget instructions needed.
+    // Default 200k CU limit is more than enough for SystemProgram.transfer (~450 CUs).
+    const tx = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: agentKeypair.publicKey,
         toPubkey: ownerPubkey,
