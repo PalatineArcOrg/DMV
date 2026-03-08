@@ -242,7 +242,9 @@ export function SetupWizardScreen() {
             const vault = await txService.fetchVaultConfig(publicKey);
             if (vault && vault.active) {
               setVaultConfig(vault);
-            } else if (!vault) {
+            } else if (!vault && useVaultStore.getState().vaultConfig) {
+              // Only clear if we previously had a vault (PDAs closed post-execution)
+              // Don't clear during fresh setup — it would wipe local beneficiaries
               setVaultConfig(null);
             }
           } catch {

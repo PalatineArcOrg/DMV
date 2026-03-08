@@ -165,8 +165,9 @@ export function DashboardScreen() {
     try {
       const vault: any = await fetchVaultConfig(publicKey);
       setVaultData(vault);
-      if (!vault) {
+      if (!vault && useVaultStore.getState().vaultConfig) {
         // Vault PDAs closed — sync Zustand so Vault tab reflects this
+        // Only clear if we previously had a vault; don't wipe mid-setup state
         useVaultStore.getState().setVaultConfig(null);
         // Check if execution completed
         const escState = useEscalationStore.getState().state;
