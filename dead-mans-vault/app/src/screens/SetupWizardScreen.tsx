@@ -10,7 +10,7 @@ import { useEscalationStore } from '../store/useEscalationStore';
 import { validateBeneficiaryShares } from '../utils/validation';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, SPACING, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
-import { getExecutionSteps, clearExecutionSteps, clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
+import { getExecutionSteps, clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
 
 export function SetupWizardScreen() {
   const navigation = useNavigation<any>();
@@ -153,7 +153,6 @@ export function SetupWizardScreen() {
     useHeartbeatStore.getState().reset();
     useEscalationStore.getState().reset();
     if (publicKey) {
-      await clearExecutionSteps(publicKey.toString());
       await clearDistributableSnapshot(publicKey.toString());
       await clearTokenSnapshot(publicKey.toString());
     }
