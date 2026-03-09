@@ -8,8 +8,8 @@ Dead Man's Vault monitors an owner's liveness through configurable heartbeat che
 
 ### Demo Videos
 
-- **Short Demo** (1 min): https://www.youtube.com/shorts/LetYFctqcvM
-- **Full Vault Cycle** (3-4 min): https://www.youtube.com/watch?v=p2dqby2mJcc
+- **Short Demo** (2 min): https://www.youtube.com/shorts/LetYFctqcvM
+- **Full Vault Cycle** (4 min): https://www.youtube.com/watch?v=p2dqby2mJcc
 
 ### Links
 
