@@ -6,6 +6,17 @@ Dead Man's Vault monitors an owner's liveness through configurable heartbeat che
 
 **Built for the Monolith — Solana Mobile Hackathon (Feb 2 -- Mar 9, 2026)**
 
+### Demo Videos
+
+- **Short Demo** (1 min): https://www.youtube.com/shorts/LetYFctqcvM
+- **Full Vault Cycle** (3-4 min): https://www.youtube.com/watch?v=p2dqby2mJcc
+
+### Links
+
+- **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
+- **Download APK**: [GitHub Releases](https://github.com/PalatineArcOrg/DMV/releases/latest)
+- **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
+
 ---
 
 ## How It Works
@@ -183,7 +194,7 @@ Authentication screen guards app access with biometric/PIN when enabled.
 | **BackgroundAgent** | Singleton orchestrator for heartbeat monitoring and escalation evaluation |
 | **HeartbeatService** | Records confirmations to SQLite, tracks overdue status, monitors on-chain wallet activity |
 | **EscalationService** | Autonomous state machine evaluating every 60s (10s in demo), transitions through 4 stages |
-| **ExecutionService** | 10-step idempotent execution engine with on-chain SOL/SPL distribution, vault closure, and SQLite checkpointing |
+| **ExecutionService** | Idempotent execution engine with on-chain SOL/SPL distribution, agent refund, vault closure, and SQLite checkpointing |
 | **VaultTransactionService** | Builds and sends all on-chain transactions with priority fees and raw byte parsing fallback |
 | **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker) |
 | **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX) with frequency caps |
