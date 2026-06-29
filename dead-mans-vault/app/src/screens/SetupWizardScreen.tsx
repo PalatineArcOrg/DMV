@@ -172,29 +172,18 @@ export function SetupWizardScreen() {
           onPress: async () => {
             setIsRevoking(true);
             try {
-              const { revokeVault } = require('../services/revokeVault');
+              const { revokeVault, formatRevokeSummary } = require('../services/revokeVault');
               const result = await revokeVault(publicKey, signTransaction);
+              const summary = formatRevokeSummary(result);
 
-              const refundNote = result.agentRefunded
-                ? '\n\nAgent SOL refunded to your wallet (separate transaction).'
-                : result.refundError
-                ? `\n\nAgent SOL refund failed: ${result.refundError}`
-                : '';
-
-              if (result.status === 'revoked') {
-                const revokeMsg = result.assetCount > 0
-                  ? `Vault closed. ${result.assetCount} asset(s) returned to your wallet.${refundNote}\n\nTx: ${result.txSig.slice(0, 20)}...`
-                  : `Vault closed and rent reclaimed.${refundNote}\n\nTx: ${result.txSig.slice(0, 20)}...`;
-                Alert.alert('Vault Revoked', revokeMsg, [
-                  { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${result.txSig}?cluster=devnet`) },
-                  { text: 'OK' },
-                ]);
-              } else {
-                const statusMsg = result.executed
-                  ? 'Vault already executed. Local data cleared.'
-                  : 'No active vault found on-chain. Local data cleared.';
-                Alert.alert('Vault Cleared', `${statusMsg}${refundNote}`);
-              }
+              const buttons = [
+                ...summary.txs.slice(0, 2).map((t: { label: string; sig: string }, i: number) => ({
+                  text: `View tx ${i + 1}`,
+                  onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${t.sig}?cluster=devnet`),
+                })),
+                { text: 'Done' },
+              ];
+              Alert.alert(summary.title, summary.message, buttons);
             } catch (err: any) {
               const { NotOwnerError } = require('../services/revokeVault');
               if (err instanceof NotOwnerError) {
