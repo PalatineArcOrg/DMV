@@ -4,6 +4,10 @@ export const PROGRAM_ID = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
 export const RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
 export const HELIUS_API_KEY = process.env.EXPO_PUBLIC_HELIUS_API_KEY || '';
 
+// DMV push-notification server (FCM relay). Empty = push registration disabled.
+export const NOTIFY_URL = process.env.EXPO_PUBLIC_NOTIFY_URL || '';
+export const NOTIFY_SECRET = process.env.EXPO_PUBLIC_NOTIFY_SECRET || '';
+
 // Derive Helius REST endpoints from RPC_URL — zero-config for mainnet migration
 const IS_DEVNET = RPC_URL.includes('devnet') || RPC_URL.includes('api.devnet');
 const HELIUS_NET_PREFIX = IS_DEVNET ? 'api-devnet' : 'api-mainnet';

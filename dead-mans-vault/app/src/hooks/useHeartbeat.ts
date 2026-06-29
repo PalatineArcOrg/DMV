@@ -9,7 +9,8 @@ import { useEscalationStore } from '../store/useEscalationStore';
 import { useVaultStore } from '../store/useVaultStore';
 import { useDemoStore } from '../store/useDemoStore';
 import { NotificationService } from '../notifications/NotificationService';
-import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS } from '../utils/constants';
+import { PushRegistrationService } from '../services/PushRegistrationService';
+import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS, PROGRAM_ID } from '../utils/constants';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
   methods: ['active_tap'],
@@ -99,6 +100,26 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
 
     escService.start();
     setIsMonitoring(true);
+
+    // Register this device with the FCM notify server so escalation pushes
+    // arrive even when the app is killed. Idempotent; the server reads
+    // heartbeats from chain, so we only register the token + stage durations.
+    // Fire-and-forget and no-ops if push isn't configured in this build.
+    if (ownerPubkey) {
+      try {
+        const [vaultPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('vault'), ownerPubkey.toBuffer()],
+          new PublicKey(PROGRAM_ID),
+        );
+        PushRegistrationService.register(ownerPubkey.toBase58(), vaultPda.toBase58(), {
+          stage1: escConfig.stage1Duration,
+          stage2: escConfig.stage2Duration,
+          stage3: escConfig.stage3Duration,
+        }).catch(() => {});
+      } catch {
+        // Non-fatal — push registration is best-effort.
+      }
+    }
 
     // Refresh heartbeat status for UI every 10s
     const refreshStatus = async () => {
