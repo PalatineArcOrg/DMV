@@ -28,10 +28,16 @@ export type DeadMansVault = {
       "accounts": [
         {
           "name": "agent",
+          "docs": [
+            "Agent signer — must match vault's registered agent"
+          ],
           "signer": true
         },
         {
           "name": "owner",
+          "docs": [
+            "Owner wallet — receives rent refund (does not need to sign)"
+          ],
           "writable": true,
           "relations": [
             "vaultConfig"
@@ -280,6 +286,90 @@ export type DeadMansVault = {
               }
             ]
           }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "closeVaultAta",
+      "discriminator": [
+        148,
+        47,
+        170,
+        34,
+        91,
+        173,
+        95,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "Owner signs and receives the reclaimed ATA rent"
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vaultConfig"
+          ]
+        },
+        {
+          "name": "vaultConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultTokenAccount",
+          "docs": [
+            "Vault PDA's token account to close — must be owned by the vault PDA"
+          ],
+          "writable": true
+        },
+        {
+          "name": "vaultAuthority",
+          "docs": [
+            "Vault PDA as the close authority.",
+            "constraint. No data deserialization needed — only PDA signature."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": []

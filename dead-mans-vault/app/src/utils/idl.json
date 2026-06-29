@@ -285,6 +285,90 @@
       "args": []
     },
     {
+      "name": "close_vault_ata",
+      "discriminator": [
+        148,
+        47,
+        170,
+        34,
+        91,
+        173,
+        95,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "Owner signs and receives the reclaimed ATA rent"
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vault_config"
+          ]
+        },
+        {
+          "name": "vault_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault PDA's token account to close — must be owned by the vault PDA"
+          ],
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "docs": [
+            "Vault PDA as the close authority.",
+            "constraint. No data deserialization needed — only PDA signature."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "execute_distribution",
       "discriminator": [
         163,

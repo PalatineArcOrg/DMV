@@ -10,6 +10,7 @@ pub mod record_execution;
 pub mod update_vault;
 pub mod withdraw_from_vault;
 pub mod withdraw_sol_from_vault;
+pub mod close_vault_ata;
 pub mod close_executed_vault;
 pub mod close_executed_vault_by_owner;
 
@@ -24,5 +25,6 @@ pub use record_execution::*;
 pub use update_vault::*;
 pub use withdraw_from_vault::*;
 pub use withdraw_sol_from_vault::*;
+pub use close_vault_ata::*;
 pub use close_executed_vault::*;
 pub use close_executed_vault_by_owner::*;

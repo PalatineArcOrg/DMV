@@ -1322,6 +1322,148 @@ describe("dead-mans-vault", () => {
     expect(Number(ownerAccountAfter.amount)).to.equal(700_000); // 500k kept + 200k withdrawn
   });
 
+  it("owner can close an emptied vault ATA and reclaim its rent", async () => {
+    const mintAuthority = anchor.web3.Keypair.generate();
+    await airdrop(provider, mintAuthority.publicKey, 2);
+
+    const mint = await createMint(
+      provider.connection,
+      mintAuthority,
+      mintAuthority.publicKey,
+      null,
+      6
+    );
+
+    const ownerAta = await createAssociatedTokenAccount(
+      provider.connection,
+      mintAuthority,
+      mint,
+      owner.publicKey
+    );
+    await mintTo(
+      provider.connection,
+      mintAuthority,
+      mint,
+      ownerAta,
+      mintAuthority,
+      1_000_000
+    );
+
+    // Vault PDA's ATA (allowOwnerOffCurve = true), rent paid by mintAuthority
+    const vaultAta = await createAssociatedTokenAccount(
+      provider.connection,
+      mintAuthority,
+      mint,
+      vaultConfigPda,
+      undefined,
+      TOKEN_PROGRAM_ID,
+      undefined,
+      true
+    );
+
+    const { createTransferInstruction } = await import("@solana/spl-token");
+    const depositSplTx = new anchor.web3.Transaction().add(
+      createTransferInstruction(ownerAta, vaultAta, owner.publicKey, 250_000)
+    );
+    await provider.sendAndConfirm(depositSplTx);
+
+    // Drain the vault ATA to zero, then close it — both in one transaction,
+    // exactly as the client revoke flow batches them.
+    const ownerBalBefore = await provider.connection.getBalance(owner.publicKey);
+    const ataRent = (await provider.connection.getAccountInfo(vaultAta)).lamports;
+
+    await program.methods
+      .withdrawFromVault(new anchor.BN(250_000))
+      .accounts({
+        owner: owner.publicKey,
+        vaultConfig: vaultConfigPda,
+        sourceTokenAccount: vaultAta,
+        destinationTokenAccount: ownerAta,
+        vaultAuthority: vaultConfigPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .postInstructions([
+        await program.methods
+          .closeVaultAta()
+          .accounts({
+            owner: owner.publicKey,
+            vaultConfig: vaultConfigPda,
+            vaultTokenAccount: vaultAta,
+            vaultAuthority: vaultConfigPda,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .instruction(),
+      ])
+      .rpc();
+
+    // The ATA is gone — fetching it must fail.
+    let closed = false;
+    try {
+      await getAccount(provider.connection, vaultAta);
+    } catch {
+      closed = true;
+    }
+    expect(closed).to.equal(true);
+
+    // Owner reclaimed the ATA rent (minus tx fee). The vault is the owner's
+    // own PDA, so the rent flows back to the owner wallet.
+    const ownerBalAfter = await provider.connection.getBalance(owner.publicKey);
+    expect(ownerBalAfter).to.be.greaterThan(ownerBalBefore + ataRent - 100_000);
+  });
+
+  it("cannot close a vault ATA that still holds tokens", async () => {
+    const mintAuthority = anchor.web3.Keypair.generate();
+    await airdrop(provider, mintAuthority.publicKey, 2);
+
+    const mint = await createMint(
+      provider.connection,
+      mintAuthority,
+      mintAuthority.publicKey,
+      null,
+      6
+    );
+    const ownerAta = await createAssociatedTokenAccount(
+      provider.connection,
+      mintAuthority,
+      mint,
+      owner.publicKey
+    );
+    await mintTo(provider.connection, mintAuthority, mint, ownerAta, mintAuthority, 1_000_000);
+    const vaultAta = await createAssociatedTokenAccount(
+      provider.connection,
+      mintAuthority,
+      mint,
+      vaultConfigPda,
+      undefined,
+      TOKEN_PROGRAM_ID,
+      undefined,
+      true
+    );
+    const { createTransferInstruction } = await import("@solana/spl-token");
+    await provider.sendAndConfirm(
+      new anchor.web3.Transaction().add(
+        createTransferInstruction(ownerAta, vaultAta, owner.publicKey, 100_000)
+      )
+    );
+
+    // CloseAccount on a non-empty token account must fail (SPL Token program error).
+    try {
+      await program.methods
+        .closeVaultAta()
+        .accounts({
+          owner: owner.publicKey,
+          vaultConfig: vaultConfigPda,
+          vaultTokenAccount: vaultAta,
+          vaultAuthority: vaultConfigPda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+      expect.fail("closeVaultAta should reject a non-empty token account");
+    } catch (err) {
+      expect(err).to.exist;
+    }
+  });
+
   it("non-owner cannot withdraw SOL from vault", async () => {
     const attacker = anchor.web3.Keypair.generate();
     await airdrop(provider, attacker.publicKey, 1);

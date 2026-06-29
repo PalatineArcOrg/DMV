@@ -82,91 +82,35 @@ export function SettingsScreen() {
           onPress: async () => {
             setIsRevoking(true);
             try {
-              const { VaultTransactionService } = require('../services/VaultTransactionService');
-              const txService = new VaultTransactionService();
-              const connection = txService.getConnection();
-              const vault = await txService.fetchVaultConfig(publicKey);
+              const { revokeVault, NotOwnerError } = require('../services/revokeVault');
+              const result = await revokeVault(publicKey, signTransaction);
 
-              if (vault && vault.owner && vault.owner.toBase58() !== publicKey.toBase58()) {
-                Alert.alert('Not Owner', 'This vault belongs to a different wallet.');
-                return;
-              }
-
-              // Always attempt agent SOL refund regardless of vault state
-              let agentRefunded = false;
-              let refundError = '';
-              try {
-                const { KeyManager } = require('../tee/KeyManager');
-                const keyManager = KeyManager.getInstance();
-                if (await keyManager.hasAgentKey()) {
-                  const agentKeypair = await keyManager.getKeypair();
-                  const agentBal = await connection.getBalance(agentKeypair.publicKey);
-                  if (agentBal > 10000) {
-                    const refundSig = await txService.refundAgentSol(agentKeypair, publicKey);
-                    agentRefunded = refundSig !== null;
-                  }
-                }
-              } catch (e: any) {
-                refundError = e?.message || 'Unknown error';
-              }
-
-              const refundNote = agentRefunded ? '\n\nAgent SOL refunded to your wallet (separate transaction).' : refundError
-                ? `\n\nAgent SOL refund failed: ${refundError}`
+              const refundNote = result.agentRefunded
+                ? '\n\nAgent SOL refunded to your wallet (separate transaction).'
+                : result.refundError
+                ? `\n\nAgent SOL refund failed: ${result.refundError}`
                 : '';
 
-              if (vault && vault.active && !vault.executed) {
-                // Active vault: withdraw assets + revoke on-chain
-                const { instructions: withdrawIxs, assetCount } = await txService.buildWithdrawAllInstructions(publicKey);
-                const txs = await txService.buildBatchedTxs(publicKey, withdrawIxs, { includeRevoke: true });
-
-                let txSig = '';
-                for (const batchTx of txs) {
-                  batchTx.feePayer = publicKey;
-                  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-                  batchTx.recentBlockhash = blockhash;
-                  const signed = await signTransaction(batchTx);
-                  txSig = await connection.sendRawTransaction(signed.serialize(), {
-                    skipPreflight: false, preflightCommitment: 'confirmed',
-                  });
-                  await connection.confirmTransaction(
-                    { signature: txSig, blockhash, lastValidBlockHeight }, 'confirmed',
-                  );
-                }
-
-                // Destroy agent key — vault is gone, agent no longer needed
-                try {
-                  const { KeyManager } = require('../tee/KeyManager');
-                  await KeyManager.getInstance().destroyKey();
-                } catch {}
-
-                useVaultStore.getState().reset();
-                useHeartbeatStore.getState().reset();
-                useEscalationStore.getState().reset();
-
-                const revokeMsg = assetCount > 0
-                  ? `Vault closed. ${assetCount} asset(s) returned to your wallet.${refundNote}\n\nTx: ${txSig.slice(0, 20)}...`
-                  : `Vault closed and rent reclaimed.${refundNote}\n\nTx: ${txSig.slice(0, 20)}...`;
+              if (result.status === 'revoked') {
+                const revokeMsg = result.assetCount > 0
+                  ? `Vault closed. ${result.assetCount} asset(s) returned to your wallet.${refundNote}\n\nTx: ${result.txSig.slice(0, 20)}...`
+                  : `Vault closed and rent reclaimed.${refundNote}\n\nTx: ${result.txSig.slice(0, 20)}...`;
                 Alert.alert('Vault Revoked', revokeMsg, [
-                  { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
+                  { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${result.txSig}?cluster=devnet`) },
                   { text: 'OK' },
                 ]);
               } else {
-                // Vault executed, inactive, or PDAs already closed — just clean up
-                try {
-                  const { KeyManager } = require('../tee/KeyManager');
-                  await KeyManager.getInstance().destroyKey();
-                } catch {}
-
-                useVaultStore.getState().reset();
-                useHeartbeatStore.getState().reset();
-                useEscalationStore.getState().reset();
-
-                const statusMsg = vault?.executed
+                const statusMsg = result.executed
                   ? 'Vault already executed. Local data cleared.'
                   : 'No active vault found on-chain. Local data cleared.';
                 Alert.alert('Vault Cleared', `${statusMsg}${refundNote}`);
               }
             } catch (err: any) {
+              const { NotOwnerError } = require('../services/revokeVault');
+              if (err instanceof NotOwnerError) {
+                Alert.alert('Not Owner', 'This vault belongs to a different wallet.');
+                return;
+              }
               const msg = err.message || String(err);
               if (msg.includes('CancellationException') || msg.includes('cancelled')) {
                 Alert.alert('Cancelled', 'Wallet signing was cancelled.');

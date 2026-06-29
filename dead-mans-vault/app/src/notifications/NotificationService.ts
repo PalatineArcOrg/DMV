@@ -204,6 +204,58 @@ export class NotificationService {
     await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
   }
 
+  // --- Escalation Timeline (pre-scheduled, survives app kill) ---
+
+  // Identifier prefix + bound for the pre-scheduled escalation timeline. The
+  // whole future escalation sequence is materialized to the OS up-front so the
+  // user is warned even if the app is never reopened. Bounded to stay within
+  // Android's scheduled-alarm limits.
+  static readonly ESCALATION_PREFIX = 'esc-';
+  static readonly MAX_ESCALATION_NOTIFS = 50;
+
+  /** Cancel every previously pre-scheduled escalation notification. */
+  static async cancelEscalationTimeline(): Promise<void> {
+    const cancels: Promise<unknown>[] = [];
+    for (let i = 0; i < NotificationService.MAX_ESCALATION_NOTIFS; i++) {
+      cancels.push(
+        Notifications.cancelScheduledNotificationAsync(
+          `${NotificationService.ESCALATION_PREFIX}${i}`,
+        ).catch(() => {}),
+      );
+    }
+    await Promise.all(cancels);
+  }
+
+  /**
+   * Replace the pre-scheduled escalation timeline with a fresh one. Each event
+   * is an OS-level TIME_INTERVAL notification, so the sequence fires on schedule
+   * even when the app is backgrounded or killed.
+   */
+  static async scheduleEscalationTimeline(
+    events: Array<{ title: string; body: string; channelId: string; delaySeconds: number }>,
+  ): Promise<void> {
+    await NotificationService.cancelEscalationTimeline();
+
+    const bounded = events.slice(0, NotificationService.MAX_ESCALATION_NOTIFS);
+    await Promise.all(
+      bounded.map((e, i) =>
+        Notifications.scheduleNotificationAsync({
+          identifier: `${NotificationService.ESCALATION_PREFIX}${i}`,
+          content: {
+            title: e.title,
+            body: e.body,
+            ...(Platform.OS === 'android' && { channelId: e.channelId }),
+          },
+          trigger: {
+            type: SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: Math.max(1, Math.round(e.delaySeconds)),
+            repeats: false,
+          },
+        }).catch(() => {}),
+      ),
+    );
+  }
+
   // --- Cancel All ---
 
   static async cancelAll(): Promise<void> {

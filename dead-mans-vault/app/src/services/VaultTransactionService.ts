@@ -907,6 +907,21 @@ export class VaultTransactionService {
         })
         .instruction();
       instructions.push(ix);
+
+      // Close the now-empty vault ATA so its rent (~0.002 SOL) returns to the
+      // owner instead of being stranded. CloseAccount requires a zero balance,
+      // which the withdraw instruction above guarantees within the same tx.
+      const closeIx = await program.methods
+        .closeVaultAta()
+        .accountsPartial({
+          owner,
+          vaultConfig: vaultPda,
+          vaultTokenAccount: vaultAta,
+          vaultAuthority: vaultPda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .instruction();
+      instructions.push(closeIx);
       assetCount++;
     }
 
@@ -933,7 +948,10 @@ export class VaultTransactionService {
 
   /**
    * Pack withdrawal instructions (and optionally revoke) into minimal transactions.
-   * ~8 withdraw instructions fit per TX within the 1232-byte limit.
+   * Each SPL token contributes a [withdraw, close-ATA] pair; 8 instructions
+   * (~4 token pairs, or 8 single SOL/withdraw ixs) fit per TX within the
+   * 1232-byte limit. The pair is kept in one chunk so the ATA is emptied and
+   * closed atomically.
    */
   async buildBatchedTxs(
     owner: PublicKey,
