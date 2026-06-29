@@ -25,6 +25,7 @@ export interface TxRef {
 interface RevokeResultBase {
   agentRefunded: boolean;
   agentRefundedSol: number; // SOL swept from the agent key back to owner (0 if none)
+  agentAlreadyEmpty: boolean; // agent key existed but held no SOL (already refunded earlier)
   vaultReturnedSol: number; // everything else returned (rent + deposited + ATA rent), net of fee
   totalReturnedSol: number; // net wallet increase = agentRefundedSol + vaultReturnedSol
   txs: TxRef[]; // every transaction, in order, for the breakdown + explorer links
@@ -74,6 +75,7 @@ export async function revokeVault(
   // funding is swept back to the owner before the key is destroyed.
   let agentRefunded = false;
   let agentRefundedSol = 0;
+  let agentAlreadyEmpty = false;
   let refundError = '';
   try {
     const keyManager = KeyManager.getInstance();
@@ -89,8 +91,10 @@ export async function revokeVault(
           txs.push({ label: 'Agent key refund', sig: refundSig });
         }
       } else {
-        // Key exists but is already empty — nothing to refund (not an error).
-        refundError = 'no agent balance';
+        // Key exists but holds no SOL — it was already swept back to the owner
+        // in an earlier step (e.g. a prior revoke attempt). Surface this so the
+        // summary can say so explicitly instead of silently omitting the agent.
+        agentAlreadyEmpty = true;
       }
     } else {
       refundError = 'no agent key on this device';
@@ -153,6 +157,7 @@ export async function revokeVault(
       assetCount,
       agentRefunded,
       agentRefundedSol,
+      agentAlreadyEmpty,
       vaultReturnedSol,
       totalReturnedSol,
       txs,
@@ -175,6 +180,7 @@ export async function revokeVault(
     executed: !!vault?.executed,
     agentRefunded,
     agentRefundedSol,
+    agentAlreadyEmpty,
     vaultReturnedSol,
     totalReturnedSol,
     txs,
@@ -211,6 +217,10 @@ export function formatRevokeSummary(r: RevokeResult): {
   const lines: string[] = ['Returned to your wallet:'];
   if (r.agentRefunded) {
     lines.push(`  • Agent key refund:   ${r.agentRefundedSol.toFixed(4)} SOL`);
+  } else if (r.agentAlreadyEmpty) {
+    // The agent had already been swept back earlier — say so explicitly so it
+    // never looks like the agent funding silently disappeared.
+    lines.push('  • Agent SOL:  already returned earlier');
   }
   if (r.vaultReturnedSol > 0) {
     const assetCount = r.status === 'revoked' ? r.assetCount : 0;
@@ -218,7 +228,7 @@ export function formatRevokeSummary(r: RevokeResult): {
     lines.push(`  • ${label}:  ${r.vaultReturnedSol.toFixed(4)} SOL`);
   }
   lines.push('  ─────────────────');
-  lines.push(`  Total returned:  ${r.totalReturnedSol.toFixed(4)} SOL`);
+  lines.push(`  Total this revoke:  ${r.totalReturnedSol.toFixed(4)} SOL`);
 
   lines.push('');
   lines.push(`Transaction${r.txs.length !== 1 ? 's' : ''}:`);
