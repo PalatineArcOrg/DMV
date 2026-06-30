@@ -447,6 +447,106 @@ Adapt the existing suite + add:
 `TokensRemain` (close guard), `TooManyAssignments`, `DuplicateNftAssignment`,
 `InvalidBeneficiaryIndex`.
 
+## 18. BUILD-SPEC REVIEW CORRECTIONS (apply these — they override §3–§13 where they conflict)
+
+Two audit passes over this build spec (fidelity + implementer-correctness). Byte math
+(§3 SPACE) and mask helpers (§3.5) verified **correct**. Apply the following before coding.
+
+### B1 (BLOCKER) — grace check plumbing: `ExecutionLog` existence IS the grace proof
+`grace_elapsed` needs `heartbeat_record`, but only `begin_execution` listed it.
+**Resolution (chosen): only `begin_execution` checks `grace_elapsed`** (and loads
+`heartbeat_record`). Every downstream permissionless ix (`begin_token_dist`,
+`execute_specific_asset`, `execute_sol_shares`, `execute_token_shares`,
+`finalize_execution`, `close_token_dist`) **drops the live grace re-check and instead
+requires `execution_log` to already exist** (its existence proves grace was elapsed at
+`begin_execution`). No `heartbeat_record` on those structs.
+- **Block `record_heartbeat` once `ExecutionLog` exists** (and once `vault.executed`) so
+  the deadline can't be reset mid-execution. New guard on `record_heartbeat`.
+- **Owner ix freeze (§4.10):** `update_vault`/`withdraw_*`/`revoke_vault`/`rotate_agent`
+  run pre-execution, so they DO compute the deadline — add `heartbeat_record`
+  (seeds-pinned) to each `#[derive(Accounts)]` and `require!(now < deadline && execution_log not started)`. (Cleanest: also reject if `ExecutionLog` exists.)
+
+### B2 (BLOCKER) — do NOT permissionlessly close `VaultConfig` in v1 (orphaned-token risk)
+The program can't enumerate the vault's ATAs, so a premature/buggy permissionless
+`close_vault` could close `VaultConfig` while a never-`begin_token_dist`'d mint still
+has a balance → the vault PDA can never sign again → **tokens orphaned forever.**
+**Resolution:** v1 has **no permissionless `close_vault`.** The permissionless flow
+distributes all assets and runs `close_token_dist(M)` per mint (which closes that ATA +
+TokenDist, token rent → cranker, dust → largest beneficiary). The final core-PDA close
+(VaultConfig/HeartbeatRecord/ExecutionLog/AssetPlan, rent → owner) becomes
+**`close_vault_by_owner` (owner-signed)** — the owner (or, fast-follow, a guarded
+permissionless variant) reclaims the ~0.002 SOL rent later. Inheritance correctness does
+NOT depend on this close — beneficiaries already received every asset. Keep existing
+`close_executed_vault_by_owner` as that escape hatch. (Delete §4.9 permissionless
+`close_vault`.)
+
+### B3 (HIGH) — `begin_token_dist` ATA must be un-spoofable (not `Option`)
+A caller passing `None`/empty for a held mint would freeze `snapshot=0` (write-once) →
+mis-distribution. **Replace `vault_ata: Option<…>` with the canonical ATA as an
+`UncheckedAccount` pinned to the derived address** (`associated_token::mint = mint,
+associated_token::authority = vault_config`, or derive+assert the key), then read
+`bal = if ai.data_is_empty() { 0 } else { TokenAccount::try_deserialize(..).amount }`.
+This makes "missing ATA" (P11) real and un-spoofable.
+
+### B4 (HIGH) — `set_asset_plan` NFT shape-check moves client-side
+On-chain validation of `decimals==0 && supply==1` would need up to 64 mint accounts.
+**Resolution: validate NFT-shape CLIENT-side.** On-chain `set_asset_plan` keeps only:
+`len ≤ MAX_ASSIGNMENTS`, `beneficiary_index < len`, and **≤1 assignment per NFT mint**
+(dedup over `is_nft` assignments — needs only the assignment list, no mint accounts). A
+mis-flagged NFT only harms the owner's own vault. No mint accounts on `set_asset_plan`.
+
+### Mechanical fixes (apply inline)
+- **`lower_index_same_mint_mask` (was undefined):**
+  ```rust
+  fn lower_index_same_mint_mask(plan: &AssetPlan, mint: Pubkey, j: usize) -> u64 {
+      let mut m = 0u64;
+      for k in 0..j { if plan.assignments[k].mint == mint { m |= 1u64 << k; } }
+      m   // first-of-mint → 0 → guard always passes; only same-mint lower bits block
+  }
+  ```
+- **`AssetAssignment` derives `Copy`** (so `let a = plan.assignments[j];` compiles; all
+  fields are Copy). Or bind by reference.
+- **Mark `vault_ata`/`beneficiary_ata` `mut`** in token ix; use `transfer_checked` from
+  **`anchor_spl::token_interface`** (not `token::transfer`).
+- **Batched ix:** `require!(indices.len() == remaining_accounts.len())`; manually
+  `try_deserialize` each `remaining_accounts[k]`, assert writable + `owner`/`mint`;
+  **cap a batch at ~8–10** payouts (20× `transfer_checked` risks the 200k CU limit) —
+  the crank chunks; keep single-index fallback. (Account-count ~26 fits a legacy tx but
+  is tight; an Address Lookup Table is advisable for big batches.)
+- **Use explicit-width shifts** `1u32 << i` / `1u64 << j` (never bare `1 << i`).
+- **`finalize` AssetPlan:** `Option<Account<AssetPlan>>`; on a `has_asset_plan` vault use
+  `.ok_or(AssetPlanRequired)?` (never `unwrap`) so a spoofed `None` fails cleanly.
+- **`close_token_dist`:** make the dust-sweep + `largest_benef_ata` requirement
+  **conditional on `vault_ata.amount > 0`** (else an empty mint with no dust ATA blocks
+  close). Validate `largest_benef.key() == beneficiaries[max_idx].wallet` explicitly for
+  BOTH the token-dust and (former SOL-dust) paths.
+- **Rent recipients (resolves the §4.8 footnote):** cranker-paid PDAs (`ExecutionLog`,
+  `TokenDist`) → refund the **cranker/payer**; owner-paid PDAs (`VaultConfig`,
+  `HeartbeatRecord`, `AssetPlan`) → **owner**; asset dust → **largest-share beneficiary**.
+- **`grace_elapsed` uses `>=`** (deadline reached); align tests (existing code used `>`).
+- **`VaultConfig::SPACE` recompute:** new `Beneficiary{wallet:32, share_bps:2}` = 34 B →
+  vec `4 + 20*34 = 684`; `+1` for `has_asset_plan`. Existing `+63` padding absorbs it.
+  **This is a breaking byte-layout change** — old devnet vaults won't deserialize; handle
+  at deploy (revoke/recreate; devnet only).
+- **Drop redundant accounts:** `execute_specific_asset`'s separate `beneficiary`
+  UncheckedAccount (guard #8 already pins via `beneficiary_ata.owner`); the extra
+  `vault_authority` in `close_token_dist` (use `vault_config.to_account_info()` as PDA
+  authority). Drop unused `system_program` from `execute_sol_shares` (no CPI).
+- **§5 matrix:** add rows for **R15** (covered by the 4.1 P10 grace gate) and **R18**
+  (covered by §6 math / §15 edge table) so the checklist is complete.
+- **D6 wording:** the beneficiary-**claim CAPABILITY is v1** (same permissionless ix,
+  different fee payer); only the dedicated **"Claim" UI button** is fast-follow. Fix §8/§14.
+- **Error codes:** add `InvalidNftMint` only if any on-chain NFT check remains (B4 removes
+  it); remove unused `ExecutionAlreadyStarted` (Anchor `init` "already in use" covers the
+  second `begin_execution`); clarify whether duplicate `(mint, beneficiary)` pairs are
+  rejected and add a code if so.
+
+### Verified correct (no change needed)
+SPACE math; `full_mask_*` u128/u64 widen (n=0/20/32/64 all safe); the order-independence
+gate (strict-`init` `begin_*` + downstream "TokenDist must pre-exist"); conservation math
+(§6); index-equality guards (R1/R14); `transfer_checked` signer seeds `["vault",owner,&[bump]]`;
+direct-lamport SOL debit on the program-owned PDA; AssetPlan on the heap (not the 4KB stack).
+
 ## 14. Fast-follow (explicitly out of v1)
 - Specific-SOL bequests (D2).
 - Beneficiary "Claim inheritance" UI button (server crank already gives autonomy).
