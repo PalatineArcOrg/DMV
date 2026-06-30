@@ -12,6 +12,7 @@ import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { HeartbeatConfigScreen } from '../screens/HeartbeatConfigScreen';
 import { BeneficiaryScreen } from '../screens/BeneficiaryScreen';
 import { DeFiPositionsScreen } from '../screens/DeFiPositionsScreen';
+import { BequestsScreen } from '../screens/BequestsScreen';
 import { EstateReviewScreen } from '../screens/EstateReviewScreen';
 import { AssetsScreen } from '../screens/AssetsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -94,6 +95,11 @@ function SetupStackScreen() {
         name="DeFiPositions"
         component={DeFiPositionsScreen}
         options={{ title: 'DeFi Positions' }}
+      />
+      <SetupStack.Screen
+        name="Bequests"
+        component={BequestsScreen}
+        options={{ title: 'Specific Bequests' }}
       />
       <SetupStack.Screen
         name="EstateReview"

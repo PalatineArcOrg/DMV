@@ -111,7 +111,6 @@ export function BeneficiaryScreen() {
                 const onChainBeneficiaries = beneficiaries.map((b: any) => ({
                   wallet: new PublicKey(b.wallet.toBase58()),
                   shareBps: b.shareBps,
-                  hasSpecificAssets: b.hasSpecificAssets,
                 }));
 
                 const tx = await txService.buildUpdateVaultTx(publicKey, {

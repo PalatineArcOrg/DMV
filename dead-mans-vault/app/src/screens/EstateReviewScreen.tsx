@@ -25,7 +25,9 @@ import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, PROGRAM_ID } from '../utils/constants';
 import { StepIndicator } from '../components/StepIndicator';
 
-const AGENT_FUNDING_LAMPORTS = Math.floor(0.05 * LAMPORTS_PER_SOL);
+// Agent only needs heartbeat fees now — execution is permissionless and nothing
+// refunds the agent on autonomous execution (D7).
+const AGENT_FUNDING_LAMPORTS = Math.floor(0.01 * LAMPORTS_PER_SOL);
 
 export function EstateReviewScreen() {
   const navigation = useNavigation<any>();
@@ -69,14 +71,13 @@ export function EstateReviewScreen() {
       const onChainBeneficiaries = beneficiaries.map((b) => ({
         wallet: new PublicKey(b.wallet.toBase58()),
         shareBps: b.shareBps,
-        hasSpecificAssets: b.hasSpecificAssets,
       }));
 
-      // Pre-flight balance check — need enough for vault init rent (~0.015) + agent funding (~0.05)
+      // Pre-flight balance check — need enough for vault init rent (~0.015) + agent funding (~0.01)
       const ownerBalance = await connection.getBalance(publicKey);
-      const MIN_BALANCE = 0.07 * LAMPORTS_PER_SOL;
+      const MIN_BALANCE = 0.03 * LAMPORTS_PER_SOL;
       if (ownerBalance < MIN_BALANCE) {
-        Alert.alert('Insufficient Balance', `You need at least 0.07 SOL to activate the vault (0.015 rent + 0.05 agent funding).\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+        Alert.alert('Insufficient Balance', `You need at least 0.03 SOL to activate the vault (0.015 rent + 0.01 agent funding).\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
         setIsRegistering(false);
         return;
       }
@@ -294,7 +295,7 @@ export function EstateReviewScreen() {
           <DetailRow label="Network" value="Devnet" />
           <DetailRow label="Program" value={truncateAddress(PROGRAM_ID, 4)} mono />
           <DetailRow label="Vault Rent" value="~0.015 SOL" />
-          <DetailRow label="Agent Funding" value="~0.05 SOL" />
+          <DetailRow label="Agent Funding" value="~0.01 SOL" />
           <DetailRow label="Total Est. Cost" value="~0.065 SOL" />
           <DetailRow label="Distribution" value="Per-beneficiary on-chain" />
         </View>

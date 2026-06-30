@@ -1,43 +1,62 @@
-import { PublicKey } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
+import { PublicKey, Keypair } from '@solana/web3.js';
 import { KeyManager } from '../tee/KeyManager';
 import { NotificationService } from '../notifications/NotificationService';
 import { VaultTransactionService } from './VaultTransactionService';
 import {
   saveExecutionStep,
-  getLastCompletedStep,
   updateStepStatus,
-  clearDistributableSnapshot,
-  saveDistributableSnapshot,
-  getDistributableSnapshot,
-  saveTokenSnapshot,
-  getTokenSnapshot,
-  clearTokenSnapshot,
   clearExecutionSteps,
-  TokenSnapshotEntry,
+  clearDistributableSnapshot,
+  clearTokenSnapshot,
+  getLastCompletedStep,
 } from '../db/executionRepo';
 import { ExecutionStep, ExecutionStepType } from '../types/execution';
 import { Beneficiary } from '../types/vault';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { useVaultStore } from '../store/useVaultStore';
 
-// Module-level guard prevents concurrent execution across multiple instances
+// Module-level guard prevents concurrent execution across multiple instances.
 let globalExecutionInProgress = false;
 
+const MAX_BATCH = 8; // payouts per tx (CU / 1232-byte tx-size headroom)
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/** Full u32 beneficiary mask for `n` beneficiaries (n <= 20 in practice). */
+function fullU32Mask(n: number): number {
+  return n >= 32 ? 0xffffffff : (((1 << n) - 1) >>> 0);
+}
+
+/** Full u64 assignment mask for `n` assignments. */
+function fullU64Mask(n: number): bigint {
+  return n >= 64 ? (2n ** 64n - 1n) : ((1n << BigInt(n)) - 1n);
+}
+
+/**
+ * Drives the on-chain permissionless execution crank. Idempotent and resumable:
+ * every payout is gated by an on-chain bitmask, so re-running after a crash or
+ * partial completion simply continues from where the masks left off. The local
+ * SQLite step list is a progress MIRROR for the UI — the masks are the source
+ * of truth. The agent key pays fees (app-driven); the same instructions are
+ * permissionless, so the notify-server / any keeper can crank too.
+ *
+ * The final core-PDA close is owner-signed (close_executed_vault_by_owner, B2)
+ * and is NOT performed here.
+ */
 export class ExecutionService {
   private ownerPubkey: PublicKey;
   private beneficiaries: Beneficiary[];
   private txService: VaultTransactionService;
   private keyManager: KeyManager;
 
-  private totalSolDistributed: BN = new BN(0);
-  private tokenTypesDistributed: number = 0;
-  private vaultTokens: TokenSnapshotEntry[] = [];
+  private completedDistributions = 0;
+  private totalDistributions = 0;
 
-  constructor(
-    ownerPubkey: PublicKey,
-    beneficiaries: Beneficiary[],
-  ) {
+  constructor(ownerPubkey: PublicKey, beneficiaries: Beneficiary[]) {
     this.ownerPubkey = ownerPubkey;
     this.beneficiaries = beneficiaries;
     this.txService = new VaultTransactionService();
@@ -48,168 +67,238 @@ export class ExecutionService {
     if (globalExecutionInProgress) return;
     globalExecutionInProgress = true;
 
+    const owner = this.ownerPubkey;
+    const ownerWallet = owner.toString();
+
     try {
-      // Wait for the on-chain grace period to fully elapse before attempting execution.
-      // The client-side escalation may fire Stage 4 slightly before the on-chain deadline
-      // due to clock drift or TX confirmation delays on heartbeat recording.
+      // The client escalation may reach Stage 4 slightly before the on-chain
+      // deadline (clock drift / heartbeat-confirmation lag) — wait it out.
       await this.waitForOnChainDeadline();
 
-      const ownerWallet = this.ownerPubkey.toString();
+      const config = await this.txService.fetchVaultConfig(owner);
+      if (!config) return;
 
-      // Guard against stale execution data from a previous vault:
-      // If the on-chain vault is not yet executed but we have completed steps
-      // from a prior run, clear them to start fresh.
-      const resumeAfter = await getLastCompletedStep(ownerWallet);
-      if (resumeAfter >= 0) {
-        const vaultConfig = await this.txService.fetchVaultConfig(this.ownerPubkey);
-        if (vaultConfig && !vaultConfig.executed) {
-          await clearExecutionSteps(ownerWallet);
-          await clearDistributableSnapshot(ownerWallet);
-          await clearTokenSnapshot(ownerWallet);
-        }
-      }
-      const resumePoint = await getLastCompletedStep(ownerWallet);
-
-      // Scan vault PDA's token balances (or recover from snapshot)
-      let tokenSnapshot = await getTokenSnapshot(ownerWallet);
-      if (!tokenSnapshot) {
-        const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
-        const vaultTokens = await this.txService.getVaultTokenBalances(vaultPda);
-        tokenSnapshot = vaultTokens.map((t) => ({
-          mint: t.mint.toString(),
-          amount: t.amount,
-          decimals: t.decimals,
-          symbol: '',
-        }));
-        if (tokenSnapshot.length > 0) {
-          await saveTokenSnapshot(tokenSnapshot, ownerWallet);
-        }
-      }
-      this.vaultTokens = tokenSnapshot;
-
-      const steps = this.buildExecutionPlan();
-
-      // Save all steps to SQLite
-      for (const step of steps) {
-        if (step.order > resumePoint) {
-          await saveExecutionStep(step, ownerWallet);
-        }
+      // Fresh-run guard: if a prior run left steps but this vault isn't executed
+      // yet, clear the stale mirror so the UI reflects this run.
+      const last = await getLastCompletedStep(ownerWallet);
+      if (last >= 0 && !config.executed) {
+        await clearExecutionSteps(ownerWallet);
+        await clearDistributableSnapshot(ownerWallet);
+        await clearTokenSnapshot(ownerWallet);
       }
 
-      // Reconstitute totalSolDistributed from already-completed distribute_sol steps
-      // so crash recovery doesn't reset the running total to zero
-      this.totalSolDistributed = new BN(0);
-      const snapshot = await getDistributableSnapshot(ownerWallet);
-      if (snapshot !== null) {
-        for (const step of steps) {
-          if (step.order <= resumePoint && step.type === 'distribute_sol' && step.metadata?.shareBps) {
-            const amount = Math.floor(snapshot * (step.metadata.shareBps as number) / 10000);
-            this.totalSolDistributed = this.totalSolDistributed.add(new BN(amount));
-          }
-        }
-      }
-
-      // Track failures to protect agent key for recovery
-      let hasDistributionFailure = false;
-      let recordExecutionSucceeded = false;
-      let closeVaultSucceeded = false;
-
-      // Count distribution steps for progress notifications
-      const distributionSteps = steps.filter(
-        (s) => s.type === 'distribute_sol' || s.type === 'distribute_token',
+      const agent = await this.keyManager.getKeypair();
+      const hasAssetPlan = !!config.hasAssetPlan;
+      const onChainBenefs: { wallet: PublicKey; shareBps: number }[] = config.beneficiaries.map(
+        (b: any) => ({ wallet: new PublicKey(b.wallet), shareBps: b.shareBps }),
       );
-      const totalDistributionSteps = distributionSteps.length;
-      let completedDistributionSteps = 0;
+      const benefWallets = onChainBenefs.map((b) => b.wallet);
+      const n = benefWallets.length;
+      const fullSol = fullU32Mask(n);
+      const largestBenef = VaultTransactionService.largestShareWallet(onChainBenefs);
 
-      // Execute sequentially, skip completed and pre-skipped steps
-      for (const step of steps) {
-        if (step.order <= resumePoint) continue;
-        const scopedId = `${ownerWallet}_${step.id}`;
-        if (step.status === 'skipped') {
-          continue;
+      // 1. begin_execution (idempotent — account already existing == done).
+      let execLog = await this.txService.fetchExecutionLog(owner);
+      if (!execLog) {
+        await this.txService.crankBeginExecution(agent, owner);
+        execLog = await this.txService.fetchExecutionLog(owner);
+      }
+
+      // 2. Enumerate mints = vault token balances ∪ assignment mints.
+      const [vaultPda] = this.txService.getVaultPDA(owner);
+      const tokenBalances = await this.txService.getVaultTokenBalances(vaultPda);
+      const mintMap = new Map<string, PublicKey>();
+      for (const t of tokenBalances) mintMap.set(t.mint.toString(), t.mint);
+      let assetPlan = hasAssetPlan ? await this.txService.fetchAssetPlan(owner) : null;
+      if (assetPlan) {
+        for (const a of assetPlan.assignments) mintMap.set(a.mint.toString(), a.mint);
+      }
+      const mints = [...mintMap.values()];
+
+      // Build the progress mirror once we know the plan shape.
+      await this.buildMirror(ownerWallet, assetPlan, n, mints);
+
+      // 3. begin_token_dist per mint (idempotent).
+      for (const mint of mints) {
+        const td = await this.txService.fetchTokenDist(owner, mint);
+        if (!td) {
+          await this.txService.crankBeginTokenDist(agent, owner, mint, hasAssetPlan);
         }
+      }
 
-        // If a distribution failed, skip record_execution, close_executed_vault, refund, and self_terminate
-        // to preserve the agent key for manual recovery
-        if (hasDistributionFailure && (step.type === 'record_execution_log' || step.type === 'close_executed_vault' || step.type === 'refund_agent_sol' || step.type === 'self_terminate')) {
-          await updateStepStatus(scopedId, 'failed', undefined,
-            'Skipped: prior distribution step failed. Agent key preserved for recovery.');
-          continue;
-        }
-
-        // Defense in depth: never close vault, refund, or destroy agent key unless record_execution succeeded
-        if ((step.type === 'close_executed_vault' || step.type === 'refund_agent_sol' || step.type === 'self_terminate') && !recordExecutionSucceeded) {
-          await updateStepStatus(scopedId, 'failed', undefined,
-            'Skipped: record_execution did not succeed. Agent key preserved for recovery.');
-          continue;
-        }
-
-        // Never refund or destroy agent key unless close_executed_vault succeeded
-        if ((step.type === 'refund_agent_sol' || step.type === 'self_terminate') && !closeVaultSucceeded) {
-          await updateStepStatus(scopedId, 'failed', undefined,
-            'Skipped: close_executed_vault did not succeed. Agent key preserved for retry.');
-          continue;
-        }
-
-        await updateStepStatus(scopedId, 'in_progress');
-
-        try {
-          const txSig = await this.executeStep(step);
-          await updateStepStatus(scopedId, 'completed', txSig);
-
-          // Distribution progress notification
-          if (step.type === 'distribute_sol' || step.type === 'distribute_token') {
-            completedDistributionSteps++;
-            try {
-              NotificationService.sendDistributionProgress(
-                completedDistributionSteps,
-                totalDistributionSteps,
-                step.description,
-              );
-            } catch {}
-          }
-
-          if (step.type === 'record_execution_log') {
-            recordExecutionSucceeded = true;
-            useEscalationStore.getState().reset();
-
-            // Execution complete summary notification
-            try {
-              const totalSolDisplay = (this.totalSolDistributed.toNumber() / 1e9).toFixed(4);
-              NotificationService.sendExecutionComplete(
-                completedDistributionSteps,
-                totalSolDisplay,
-              );
-            } catch {}
-          }
-          if (step.type === 'close_executed_vault') {
-            closeVaultSucceeded = true;
-            useVaultStore.getState().markExecutionCompleted();
-          }
-        } catch (err: any) {
-          // Set failure flag BEFORE updateStepStatus to guarantee it's always set
-          // even if the DB write throws
-          if (step.type === 'distribute_sol' || step.type === 'distribute_token') {
-            hasDistributionFailure = true;
-            try { NotificationService.sendExecutionFailed(step.description); } catch {}
-          }
-          try {
-            await updateStepStatus(scopedId, 'failed', undefined, err.message);
-          } catch {
-            // DB write failed — hasDistributionFailure is already set above
+      // 4. Specific bequests in ascending assignment index (per-mint order is
+      //    enforced on-chain; the natural index order satisfies it).
+      if (assetPlan) {
+        assetPlan = await this.txService.fetchAssetPlan(owner);
+        if (assetPlan) {
+          for (let j = 0; j < assetPlan.assignments.length; j++) {
+            if ((assetPlan.paidMask & (1n << BigInt(j))) !== 0n) {
+              await this.markDone(ownerWallet, `spec_${j}`);
+              continue;
+            }
+            const a = assetPlan.assignments[j];
+            const benef = benefWallets[a.beneficiaryIndex];
+            await this.runStep(ownerWallet, `spec_${j}`, () =>
+              this.txService.crankExecuteSpecificAsset(agent, owner, a.mint, j, benef),
+            );
           }
         }
       }
+
+      // 5. SOL pro-rata for unpaid indices, batched.
+      execLog = await this.txService.fetchExecutionLog(owner);
+      const unpaidSol = this.unpaidIndices(execLog ? execLog.solPaidMask : 0, n);
+      for (const idxs of chunk(unpaidSol, MAX_BATCH)) {
+        await this.runBatch(ownerWallet, idxs.map((i) => `sol_${i}`), () =>
+          this.txService.crankExecuteSolShares(agent, owner, idxs, idxs.map((i) => benefWallets[i])),
+        );
+      }
+
+      // 6. Finalize when SOL mask full AND asset mask full.
+      execLog = await this.txService.fetchExecutionLog(owner);
+      const solDone = execLog ? (execLog.solPaidMask >>> 0) === fullSol : false;
+      let assetDone = true;
+      if (hasAssetPlan) {
+        const ap = await this.txService.fetchAssetPlan(owner);
+        assetDone = ap ? ap.paidMask === fullU64Mask(ap.assignments.length) : true;
+      }
+      if (execLog && !execLog.completed && solDone && assetDone) {
+        await this.runStep(ownerWallet, 'finalize', () =>
+          this.txService.crankFinalize(agent, owner, hasAssetPlan),
+        );
+      }
+
+      // 7. Token residual pro-rata per mint, batched (gated on grace only — runs
+      //    after finalize).
+      for (const mint of mints) {
+        const td = await this.txService.fetchTokenDist(owner, mint);
+        if (!td) continue;
+        const unpaid = this.unpaidIndices(td.paidMask, n);
+        for (const idxs of chunk(unpaid, MAX_BATCH)) {
+          await this.runBatch(ownerWallet, idxs.map((i) => `tok_${mint.toString()}_${i}`), () =>
+            this.txService.crankExecuteTokenShares(agent, owner, mint, idxs, idxs.map((i) => benefWallets[i])),
+          );
+        }
+      }
+
+      // 8. Close each TokenDist once its residual is fully paid (sweeps dust to
+      //    the largest-share beneficiary, closes the ATA + TokenDist).
+      for (const mint of mints) {
+        const td = await this.txService.fetchTokenDist(owner, mint);
+        if (!td) continue;
+        if ((td.paidMask >>> 0) === fullSol) {
+          await this.runStep(ownerWallet, `close_${mint.toString()}`, () =>
+            this.txService.crankCloseTokenDist(agent, owner, mint, largestBenef),
+          );
+        }
+      }
+
+      // 9. Done. Reset escalation + reflect in the store. Core PDAs are closed
+      //    later by the owner (B2).
+      const finalLog = await this.txService.fetchExecutionLog(owner);
+      if (finalLog?.completed) {
+        useEscalationStore.getState().reset();
+        useVaultStore.getState().markExecutionCompleted();
+        try {
+          const solDisplay = (Number(finalLog.solSnapshot.toString()) / 1e9).toFixed(4);
+          NotificationService.sendExecutionComplete(this.completedDistributions, solDisplay);
+        } catch {}
+      }
+    } catch (err: any) {
+      // Resumable by design — the next Stage-4 evaluation re-enters and continues
+      // from the on-chain masks. Surface a failure notification for visibility.
+      try { NotificationService.sendExecutionFailed(err?.message ?? 'execution step failed'); } catch {}
     } finally {
       globalExecutionInProgress = false;
     }
   }
 
-  /**
-   * Poll the on-chain deadline until it has passed, with a small buffer.
-   * Uses the Solana cluster clock (via getBlockTime) as the reference,
-   * not the local device clock, to match what the program sees.
-   */
+  // ─── crank helpers ───
+
+  private unpaidIndices(mask: number, n: number): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (((mask >>> i) & 1) === 0) out.push(i);
+    }
+    return out;
+  }
+
+  private async runStep(ownerWallet: string, id: string, fn: () => Promise<string>): Promise<void> {
+    const scoped = `${ownerWallet}_${id}`;
+    try { await updateStepStatus(scoped, 'in_progress'); } catch {}
+    const sig = await fn();
+    try { await updateStepStatus(scoped, 'completed', sig); } catch {}
+    this.bumpProgress(id);
+  }
+
+  private async runBatch(ownerWallet: string, ids: string[], fn: () => Promise<string>): Promise<void> {
+    for (const id of ids) {
+      try { await updateStepStatus(`${ownerWallet}_${id}`, 'in_progress'); } catch {}
+    }
+    const sig = await fn();
+    for (const id of ids) {
+      try { await updateStepStatus(`${ownerWallet}_${id}`, 'completed', sig); } catch {}
+      this.bumpProgress(id);
+    }
+  }
+
+  private async markDone(ownerWallet: string, id: string): Promise<void> {
+    try { await updateStepStatus(`${ownerWallet}_${id}`, 'completed'); } catch {}
+    this.bumpProgress(id);
+  }
+
+  private bumpProgress(id: string): void {
+    if (id === 'finalize' || id.startsWith('close_')) return;
+    this.completedDistributions++;
+    try {
+      NotificationService.sendDistributionProgress(
+        Math.min(this.completedDistributions, this.totalDistributions),
+        this.totalDistributions,
+        id,
+      );
+    } catch {}
+  }
+
+  /** Materialize the SQLite step mirror for the UI (best-effort). */
+  private async buildMirror(
+    ownerWallet: string,
+    assetPlan: { assignments: { mint: PublicKey }[] } | null,
+    n: number,
+    mints: PublicKey[],
+  ): Promise<void> {
+    let order = 0;
+    const steps: ExecutionStep[] = [];
+    const add = (id: string, type: ExecutionStepType, description: string) => {
+      steps.push({ id, type, status: 'pending', description, order: order++ });
+    };
+
+    if (assetPlan) {
+      assetPlan.assignments.forEach((a, j) =>
+        add(`spec_${j}`, 'distribute_specific_asset', `Bequest #${j + 1} (${a.mint.toString().slice(0, 6)}…)`),
+      );
+    }
+    for (let i = 0; i < n; i++) {
+      add(`sol_${i}`, 'distribute_sol', `Distribute SOL share to beneficiary ${i + 1}`);
+    }
+    for (const mint of mints) {
+      for (let i = 0; i < n; i++) {
+        add(`tok_${mint.toString()}_${i}`, 'distribute_token', `Distribute ${mint.toString().slice(0, 6)}… to beneficiary ${i + 1}`);
+      }
+    }
+    add('finalize', 'record_execution_log', 'Finalize execution on-chain');
+    for (const mint of mints) {
+      add(`close_${mint.toString()}`, 'close_accounts', `Close ${mint.toString().slice(0, 6)}… distribution`);
+    }
+
+    this.totalDistributions = steps.filter(
+      (s) => s.type === 'distribute_sol' || s.type === 'distribute_token' || s.type === 'distribute_specific_asset',
+    ).length;
+
+    try {
+      for (const step of steps) await saveExecutionStep(step, ownerWallet);
+    } catch {}
+  }
+
   private async waitForOnChainDeadline(): Promise<void> {
     const MAX_WAIT_MS = 120_000;
     const POLL_INTERVAL_MS = 5_000;
@@ -218,234 +307,12 @@ export class ExecutionService {
 
     while (Date.now() - start < MAX_WAIT_MS) {
       const deadline = await this.txService.getOnChainDeadline(this.ownerPubkey);
-      if (deadline === null) return; // Can't read accounts — proceed anyway
-
-      // Use cluster clock: get latest slot's block time
+      if (deadline === null) return;
       const slot = await this.txService.getConnection().getSlot('confirmed');
       const blockTime = await this.txService.getConnection().getBlockTime(slot);
-      if (blockTime === null) return; // Can't get cluster time — proceed anyway
-
-      if (blockTime > deadline + BUFFER_SECONDS) {
-        return; // On-chain deadline has passed — safe to execute
-      }
-
+      if (blockTime === null) return;
+      if (blockTime > deadline + BUFFER_SECONDS) return;
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
-    // Max wait exceeded — proceed anyway (execution will fail on-chain if too early,
-    // and the failure guards will preserve the agent key)
-  }
-
-  private buildExecutionPlan(): ExecutionStep[] {
-    const steps: ExecutionStep[] = [];
-    let order = 0;
-
-    // DeFi closure and specific-asset distribution are future features.
-    // The vault PDA only holds deposited SOL + SPL tokens — distribute those.
-
-    // Distribute SOL from vault PDA to each beneficiary
-    for (const b of this.beneficiaries) {
-      const label = b.label || b.wallet.toString().slice(0, 8);
-      steps.push(
-        this.makeStep(
-          order++,
-          'distribute_sol',
-          `Distribute ${(b.shareBps / 100).toFixed(1)}% SOL to ${label}`,
-          'pending',
-          { beneficiaryWallet: b.wallet.toString(), shareBps: b.shareBps },
-        ),
-      );
-    }
-
-    // Distribute SPL tokens from vault PDA's ATAs to each beneficiary
-    for (const token of this.vaultTokens) {
-      for (const b of this.beneficiaries) {
-        const label = b.label || b.wallet.toString().slice(0, 8);
-        const tokenLabel = token.symbol || token.mint.slice(0, 6);
-        const shareAmount = Math.floor(token.amount * b.shareBps / 10000);
-        if (shareAmount <= 0) continue;
-
-        steps.push(
-          this.makeStep(
-            order++,
-            'distribute_token',
-            `Distribute ${(b.shareBps / 100).toFixed(1)}% ${tokenLabel} to ${label}`,
-            'pending',
-            {
-              beneficiaryWallet: b.wallet.toString(),
-              shareBps: b.shareBps,
-              mint: token.mint,
-              amount: shareAmount,
-              decimals: token.decimals,
-              symbol: token.symbol,
-            },
-          ),
-        );
-      }
-    }
-
-    // Record execution log on-chain
-    steps.push(this.makeStep(order++, 'record_execution_log', 'Record execution on-chain', 'pending'));
-
-    // Close executed vault PDAs (return rent to owner)
-    steps.push(this.makeStep(order++, 'close_executed_vault', 'Close vault PDAs, return rent', 'pending'));
-
-    // Refund remaining agent SOL back to owner
-    steps.push(this.makeStep(order++, 'refund_agent_sol', 'Refund agent SOL to owner', 'pending'));
-
-    // Self-terminate agent key
-    steps.push(this.makeStep(order++, 'self_terminate', 'Destroy agent key', 'pending'));
-
-    return steps;
-  }
-
-  private makeStep(
-    order: number,
-    type: ExecutionStepType,
-    description: string,
-    status: 'pending' | 'skipped',
-    metadata?: Record<string, unknown>,
-  ): ExecutionStep {
-    return {
-      id: `exec_${type}_${order}`,
-      type,
-      status,
-      description,
-      order,
-      metadata,
-    };
-  }
-
-  private async executeStep(step: ExecutionStep): Promise<string | undefined> {
-    switch (step.type) {
-      case 'revoke_approvals':
-      case 'distribute_specific_asset':
-      case 'burn_asset':
-      case 'close_accounts':
-      case 'close_defi_position':
-        return undefined;
-
-      case 'distribute_sol':
-        return this.executeDistributeSol(step);
-
-      case 'distribute_token':
-        return this.executeDistributeToken(step);
-
-      case 'record_execution_log':
-        return this.executeRecordExecution();
-
-      case 'close_executed_vault':
-        return this.executeCloseExecutedVault();
-
-      case 'refund_agent_sol':
-        return this.executeRefundAgentSol();
-
-      case 'self_terminate':
-        await this.executeSelfTerminate();
-        return undefined;
-
-      default:
-        return undefined;
-    }
-  }
-
-  /**
-   * Distribute SOL from vault PDA to a single beneficiary.
-   * Uses a snapshot of the vault balance (taken on first distribution step)
-   * to ensure consistent amounts across crash recovery.
-   */
-  private async executeDistributeSol(step: ExecutionStep): Promise<string | undefined> {
-    const agentKeypair = await this.keyManager.getKeypair();
-    const connection = this.txService.getConnection();
-    const [vaultPda] = this.txService.getVaultPDA(this.ownerPubkey);
-
-    // Get or create distributable snapshot for consistent amounts
-    const ownerWallet = this.ownerPubkey.toString();
-    let distributable = await getDistributableSnapshot(ownerWallet);
-    if (distributable === null) {
-      const vaultBalance = await connection.getBalance(vaultPda);
-      const vaultAccountInfo = await connection.getAccountInfo(vaultPda);
-      const dataLen = vaultAccountInfo?.data.length ?? 800;
-      const rent = await connection.getMinimumBalanceForRentExemption(dataLen);
-      distributable = Math.max(0, vaultBalance - rent);
-      await saveDistributableSnapshot(distributable, ownerWallet);
-    }
-
-    // No SOL deposited — skip gracefully (vault may only have SPL tokens)
-    if (distributable <= 0) {
-      return undefined;
-    }
-
-    const beneficiaryWallet = new PublicKey(step.metadata?.beneficiaryWallet as string);
-    const shareBps = step.metadata?.shareBps as number;
-    const amountLamports = Math.floor(distributable * shareBps / 10000);
-
-    if (amountLamports <= 0) {
-      return undefined;
-    }
-
-    const sig = await this.txService.executeDistribution(
-      agentKeypair,
-      this.ownerPubkey,
-      beneficiaryWallet,
-      new BN(amountLamports),
-    );
-
-    this.totalSolDistributed = this.totalSolDistributed.add(new BN(amountLamports));
-    return sig;
-  }
-
-  private async executeDistributeToken(step: ExecutionStep): Promise<string> {
-    const agentKeypair = await this.keyManager.getKeypair();
-    const beneficiaryWallet = new PublicKey(step.metadata?.beneficiaryWallet as string);
-    const mint = new PublicKey(step.metadata?.mint as string);
-    const amount = new BN(step.metadata?.amount as number);
-
-    const sig = await this.txService.executeSplDistribution(
-      agentKeypair,
-      this.ownerPubkey,
-      beneficiaryWallet,
-      mint,
-      amount,
-    );
-
-    this.tokenTypesDistributed++;
-    return sig;
-  }
-
-  private async executeRecordExecution(): Promise<string> {
-    const agentKeypair = await this.keyManager.getKeypair();
-
-    const attestationHash = new Array(32).fill(0);
-    const uniqueTokenCount = new Set(this.vaultTokens.map((t) => t.mint)).size;
-    const solTransfers = this.beneficiaries.length;
-    const tokenTransfers = this.vaultTokens.length > 0
-      ? this.beneficiaries.length * uniqueTokenCount
-      : 0;
-
-    return this.txService.recordExecution(agentKeypair, this.ownerPubkey, {
-      transferCount: solTransfers + tokenTransfers,
-      totalSolDistributed: this.totalSolDistributed,
-      tokenTypesDistributed: uniqueTokenCount,
-      attestationHash,
-      completed: true,
-    });
-  }
-
-  private async executeCloseExecutedVault(): Promise<string> {
-    const agentKeypair = await this.keyManager.getKeypair();
-    return this.txService.closeExecutedVault(agentKeypair, this.ownerPubkey);
-  }
-
-  private async executeRefundAgentSol(): Promise<string | undefined> {
-    const agentKeypair = await this.keyManager.getKeypair();
-    const sig = await this.txService.refundAgentSol(agentKeypair, this.ownerPubkey);
-    return sig ?? undefined;
-  }
-
-  private async executeSelfTerminate(): Promise<void> {
-    const ownerWallet = this.ownerPubkey.toString();
-    await clearDistributableSnapshot(ownerWallet);
-    await clearTokenSnapshot(ownerWallet);
-    await this.keyManager.destroyKey();
   }
 }

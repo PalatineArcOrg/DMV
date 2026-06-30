@@ -14,38 +14,25 @@ export type DeadMansVault = {
   },
   "instructions": [
     {
-      "name": "closeExecutedVault",
+      "name": "beginExecution",
       "discriminator": [
-        194,
-        143,
-        104,
-        253,
-        159,
-        57,
-        16,
-        130
+        148,
+        246,
+        18,
+        188,
+        252,
+        93,
+        187,
+        14
       ],
       "accounts": [
         {
-          "name": "agent",
-          "docs": [
-            "Agent signer — must match vault's registered agent"
-          ],
+          "name": "payer",
+          "writable": true,
           "signer": true
         },
         {
-          "name": "owner",
-          "docs": [
-            "Owner wallet — receives rent refund (does not need to sign)"
-          ],
-          "writable": true,
-          "relations": [
-            "vaultConfig"
-          ]
-        },
-        {
           "name": "vaultConfig",
-          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -60,14 +47,14 @@ export type DeadMansVault = {
               },
               {
                 "kind": "account",
-                "path": "owner"
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
               }
             ]
           }
         },
         {
           "name": "heartbeatRecord",
-          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -116,6 +103,153 @@ export type DeadMansVault = {
               }
             ]
           }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "beginTokenDist",
+      "discriminator": [
+        167,
+        52,
+        216,
+        51,
+        38,
+        109,
+        214,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executionLog",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vaultAta",
+          "docs": [
+            "The vault's canonical associated token account for `mint`. May not exist."
+          ]
+        },
+        {
+          "name": "assetPlan",
+          "docs": [
+            "Required iff `vault_config.has_asset_plan` (P1)."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenDist",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  100,
+                  105,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -214,6 +348,46 @@ export type DeadMansVault = {
               }
             ]
           }
+        },
+        {
+          "name": "assetPlan",
+          "docs": [
+            "Present iff `vault_config.has_asset_plan`. Closed manually (rent → owner)",
+            "so the PDA slot frees for a future re-init on the same wallet."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "largestBenef",
+          "docs": [
+            "Required only when SOL dust remains to be swept."
+          ],
+          "writable": true,
+          "optional": true
         }
       ],
       "args": []
@@ -291,63 +465,33 @@ export type DeadMansVault = {
       "args": []
     },
     {
-      "name": "closeVaultAta",
+      "name": "closeTokenDist",
       "discriminator": [
-        148,
-        47,
-        170,
-        34,
-        91,
-        173,
-        95,
-        46
+        195,
+        78,
+        81,
+        239,
+        193,
+        38,
+        13,
+        139
       ],
       "accounts": [
         {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
           "name": "owner",
           "docs": [
-            "Owner signs and receives the reclaimed ATA rent"
-          ],
-          "writable": true,
-          "signer": true,
-          "relations": [
-            "vaultConfig"
-          ]
-        },
-        {
-          "name": "vaultConfig",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "owner"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vaultTokenAccount",
-          "docs": [
-            "Vault PDA's token account to close — must be owned by the vault PDA"
+            "Owner receives the ATA rent on close."
           ],
           "writable": true
         },
         {
-          "name": "vaultAuthority",
-          "docs": [
-            "Vault PDA as the close authority.",
-            "constraint. No data deserialization needed — only PDA signature."
-          ],
+          "name": "vaultConfig",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -362,36 +506,80 @@ export type DeadMansVault = {
               },
               {
                 "kind": "account",
-                "path": "owner"
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
               }
             ]
           }
         },
         {
-          "name": "tokenProgram",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          "name": "mint"
+        },
+        {
+          "name": "vaultAta",
+          "writable": true
+        },
+        {
+          "name": "tokenDist",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  100,
+                  105,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "largestBenefAta",
+          "docs": [
+            "Required only when there is dust to sweep (vault_ata.amount > 0)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "tokenProgram"
         }
       ],
       "args": []
     },
     {
-      "name": "executeDistribution",
+      "name": "executeSolShares",
       "discriminator": [
-        163,
-        217,
-        35,
-        57,
-        238,
-        179,
-        71,
-        204
+        20,
+        134,
+        130,
+        46,
+        12,
+        18,
+        250,
+        239
       ],
       "accounts": [
         {
-          "name": "agent",
-          "docs": [
-            "Agent signs — must match vault_config.agent_pubkey"
-          ],
+          "name": "payer",
+          "writable": true,
           "signer": true
         },
         {
@@ -418,21 +606,22 @@ export type DeadMansVault = {
           }
         },
         {
-          "name": "heartbeatRecord",
+          "name": "executionLog",
+          "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  104,
                   101,
-                  97,
-                  114,
+                  120,
+                  101,
+                  99,
+                  117,
                   116,
-                  98,
-                  101,
-                  97,
-                  116
+                  105,
+                  111,
+                  110
                 ]
               },
               {
@@ -441,95 +630,271 @@ export type DeadMansVault = {
               }
             ]
           }
-        },
-        {
-          "name": "sourceTokenAccount",
-          "docs": [
-            "Owner's token account to transfer FROM"
-          ],
-          "writable": true
-        },
-        {
-          "name": "destinationTokenAccount",
-          "docs": [
-            "Beneficiary's token account to transfer TO"
-          ],
-          "writable": true
-        },
-        {
-          "name": "vaultAuthority",
-          "docs": [
-            "Vault PDA as delegate authority",
-            "Verified by seeds + bump constraint. Used as signing authority for",
-            "token transfers. No data deserialization needed — only PDA signature."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault_config.owner",
-                "account": "vaultConfig"
-              }
-            ]
-          }
-        },
-        {
-          "name": "tokenProgram",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": [
         {
-          "name": "amount",
-          "type": "u64"
-        },
-        {
-          "name": "attestationHash",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
+          "name": "indices",
+          "type": "bytes"
         }
       ]
     },
     {
-      "name": "executeSolDistribution",
+      "name": "executeSpecificAsset",
       "discriminator": [
+        233,
+        66,
+        213,
+        215,
         245,
-        140,
-        217,
-        121,
-        172,
-        75,
-        190,
-        230
+        87,
+        36,
+        236
       ],
       "accounts": [
         {
-          "name": "agent",
-          "docs": [
-            "Agent signs — must match vault_config.agent_pubkey"
-          ],
+          "name": "payer",
+          "writable": true,
           "signer": true
         },
         {
           "name": "vaultConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executionLog",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "assetPlan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "tokenDist",
           "docs": [
-            "The vault PDA holds both config data AND deposited SOL.",
-            "Lamports above rent-exemption are available for distribution."
+            "Must already exist — its presence gates execution order (§2)."
           ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  100,
+                  105,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultAta",
+          "writable": true
+        },
+        {
+          "name": "beneficiaryAta",
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "assignmentIndex",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "executeTokenShares",
+      "discriminator": [
+        106,
+        134,
+        145,
+        19,
+        240,
+        253,
+        121,
+        235
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenDist",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  100,
+                  105,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vaultAta",
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "indices",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "finalizeExecution",
+      "discriminator": [
+        204,
+        146,
+        126,
+        8,
+        192,
+        189,
+        127,
+        166
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultConfig",
           "writable": true,
           "pda": {
             "seeds": [
@@ -552,21 +917,22 @@ export type DeadMansVault = {
           }
         },
         {
-          "name": "heartbeatRecord",
+          "name": "executionLog",
+          "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  104,
                   101,
-                  97,
-                  114,
+                  120,
+                  101,
+                  99,
+                  117,
                   116,
-                  98,
-                  101,
-                  97,
-                  116
+                  105,
+                  111,
+                  110
                 ]
               },
               {
@@ -577,19 +943,37 @@ export type DeadMansVault = {
           }
         },
         {
-          "name": "beneficiary",
+          "name": "assetPlan",
           "docs": [
-            "Beneficiary wallet to receive SOL — must be in vault whitelist."
+            "Required iff `vault_config.has_asset_plan` (P11 — omitted otherwise)."
           ],
-          "writable": true
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
         }
       ],
-      "args": [
-        {
-          "name": "amount",
-          "type": "u64"
-        }
-      ]
+      "args": []
     },
     {
       "name": "initializeVault",
@@ -668,118 +1052,6 @@ export type DeadMansVault = {
           "type": {
             "defined": {
               "name": "initializeVaultParams"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "recordExecution",
-      "discriminator": [
-        231,
-        245,
-        144,
-        129,
-        178,
-        195,
-        89,
-        160
-      ],
-      "accounts": [
-        {
-          "name": "agent",
-          "signer": true
-        },
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "vaultConfig",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vault_config.owner",
-                "account": "vaultConfig"
-              }
-            ]
-          }
-        },
-        {
-          "name": "heartbeatRecord",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  104,
-                  101,
-                  97,
-                  114,
-                  116,
-                  98,
-                  101,
-                  97,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vaultConfig"
-              }
-            ]
-          }
-        },
-        {
-          "name": "executionLog",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  120,
-                  101,
-                  99,
-                  117,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "vaultConfig"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "params",
-          "type": {
-            "defined": {
-              "name": "recordExecutionParams"
             }
           }
         }
@@ -917,6 +1189,38 @@ export type DeadMansVault = {
               }
             ]
           }
+        },
+        {
+          "name": "assetPlan",
+          "docs": [
+            "Present iff `vault_config.has_asset_plan`. Closed manually so its PDA slot",
+            "frees for re-initialization on the same wallet."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
         }
       ],
       "args": []
@@ -984,6 +1288,226 @@ export type DeadMansVault = {
       ]
     },
     {
+      "name": "setAssetPlan",
+      "discriminator": [
+        154,
+        174,
+        170,
+        203,
+        17,
+        18,
+        71,
+        138
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vaultConfig"
+          ]
+        },
+        {
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "assetPlan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "assignments",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "assetAssignment"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "updateAssetPlan",
+      "discriminator": [
+        219,
+        132,
+        15,
+        22,
+        230,
+        103,
+        217,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "vaultConfig"
+          ]
+        },
+        {
+          "name": "vaultConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "assetPlan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "assignments",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "assetAssignment"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "updateVault",
       "discriminator": [
         67,
@@ -1005,7 +1529,50 @@ export type DeadMansVault = {
         },
         {
           "name": "vaultConfig",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -1060,6 +1627,31 @@ export type DeadMansVault = {
               {
                 "kind": "account",
                 "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
               }
             ]
           }
@@ -1164,6 +1756,31 @@ export type DeadMansVault = {
               }
             ]
           }
+        },
+        {
+          "name": "heartbeatRecord",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -1175,6 +1792,19 @@ export type DeadMansVault = {
     }
   ],
   "accounts": [
+    {
+      "name": "assetPlan",
+      "discriminator": [
+        178,
+        115,
+        162,
+        79,
+        78,
+        70,
+        195,
+        45
+      ]
+    },
     {
       "name": "executionLog",
       "discriminator": [
@@ -1199,6 +1829,19 @@ export type DeadMansVault = {
         52,
         106,
         203
+      ]
+    },
+    {
+      "name": "tokenDist",
+      "discriminator": [
+        250,
+        253,
+        174,
+        111,
+        42,
+        82,
+        178,
+        42
       ]
     },
     {
@@ -1310,9 +1953,184 @@ export type DeadMansVault = {
       "code": 6018,
       "name": "vaultNotExecuted",
       "msg": "Vault has not been executed yet"
+    },
+    {
+      "code": 6019,
+      "name": "graceNotElapsed",
+      "msg": "Grace period has not elapsed yet"
+    },
+    {
+      "code": 6020,
+      "name": "executionFinalized",
+      "msg": "Execution has already been finalized"
+    },
+    {
+      "code": 6021,
+      "name": "assetPlanRequired",
+      "msg": "This vault requires an AssetPlan account"
+    },
+    {
+      "code": 6022,
+      "name": "assetPlanImmutable",
+      "msg": "AssetPlan cannot be changed after grace has elapsed or execution has begun"
+    },
+    {
+      "code": 6023,
+      "name": "beneficiaryMismatch",
+      "msg": "Provided account does not match the beneficiary at this index"
+    },
+    {
+      "code": 6024,
+      "name": "mintMismatch",
+      "msg": "Provided mint does not match the assignment or distribution"
+    },
+    {
+      "code": 6025,
+      "name": "tokenAccountMismatch",
+      "msg": "Token account owner or mint does not match the expected value"
+    },
+    {
+      "code": 6026,
+      "name": "specificOutOfOrder",
+      "msg": "Specific bequests for a mint must be paid in ascending index order"
+    },
+    {
+      "code": 6027,
+      "name": "maskAlreadySet",
+      "msg": "This payout has already been recorded"
+    },
+    {
+      "code": 6028,
+      "name": "notAllSharesPaid",
+      "msg": "Not all beneficiary shares have been paid yet"
+    },
+    {
+      "code": 6029,
+      "name": "tokensRemain",
+      "msg": "Tokens remain in the vault — close all token distributions first"
+    },
+    {
+      "code": 6030,
+      "name": "tooManyAssignments",
+      "msg": "Too many specific-bequest assignments (max 64)"
+    },
+    {
+      "code": 6031,
+      "name": "duplicateNftAssignment",
+      "msg": "An NFT mint can have at most one assignment"
+    },
+    {
+      "code": 6032,
+      "name": "invalidBeneficiaryIndex",
+      "msg": "Beneficiary index is out of range"
+    },
+    {
+      "code": 6033,
+      "name": "accountCountMismatch",
+      "msg": "Account count does not match the provided indices"
+    },
+    {
+      "code": 6034,
+      "name": "invalidVaultAta",
+      "msg": "Vault PDA address does not match the derived associated token account"
+    },
+    {
+      "code": 6035,
+      "name": "vaultFrozen",
+      "msg": "Grace period has elapsed — the vault is frozen pending execution"
+    },
+    {
+      "code": 6036,
+      "name": "beneficiariesLockedByPlan",
+      "msg": "Beneficiaries cannot be changed while an AssetPlan exists — clear the plan first"
     }
   ],
   "types": [
+    {
+      "name": "assetAssignment",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "Mint of the bequeathed asset (SPL/NFT only in v1)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Exact base units to transfer; 1 for an NFT"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "beneficiaryIndex",
+            "docs": [
+              "Index into VaultConfig.beneficiaries"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "isNft",
+            "docs": [
+              "Whether this assignment is a whole NFT (decimals 0, supply 1).",
+              "NFT shape is validated client-side (B4) — this flag enforces the",
+              "\"at most one assignment per NFT mint\" rule on-chain."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "assetPlan",
+      "docs": [
+        "One per vault, fixed-size. Owner-defined specific bequests (SPL tokens + NFTs",
+        "only in v1). Created by `set_asset_plan` (strict `init` at full size), edited",
+        "by `update_asset_plan` (owner overwrite). Lives on the heap, not the stack."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "docs": [
+              "Associated vault config"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "assignments",
+            "docs": [
+              "Specific-bequest assignments (fixed cap MAX_ASSIGNMENTS)"
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "assetAssignment"
+                }
+              }
+            }
+          },
+          {
+            "name": "paidMask",
+            "docs": [
+              "Bit j set when assignment j has been executed"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "beneficiary",
       "type": {
@@ -1331,19 +2149,17 @@ export type DeadMansVault = {
               "Percentage share (basis points, 10000 = 100%)"
             ],
             "type": "u16"
-          },
-          {
-            "name": "hasSpecificAssets",
-            "docs": [
-              "Whether this beneficiary has specific asset assignments"
-            ],
-            "type": "bool"
           }
         ]
       }
     },
     {
       "name": "executionLog",
+      "docs": [
+        "Created by `begin_execution`. Its mere existence == \"execution has begun\"",
+        "(and proves grace was elapsed at that point — downstream permissionless",
+        "instructions gate on this account existing rather than re-checking grace)."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -1355,16 +2171,38 @@ export type DeadMansVault = {
             "type": "pubkey"
           },
           {
-            "name": "executedAt",
+            "name": "solSnapshot",
             "docs": [
-              "Timestamp of execution"
+              "Lamports residual (vault balance - rent) frozen at begin_execution.",
+              "SOL is always pure pro-rata (no specific-SOL bequests in v1)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "solPaidMask",
+            "docs": [
+              "Bit i set when beneficiary i has been paid their SOL share."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "startedAt",
+            "docs": [
+              "Timestamp execution began"
             ],
             "type": "i64"
           },
           {
+            "name": "completed",
+            "docs": [
+              "Whether finalize_execution has run (sol + asset masks full)"
+            ],
+            "type": "bool"
+          },
+          {
             "name": "transferCount",
             "docs": [
-              "Number of transfers executed"
+              "Number of SOL transfers executed (incremented only on 0->1 mask transition)"
             ],
             "type": "u32"
           },
@@ -1374,32 +2212,6 @@ export type DeadMansVault = {
               "Total SOL distributed (in lamports)"
             ],
             "type": "u64"
-          },
-          {
-            "name": "tokenTypesDistributed",
-            "docs": [
-              "Total SPL token types distributed"
-            ],
-            "type": "u32"
-          },
-          {
-            "name": "attestationHash",
-            "docs": [
-              "TEE attestation data hash (32 bytes)"
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "completed",
-            "docs": [
-              "Whether execution completed fully"
-            ],
-            "type": "bool"
           },
           {
             "name": "bump",
@@ -1516,34 +2328,49 @@ export type DeadMansVault = {
       }
     },
     {
-      "name": "recordExecutionParams",
+      "name": "tokenDist",
+      "docs": [
+        "One per (vault, mint). Created by `begin_token_dist`, which freezes the",
+        "pro-rata residual (ATA balance minus the sum of specific bequests for this",
+        "mint) write-once via strict `init`. Closed by `close_token_dist`."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "transferCount",
-            "type": "u32"
+            "name": "vault",
+            "docs": [
+              "Associated vault config"
+            ],
+            "type": "pubkey"
           },
           {
-            "name": "totalSolDistributed",
+            "name": "mint",
+            "docs": [
+              "The mint this distribution tracks"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "snapshot",
+            "docs": [
+              "Residual = ata_balance - Σspecific(mint), frozen at begin_token_dist"
+            ],
             "type": "u64"
           },
           {
-            "name": "tokenTypesDistributed",
+            "name": "paidMask",
+            "docs": [
+              "Bit i set when beneficiary i has been paid this token's residual share"
+            ],
             "type": "u32"
           },
           {
-            "name": "attestationHash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "completed",
-            "type": "bool"
+            "name": "bump",
+            "docs": [
+              "Bump seed"
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -1595,7 +2422,7 @@ export type DeadMansVault = {
           {
             "name": "agentPubkey",
             "docs": [
-              "Agent's TEE-generated execution pubkey"
+              "Agent's TEE-generated execution pubkey (heartbeats only)"
             ],
             "type": "pubkey"
           },
@@ -1616,7 +2443,8 @@ export type DeadMansVault = {
           {
             "name": "beneficiaries",
             "docs": [
-              "Registered beneficiaries (on-chain whitelist)"
+              "Registered beneficiaries (on-chain whitelist). Index is authoritative —",
+              "AssetPlan assignments and paid-masks reference beneficiaries by index."
             ],
             "type": {
               "vec": {
@@ -1667,6 +2495,23 @@ export type DeadMansVault = {
               "Whether the vault can be revoked/updated by the owner (false = immutable)"
             ],
             "type": "bool"
+          },
+          {
+            "name": "hasAssetPlan",
+            "docs": [
+              "Whether a canonical AssetPlan PDA exists for this vault. Set true by",
+              "`set_asset_plan`; gates whether execution instructions require the plan."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "openTokenDists",
+            "docs": [
+              "Number of TokenDist PDAs currently open (incremented by begin_token_dist,",
+              "decremented by close_token_dist). The owner-close requires this to be 0 so",
+              "a started token distribution can never be orphaned by a premature close."
+            ],
+            "type": "u16"
           }
         ]
       }
