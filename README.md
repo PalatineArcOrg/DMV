@@ -2,7 +2,9 @@
 
 An autonomous crypto inheritance protocol for Solana Seeker.
 
-Dead Man's Vault monitors an owner's liveness through configurable heartbeat checks. When heartbeats stop, it escalates through a 4-stage warning system and then autonomously distributes assets to pre-configured beneficiaries — no backend server, no intermediaries.
+Dead Man's Vault monitors an owner's liveness through configurable heartbeat checks. When heartbeats stop, it escalates through a 4-stage warning system and then distributes assets to pre-configured beneficiaries.
+
+**Execution is permissionless and trustless.** Once the grace period elapses, the on-chain program computes every payout from on-chain state, and *anyone* — the app, a beneficiary, or a keyless watcher — can submit the distribution. The caller controls nothing: funds can only go to the pre-set beneficiaries, in the pre-set proportions, after the deadline. A bundled keyless watcher service distributes automatically even if the owner's app is never reopened — so the dead-man's switch actually fires.
 
 **Built for the Monolith — Solana Mobile Hackathon (Feb 2 -- Mar 9, 2026)**
 
@@ -31,24 +33,27 @@ Stage 1: Reminder      --> Notifications sent to owner
 Stage 2: Alert         --> Emergency contacts notified
                            | (no response)
 Stage 3: Warning       --> Final countdown, execution preview
-                           | (no response)
-Stage 4: Execution     --> Assets distributed to beneficiaries autonomously
+                           | (no response — grace period elapses)
+Stage 4: Execution     --> Permissionless distribution: anyone (app / beneficiary /
+                           keyless watcher) cranks payouts computed on-chain
 ```
 
-Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Stage 4 is irreversible.
+Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace elapses the vault is frozen to owner mutations and Stage 4 is irreversible.
 
 ---
 
 ## Features
 
 ### Core
+- **Permissionless autonomous execution** -- After grace, the program computes every payout from on-chain state; the app, a beneficiary, or a keyless watcher can submit it. No trusted trigger, no server holding keys, no app required for the switch to fire.
+- **Specific bequests + pro-rata** -- Assign exact SPL token amounts or whole NFTs to specific beneficiaries (carved out first); the remainder splits pro-rata by share. A beneficiary can receive both.
 - **4-stage escalation system** -- Graduated warnings (Reminder -> Alert -> Warning -> Execution) with configurable durations
-- **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key
+- **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key (the agent signs heartbeats only)
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
-- **Autonomous execution** -- Agent key (TEE-stored) handles distribution without user interaction at Stage 4
-- **Vault PDA asset storage** -- Owner deposits SOL/SPL tokens into vault PDA; agent distributes on-chain per beneficiary at Stage 4
-- **Idempotent crash recovery** -- Every execution step checkpointed to SQLite before proceeding
-- **Clean vault lifecycle** -- Revoking closes on-chain PDAs and reclaims rent; re-initialization on the same wallet works atomically
+- **Frozen snapshots + idempotent masks** -- Residuals are snapshotted write-once at execution start; per-asset bitmasks make every payout idempotent and safely resumable by anyone after a crash
+- **Vault PDA asset storage** -- Owner deposits SOL / SPL tokens / NFTs into the vault PDA; distribution computes shares on-chain at Stage 4
+- **Owner supremacy (pre-grace)** -- Revoking closes on-chain PDAs and reclaims rent; re-initialization on the same wallet works atomically. All owner mutations freeze once the deadline is reached.
+- **Token-2022 support** -- Distribution handles both the legacy Token program and Token-2022 via `InterfaceAccount`
 
 ### Portfolio & DeFi
 - **Live portfolio tracking** -- Token balances via Helius DAS API, USD prices via dual oracle (Pyth Hermes + Jupiter fallback), 24h price changes
@@ -77,18 +82,20 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Stage 4 is
 
 ## Architecture
 
-- **No backend server** -- all logic runs on-device or on-chain
-- **TEE-first security** -- agent signing key stored in hardware secure enclave
-- **Idempotent execution** -- every step checkpointed to SQLite before proceeding
-- **Owner supremacy** -- owner can always override or revoke agent authority (unless immutable)
-- **On-chain constraints** -- program enforces rules even if the device is compromised
+- **Permissionless execution** -- after grace, payouts are computed entirely on-chain; any signer can submit them and controls nothing
+- **Optional keyless watcher** -- a bundled keyless service distributes automatically when the app is closed; the app remains fully self-sufficient. Neither holds authority over funds.
+- **TEE-first security** -- agent signing key stored in hardware secure enclave (signs heartbeats only)
+- **Idempotent, resumable execution** -- on-chain bitmasks are the authoritative idempotency layer; a partial crank is safely resumed by anyone
+- **Owner supremacy (pre-grace)** -- owner can override or revoke authority until the deadline, after which the vault freezes
+- **On-chain constraints** -- program enforces who/where/when/how-much even if a device is compromised
 
 ### Components
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| On-chain program | Anchor 0.32.1 (Rust) | Enforces who can transfer, where, and when |
-| Mobile app | React Native (Expo SDK 52) | Orchestrates scanning, escalation, and execution |
+| On-chain program | Anchor 0.32.1 (Rust) | Computes payouts; enforces who/where/when/how-much |
+| Mobile app | React Native (Expo SDK 52) | Orchestrates scanning, escalation, and the execution crank |
+| Keyless watcher | Node.js (Express + SQLite) | Pushes escalation alerts and autonomously cranks distribution after grace |
 | State management | Zustand + SQLite | Local persistence and crash recovery |
 | Wallet integration | Solana Mobile MWA | Owner authorization via Seed Vault |
 | Key management | Seeker TEE | Agent key for autonomous operations |
@@ -138,21 +145,31 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 
 ### Instructions
 
+**Owner / setup** (all freeze once the grace deadline is reached):
+
 | Instruction | Signer | Description |
 |-------------|--------|-------------|
-| `initialize_vault` | Owner | Create vault with beneficiaries, intervals, agent key, and mutability flag |
-| `update_vault` | Owner | Modify estate plan (beneficiaries, intervals). Blocked on immutable vaults |
-| `record_heartbeat` | Agent | Record liveness confirmation on-chain |
-| `execute_sol_distribution` | Agent | Distribute SOL from vault PDA to a beneficiary |
-| `execute_distribution` | Agent | Distribute SPL tokens from vault PDA ATA to a beneficiary's ATA |
-| `record_execution` | Agent | Create immutable execution log, deactivate vault |
-| `rotate_agent` | Owner | Rotate agent key (device migration) with 5 security guards |
-| `revoke_vault` | Owner | Close vault + heartbeat PDAs, reclaim rent. Blocked on immutable vaults |
-| `withdraw_sol_from_vault` | Owner | Withdraw SOL from vault PDA back to owner |
-| `withdraw_from_vault` | Owner | Withdraw SPL tokens from vault PDA back to owner |
-| `close_executed_vault` | Agent | Close vault PDAs after execution, return rent to owner |
-| `close_executed_vault_by_owner` | Owner | Owner variant for manual post-execution cleanup |
-| `close_revoked_vault` | Owner | Clean up zombie vaults revoked under older program versions |
+| `initialize_vault` | Owner | Create vault with beneficiaries (`{wallet, share_bps}`), intervals, agent key, mutability flag |
+| `update_vault` | Owner | Modify plan (beneficiaries, intervals). Blocked on immutable vaults / once a plan exists |
+| `set_asset_plan` / `update_asset_plan` | Owner | Define specific bequests (SPL + NFT) assigned to beneficiaries |
+| `record_heartbeat` | Agent | Record liveness confirmation on-chain (heartbeats only) |
+| `rotate_agent` | Owner | Rotate agent key (device migration) with 6 security guards |
+| `withdraw_sol_from_vault` / `withdraw_from_vault` | Owner | Withdraw SOL / SPL from the vault PDA back to owner |
+| `revoke_vault` | Owner | Close vault PDAs (+ asset plan), reclaim rent. Blocked on immutable vaults |
+| `close_executed_vault_by_owner` | Owner | Final core-PDA close after execution; sweeps SOL dust to largest-share beneficiary, rent to owner |
+| `close_revoked_vault` | Owner | Clean up zombie vaults from older program versions |
+
+**Permissionless execution** (`payer` = any signer; gated on grace + on-chain masks):
+
+| Instruction | Description |
+|-------------|-------------|
+| `begin_execution` | Snapshot the SOL residual; its existence proves grace for all downstream ix |
+| `begin_token_dist` | Snapshot a mint's residual (balance − specific bequests) from the canonical, anti-spoof vault ATA |
+| `execute_specific_asset` | Pay one specific bequest (SPL/NFT) to its assigned beneficiary, in order |
+| `execute_sol_shares` | Batched SOL pro-rata payout by `share_bps` |
+| `execute_token_shares` | Batched token residual pro-rata payout (`transfer_checked`) |
+| `finalize_execution` | Mark executed once all SOL + bequest masks are full |
+| `close_token_dist` | Sweep dust to the largest-share beneficiary, close the vault ATA + dist record |
 
 All transactions include per-instruction compute unit limits and dynamic priority fees for reliable landing.
 
@@ -160,17 +177,23 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 | Account | Seeds | Purpose |
 |---------|-------|---------|
-| `VaultConfig` | `["vault", owner]` | Core configuration, beneficiary whitelist, mutability flag |
+| `VaultConfig` | `["vault", owner]` | Core config, beneficiary whitelist (`{wallet, share_bps}`), mutability flag |
 | `HeartbeatRecord` | `["heartbeat", vault]` | Heartbeat timestamps and counters |
-| `ExecutionLog` | `["execution", vault]` | Immutable distribution record |
+| `ExecutionLog` | `["execution", vault]` | SOL snapshot + paid-mask; existence marks execution begun |
+| `AssetPlan` | `["asset_plan", vault]` | Owner-defined specific bequests (≤64 assignments, u64 paid-mask) |
+| `TokenDist` | `["token_dist", vault, mint]` | Per-mint residual snapshot + paid-mask |
 
 ### Error Codes
 
-19 custom error codes covering: interval validation, share allocation, signer authorization, vault state guards, beneficiary whitelist enforcement, immutability protection, and vault lifecycle management.
+37 custom error codes covering interval/share validation, signer authorization, the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, and vault lifecycle.
+
+### Security
+
+The permissionless design was hardened by a multi-agent security review — including a **CRITICAL** fund-misdirection bug (a caller-supplied token-program could spoof a mint's residual snapshot to zero) found and fixed before deploy.
 
 ### Tests
 
-34/34 tests passing -- covers happy paths, all error cases, rotate_agent security guards, SOL/SPL distribution, vault withdraw, close_executed_vault, double-execution prevention, vault revoke/close lifecycle, and re-initialization after revoke.
+20/20 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SPL + NFT bequests, Token-2022, dust→largest beneficiary), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof), idempotency/resume, the post-grace freeze, and all setup/owner paths.
 
 ---
 
@@ -194,9 +217,9 @@ Authentication screen guards app access with biometric/PIN when enabled.
 | **BackgroundAgent** | Singleton orchestrator for heartbeat monitoring and escalation evaluation |
 | **HeartbeatService** | Records confirmations to SQLite, tracks overdue status, monitors on-chain wallet activity |
 | **EscalationService** | Autonomous state machine evaluating every 60s (10s in demo), transitions through 4 stages |
-| **ExecutionService** | Idempotent execution engine with on-chain SOL/SPL distribution, agent refund, vault closure, and SQLite checkpointing |
-| **VaultTransactionService** | Builds and sends all on-chain transactions with priority fees and raw byte parsing fallback |
-| **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker) |
+| **ExecutionService** | The permissionless crank — a mask-driven "do the next undone thing" loop (begin → bequests → pro-rata SOL → finalize → token residual → close), idempotent and resumable from on-chain state |
+| **VaultTransactionService** | Builds and sends all on-chain transactions (setup, owner ops, and the permissionless crank) with priority fees and raw byte parsing fallback |
+| **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker); signs heartbeats only |
 | **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX) with frequency caps |
 | **PortfolioScanner** | Token balances via Helius DAS, dual-oracle pricing (Pyth + Jupiter), DeFi detection |
 | **MigrationService** | Detects device migration and triggers on-chain agent rotation |
@@ -243,11 +266,11 @@ React Native's Hermes runtime requires several workarounds:
 ```
 dead-mans-vault/
 +-- programs/dead-mans-vault/src/    # Anchor program (Rust)
-|   +-- instructions/                # 13 instruction handlers
-|   +-- state/                       # Account definitions
-|   +-- errors.rs                    # 19 error codes
-|   +-- constants.rs                 # On-chain constants
-+-- tests/                           # Anchor program tests (34/34 passing)
+|   +-- instructions/                # 18 instruction handlers
+|   +-- state/                       # Account definitions (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist)
+|   +-- errors.rs                    # 37 error codes
+|   +-- constants.rs                 # On-chain constants + mask helpers
++-- tests/                           # Anchor program tests (20/20 passing)
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
         +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.
@@ -262,6 +285,8 @@ dead-mans-vault/
         +-- types/                   # TypeScript type definitions + API interfaces
         +-- utils/                   # Constants, formatting, validation, IDL, fetchWithRetry
 ```
+
+A sibling **keyless watcher service** (`notify-server/`) — Node.js + Express + SQLite — polls each registered vault's heartbeat, pushes FCM escalation alerts, and runs the same permissionless crank to autonomously distribute after grace. It holds no authority over funds; it pays only transaction fees from its own keypair.
 
 ---
 
