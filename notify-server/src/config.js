@@ -16,6 +16,10 @@ export const config = {
   registerSecret: process.env.REGISTER_SECRET || '',
   fcmProjectId: process.env.FCM_PROJECT_ID || '',
   fcmServiceAccountPath: process.env.FCM_SERVICE_ACCOUNT || '',
+  // Permissionless executor: keyless crank that distributes a vault's assets
+  // once its grace period elapses. Pays its own fees from CRANKER_KEYPAIR.
+  executorEnabled: process.env.EXECUTOR_ENABLED === '1',
+  crankerKeypairPath: process.env.CRANKER_KEYPAIR || '',
 };
 
 // Lazily load the service account so the server can boot (and serve /health)

@@ -12,10 +12,11 @@ export function heartbeatPda(vault) {
 }
 
 /**
- * Parse VaultConfig. Layout (after 8-byte discriminator):
+ * Parse VaultConfig. Layout (after 8-byte discriminator), v2 permissionless:
  *   owner(32) agent(32) interval(i64 le) grace(i64 le) benCount(u32 le)
- *   benCount*(wallet32 + shareBps u16 + hasAssets u8)
+ *   benCount*(wallet32 + shareBps u16)        <- 34 B each (dropped hasAssets u8)
  *   executed(u8) active(u8) createdAt(i64) updatedAt(i64) bump(u8) isMutable(u8)
+ *   hasAssetPlan(u8) openTokenDists(u16) ...padding
  */
 export function parseVaultConfig(data) {
   let o = 8;
@@ -24,7 +25,7 @@ export function parseVaultConfig(data) {
   const interval = Number(data.readBigInt64LE(o)); o += 8;
   const grace = Number(data.readBigInt64LE(o)); o += 8;
   const benCount = data.readUInt32LE(o); o += 4;
-  o += benCount * (32 + 2 + 1);
+  o += benCount * (32 + 2); // Beneficiary { wallet:32, share_bps:2 }
   const executed = data[o] !== 0; o += 1;
   const active = data[o] !== 0; o += 1;
   return { owner: owner.toBase58(), interval, grace, executed, active };

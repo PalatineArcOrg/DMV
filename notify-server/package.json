@@ -10,6 +10,8 @@
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.95.3",
     "better-sqlite3": "^11.3.0",
     "express": "^4.21.0",

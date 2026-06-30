@@ -9,6 +9,7 @@ import {
 } from './db.js';
 import { fcmReady } from './fcm.js';
 import { startPoller, pollOnce } from './poller.js';
+import { executorReady, crankerPubkey, runExecutor } from './executor.js';
 
 const app = express();
 app.use(express.json({ limit: '16kb' }));
@@ -34,6 +35,8 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     fcmConfigured: fcmReady(),
+    executorReady: executorReady(),
+    cranker: crankerPubkey(),
     registrations: countRegistrations(),
     rpc: config.rpcUrl,
     programId: config.programId,
@@ -53,6 +56,7 @@ app.post('/register', requireSecret, (req, res) => {
     return res.status(400).json({ error: 'invalid stage durations' });
   }
   upsertRegistration({ owner, vault, deviceToken, stage1: s1, stage2: s2, stage3: s3 });
+  console.log(`[register] vault ${vault.slice(0, 8)} owner ${owner.slice(0, 8)} token ${deviceToken.slice(0, 12)}… stages ${s1}/${s2}/${s3}`);
   res.json({ ok: true });
 });
 
@@ -69,6 +73,19 @@ app.post('/deregister', requireSecret, (req, res) => {
 app.post('/poll-now', requireSecret, async (req, res) => {
   const r = await pollOnce();
   res.json({ ok: true, ...r });
+});
+
+// Manually crank a single vault's execution (testing the autonomous path).
+app.post('/execute-now', requireSecret, async (req, res) => {
+  const { vault } = req.body || {};
+  if (!isPubkey(vault)) return res.status(400).json({ error: 'invalid vault pubkey' });
+  if (!executorReady()) return res.status(503).json({ error: 'executor not configured' });
+  try {
+    const r = await runExecutor(vault);
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.listen(config.port, '127.0.0.1', () => {

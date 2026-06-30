@@ -12,6 +12,7 @@ import {
   formatDuration,
 } from './escalation.js';
 import { sendPush, fcmReady } from './fcm.js';
+import { runExecutor, executorReady } from './executor.js';
 
 let running = false;
 let timer = null;
@@ -57,6 +58,19 @@ async function processRegistration(reg, now) {
     return { vault: reg.vault, action: 'normal' };
   }
 
+  // Grace elapsed (stage 4): drive the permissionless distribution autonomously.
+  // Idempotent and best-effort — the next tick deregisters once executed.
+  if (stage === 4 && executorReady()) {
+    try {
+      const ex = await runExecutor(reg.vault);
+      if (ex.action === 'executed' || ex.action === 'cranked') {
+        console.log(`[exec] ${ex.action} -> ${reg.vault.slice(0, 8)}`);
+      }
+    } catch (e) {
+      console.log(`[exec] FAILED -> ${reg.vault.slice(0, 8)}: ${e.message}`);
+    }
+  }
+
   const escalated = stage > reg.last_stage;
   const recurDue =
     stage === reg.last_stage &&
@@ -93,7 +107,14 @@ export async function pollOnce() {
   for (const reg of regs) {
     try {
       const r = await processRegistration(reg, now);
-      if (r.action === 'sent') sent++;
+      if (r.action === 'sent') {
+        sent++;
+        console.log(`[push] sent stage ${r.stage} -> ${reg.vault.slice(0, 8)} (owner ${reg.owner.slice(0, 8)})`);
+      } else if (r.action.startsWith('deregistered')) {
+        console.log(`[drop] ${r.action} -> ${reg.vault.slice(0, 8)}`);
+      } else if (r.action === 'send_failed') {
+        console.log(`[push] FAILED stage ${r.stage} -> ${reg.vault.slice(0, 8)}: ${r.error}`);
+      }
     } catch {
       // Per-vault failure is non-fatal; retry next tick.
     }
@@ -107,7 +128,7 @@ export function startPoller() {
     if (running) return;
     running = true;
     try {
-      if (fcmReady()) await pollOnce();
+      if (fcmReady() || executorReady()) await pollOnce();
     } finally {
       running = false;
     }
