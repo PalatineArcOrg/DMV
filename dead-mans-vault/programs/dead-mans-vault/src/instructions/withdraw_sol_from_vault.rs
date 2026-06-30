@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
-use crate::state::VaultConfig;
+use crate::state::{VaultConfig, HeartbeatRecord};
 use crate::errors::VaultError;
+use crate::util::deadline;
 
 #[derive(Accounts)]
 pub struct WithdrawSolFromVault<'info> {
@@ -17,10 +18,30 @@ pub struct WithdrawSolFromVault<'info> {
         has_one = owner @ VaultError::UnauthorizedOwner,
     )]
     pub vault_config: Account<'info, VaultConfig>,
+
+    #[account(
+        seeds = [b"heartbeat", vault_config.key().as_ref()],
+        bump = heartbeat_record.bump,
+        constraint = heartbeat_record.vault == vault_config.key() @ VaultError::HeartbeatVaultMismatch,
+    )]
+    pub heartbeat_record: Account<'info, HeartbeatRecord>,
 }
 
 pub fn handler(ctx: Context<WithdrawSolFromVault>, amount: u64) -> Result<()> {
     require!(amount > 0, VaultError::InsufficientVaultBalance);
+
+    // Freeze once grace has elapsed (R8/B1) — the snapshot belongs to the
+    // beneficiaries; the owner can't drain it once execution is possible.
+    {
+        let now = Clock::get()?.unix_timestamp;
+        let v = &ctx.accounts.vault_config;
+        let dl = deadline(
+            ctx.accounts.heartbeat_record.last_heartbeat,
+            v.heartbeat_interval,
+            v.grace_period,
+        )?;
+        require!(now < dl, VaultError::VaultFrozen);
+    }
 
     let vault_info = ctx.accounts.vault_config.to_account_info();
     let owner_info = ctx.accounts.owner.to_account_info();

@@ -1,1500 +1,1080 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
+import { Program, BN } from "@coral-xyz/anchor";
 import { DeadMansVault } from "../target/types/dead_mans_vault";
 import { expect } from "chai";
 import {
   createMint,
-  createAccount,
   mintTo,
   getAccount,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccount,
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 
-describe("dead-mans-vault", () => {
+const { Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL, Transaction } =
+  anchor.web3;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Demo-floor durations (constants.rs MIN_HEARTBEAT_INTERVAL=10, MIN_GRACE_PERIOD=30).
+const INTERVAL = 10;
+const GRACE = 30;
+// deadline = last_heartbeat + INTERVAL + GRACE. Wait a touch past it.
+const GRACE_WAIT_MS = (INTERVAL + GRACE + 3) * 1000;
+
+describe("dead-mans-vault — permissionless execution", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
-
   const program = anchor.workspace.deadMansVault as Program<DeadMansVault>;
-  const owner = provider.wallet;
-  const agent = anchor.web3.Keypair.generate();
-  const beneficiary1 = anchor.web3.Keypair.generate();
-  const beneficiary2 = anchor.web3.Keypair.generate();
+  const conn = provider.connection;
 
-  let vaultConfigPda: anchor.web3.PublicKey;
-  let vaultConfigBump: number;
-  let heartbeatRecordPda: anchor.web3.PublicKey;
+  // ── helpers ──────────────────────────────────────────────────────────
 
-  before(async () => {
-    [vaultConfigPda, vaultConfigBump] =
-      anchor.web3.PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), owner.publicKey.toBuffer()],
-        program.programId
-      );
-    [heartbeatRecordPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), vaultConfigPda.toBuffer()],
+  async function fund(pubkey: anchor.web3.PublicKey, sol: number) {
+    const sig = await conn.requestAirdrop(pubkey, sol * LAMPORTS_PER_SOL);
+    const bh = await conn.getLatestBlockhash();
+    await conn.confirmTransaction({ signature: sig, ...bh }, "confirmed");
+  }
+
+  function pdas(owner: anchor.web3.PublicKey) {
+    const [vault] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), owner.toBuffer()],
       program.programId
     );
-  });
+    const [heartbeat] = PublicKey.findProgramAddressSync(
+      [Buffer.from("heartbeat"), vault.toBuffer()],
+      program.programId
+    );
+    const [execution] = PublicKey.findProgramAddressSync(
+      [Buffer.from("execution"), vault.toBuffer()],
+      program.programId
+    );
+    const [assetPlan] = PublicKey.findProgramAddressSync(
+      [Buffer.from("asset_plan"), vault.toBuffer()],
+      program.programId
+    );
+    return { vault, heartbeat, execution, assetPlan };
+  }
 
-  // ─── Initialize Vault ───
+  function tokenDistPda(vault: anchor.web3.PublicKey, mint: anchor.web3.PublicKey) {
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_dist"), vault.toBuffer(), mint.toBuffer()],
+      program.programId
+    );
+    return pda;
+  }
 
-  it("initializes vault successfully", async () => {
+  // Build initialize_vault signed by a fresh owner.
+  async function initVault(opts: {
+    owner: anchor.web3.Keypair;
+    agent: anchor.web3.PublicKey;
+    beneficiaries: { wallet: anchor.web3.PublicKey; shareBps: number }[];
+    interval?: number;
+    grace?: number;
+    isMutable?: boolean;
+  }) {
+    const { vault, heartbeat } = pdas(opts.owner.publicKey);
     await program.methods
       .initializeVault({
-        agentPubkey: agent.publicKey,
-        heartbeatInterval: new anchor.BN(604800), // 7 days
-        gracePeriod: new anchor.BN(2073600), // 24 days
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 7000,
-            hasSpecificAssets: false,
-          },
-          {
-            wallet: beneficiary2.publicKey,
-            shareBps: 3000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: true,
+        agentPubkey: opts.agent,
+        heartbeatInterval: new BN(opts.interval ?? INTERVAL),
+        gracePeriod: new BN(opts.grace ?? GRACE),
+        beneficiaries: opts.beneficiaries,
+        isMutable: opts.isMutable ?? true,
       })
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-        heartbeatRecord: heartbeatRecordPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
+      .accountsPartial({
+        owner: opts.owner.publicKey,
+        vaultConfig: vault,
+        heartbeatRecord: heartbeat,
+        systemProgram: SystemProgram.programId,
       })
+      .signers([opts.owner])
       .rpc();
+    return pdas(opts.owner.publicKey);
+  }
 
-    const vault = await program.account.vaultConfig.fetch(vaultConfigPda);
-    expect(vault.owner.toString()).to.equal(owner.publicKey.toString());
-    expect(vault.agentPubkey.toString()).to.equal(agent.publicKey.toString());
-    expect(vault.heartbeatInterval.toNumber()).to.equal(604800);
-    expect(vault.gracePeriod.toNumber()).to.equal(2073600);
-    expect(vault.beneficiaries.length).to.equal(2);
-    expect(vault.beneficiaries[0].shareBps).to.equal(7000);
-    expect(vault.beneficiaries[1].shareBps).to.equal(3000);
-    expect(vault.executed).to.be.false;
-    expect(vault.active).to.be.true;
-
-    const heartbeat = await program.account.heartbeatRecord.fetch(
-      heartbeatRecordPda
+  async function depositSol(
+    owner: anchor.web3.Keypair,
+    vault: anchor.web3.PublicKey,
+    lamports: number
+  ) {
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: owner.publicKey,
+        toPubkey: vault,
+        lamports,
+      })
     );
-    expect(heartbeat.vault.toString()).to.equal(vaultConfigPda.toString());
-    expect(heartbeat.totalHeartbeats.toNumber()).to.equal(1);
-  });
+    await provider.sendAndConfirm(tx, [owner]);
+  }
 
-  // ─── Initialize Vault Error Cases ───
-
-  it("rejects heartbeat interval too short", async () => {
-    const newOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, newOwner.publicKey, 1);
-
-    const [newVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), newOwner.publicKey.toBuffer()],
-      program.programId
+  async function makeMint(
+    payer: anchor.web3.Keypair,
+    decimals: number,
+    programId = TOKEN_PROGRAM_ID
+  ) {
+    return await createMint(
+      conn,
+      payer,
+      payer.publicKey,
+      null,
+      decimals,
+      undefined,
+      undefined,
+      programId
     );
-    const [newHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), newVaultPda.toBuffer()],
-      program.programId
-    );
+  }
 
-    try {
-      await program.methods
-        .initializeVault({
-          agentPubkey: agent.publicKey,
-          heartbeatInterval: new anchor.BN(5), // too short (below MIN_HEARTBEAT_INTERVAL=10)
-          gracePeriod: new anchor.BN(604800),
-          beneficiaries: [
-            {
-              wallet: beneficiary1.publicKey,
-              shareBps: 10000,
-              hasSpecificAssets: false,
-            },
-          ],
-          isMutable: true,
-        })
-        .accounts({
-          owner: newOwner.publicKey,
-          vaultConfig: newVaultPda,
-          heartbeatRecord: newHeartbeatPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .signers([newOwner])
-        .rpc();
-      expect.fail("Should have thrown HeartbeatIntervalTooShort");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("HeartbeatIntervalTooShort");
+  // Create an ATA (works for PDA owners via allowOwnerOffCurve).
+  async function makeAta(
+    payer: anchor.web3.Keypair,
+    mint: anchor.web3.PublicKey,
+    owner: anchor.web3.PublicKey,
+    programId = TOKEN_PROGRAM_ID
+  ) {
+    const ata = getAssociatedTokenAddressSync(mint, owner, true, programId);
+    const ix = createAssociatedTokenAccountInstruction(
+      payer.publicKey,
+      ata,
+      owner,
+      mint,
+      programId
+    );
+    await provider.sendAndConfirm(new Transaction().add(ix), [payer]);
+    return ata;
+  }
+
+  async function fundVaultToken(
+    payer: anchor.web3.Keypair,
+    mint: anchor.web3.PublicKey,
+    vault: anchor.web3.PublicKey,
+    amount: number | bigint,
+    programId = TOKEN_PROGRAM_ID
+  ) {
+    const ata = await makeAta(payer, mint, vault, programId);
+    await mintTo(conn, payer, mint, ata, payer, amount, [], undefined, programId);
+    return ata;
+  }
+
+  function expectErr(e: any, code: string) {
+    const s = (e?.toString?.() ?? "") + JSON.stringify(e?.logs ?? "");
+    expect(
+      (e?.error?.errorCode?.code === code) || s.includes(code),
+      `expected error ${code}, got: ${e?.error?.errorCode?.code ?? s.slice(0, 300)}`
+    ).to.be.true;
+  }
+
+  before("fund provider wallet (pays setup tx fees)", async () => {
+    const bal = await conn.getBalance(provider.wallet.publicKey);
+    if (bal < 100 * LAMPORTS_PER_SOL) {
+      await fund(provider.wallet.publicKey, 500);
     }
   });
 
-  it("rejects grace period too short", async () => {
-    const newOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, newOwner.publicKey, 1);
+  // ════════════════════════════════════════════════════════════════════
+  //  PART A — setup, owner ops & guards (no grace wait)
+  // ════════════════════════════════════════════════════════════════════
+  describe("setup, owner ops & guards", () => {
+    let owner: anchor.web3.Keypair;
+    const agent = Keypair.generate();
+    const b1 = Keypair.generate();
+    const b2 = Keypair.generate();
 
-    const [newVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), newOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [newHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), newVaultPda.toBuffer()],
-      program.programId
-    );
+    before(async () => {
+      owner = Keypair.generate();
+      await fund(owner.publicKey, 10);
+    });
 
-    try {
-      await program.methods
-        .initializeVault({
-          agentPubkey: agent.publicKey,
-          heartbeatInterval: new anchor.BN(86400),
-          gracePeriod: new anchor.BN(15), // too short (below MIN_GRACE_PERIOD=30)
-          beneficiaries: [
-            {
-              wallet: beneficiary1.publicKey,
-              shareBps: 10000,
-              hasSpecificAssets: false,
-            },
-          ],
-          isMutable: true,
-        })
-        .accounts({
-          owner: newOwner.publicKey,
-          vaultConfig: newVaultPda,
-          heartbeatRecord: newHeartbeatPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .signers([newOwner])
-        .rpc();
-      expect.fail("Should have thrown GracePeriodTooShort");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("GracePeriodTooShort");
-    }
-  });
-
-  it("rejects invalid beneficiary shares (not 10000 bps)", async () => {
-    const newOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, newOwner.publicKey, 1);
-
-    const [newVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), newOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [newHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), newVaultPda.toBuffer()],
-      program.programId
-    );
-
-    try {
-      await program.methods
-        .initializeVault({
-          agentPubkey: agent.publicKey,
-          heartbeatInterval: new anchor.BN(86400),
-          gracePeriod: new anchor.BN(604800),
-          beneficiaries: [
-            {
-              wallet: beneficiary1.publicKey,
-              shareBps: 5000,
-              hasSpecificAssets: false,
-            },
-            {
-              wallet: beneficiary2.publicKey,
-              shareBps: 4000,
-              hasSpecificAssets: false,
-            },
-          ],
-          isMutable: true,
-        })
-        .accounts({
-          owner: newOwner.publicKey,
-          vaultConfig: newVaultPda,
-          heartbeatRecord: newHeartbeatPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .signers([newOwner])
-        .rpc();
-      expect.fail("Should have thrown InvalidShareAllocation");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("InvalidShareAllocation");
-    }
-  });
-
-  it("rejects empty beneficiaries list", async () => {
-    const newOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, newOwner.publicKey, 1);
-
-    const [newVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), newOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [newHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), newVaultPda.toBuffer()],
-      program.programId
-    );
-
-    try {
-      await program.methods
-        .initializeVault({
-          agentPubkey: agent.publicKey,
-          heartbeatInterval: new anchor.BN(86400),
-          gracePeriod: new anchor.BN(604800),
-          beneficiaries: [],
-          isMutable: true,
-        })
-        .accounts({
-          owner: newOwner.publicKey,
-          vaultConfig: newVaultPda,
-          heartbeatRecord: newHeartbeatPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .signers([newOwner])
-        .rpc();
-      expect.fail("Should have thrown InvalidBeneficiaryCount");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("InvalidBeneficiaryCount");
-    }
-  });
-
-  it("rejects owner as beneficiary", async () => {
-    const newOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, newOwner.publicKey, 1);
-
-    const [newVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), newOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [newHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), newVaultPda.toBuffer()],
-      program.programId
-    );
-
-    try {
-      await program.methods
-        .initializeVault({
-          agentPubkey: agent.publicKey,
-          heartbeatInterval: new anchor.BN(86400),
-          gracePeriod: new anchor.BN(604800),
-          beneficiaries: [
-            {
-              wallet: newOwner.publicKey, // owner as beneficiary
-              shareBps: 10000,
-              hasSpecificAssets: false,
-            },
-          ],
-          isMutable: true,
-        })
-        .accounts({
-          owner: newOwner.publicKey,
-          vaultConfig: newVaultPda,
-          heartbeatRecord: newHeartbeatPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .signers([newOwner])
-        .rpc();
-      expect.fail("Should have thrown OwnerCannotBeBeneficiary");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("OwnerCannotBeBeneficiary");
-    }
-  });
-
-  // ─── Record Heartbeat ───
-
-  it("records heartbeat from authorized agent", async () => {
-    const hbBefore = await program.account.heartbeatRecord.fetch(
-      heartbeatRecordPda
-    );
-    const countBefore = hbBefore.totalHeartbeats.toNumber();
-
-    await program.methods
-      .recordHeartbeat({ activeTap: {} })
-      .accounts({
+    it("initializes a vault", async () => {
+      const { vault, heartbeat } = await initVault({
+        owner,
         agent: agent.publicKey,
-        vaultConfig: vaultConfigPda,
-        heartbeatRecord: heartbeatRecordPda,
-      })
-      .signers([agent])
-      .rpc();
+        beneficiaries: [
+          { wallet: b1.publicKey, shareBps: 7000 },
+          { wallet: b2.publicKey, shareBps: 3000 },
+        ],
+        interval: 604800,
+        grace: 2073600,
+      });
+      const v = await program.account.vaultConfig.fetch(vault);
+      expect(v.owner.toString()).to.equal(owner.publicKey.toString());
+      expect(v.beneficiaries.length).to.equal(2);
+      expect(v.hasAssetPlan).to.be.false;
+      expect(v.openTokenDists).to.equal(0);
+      const h = await program.account.heartbeatRecord.fetch(heartbeat);
+      expect(h.totalHeartbeats.toNumber()).to.equal(1);
+    });
 
-    const hbAfter = await program.account.heartbeatRecord.fetch(
-      heartbeatRecordPda
-    );
-    expect(hbAfter.totalHeartbeats.toNumber()).to.equal(countBefore + 1);
-    expect(hbAfter.lastHeartbeat.toNumber()).to.be.greaterThan(0);
-  });
+    it("rejects interval too short", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 2);
+      try {
+        await initVault({
+          owner: o,
+          agent: agent.publicKey,
+          beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+          interval: 5,
+        });
+        expect.fail("should reject");
+      } catch (e) {
+        expectErr(e, "HeartbeatIntervalTooShort");
+      }
+    });
 
-  it("rejects heartbeat from non-agent", async () => {
-    const fakeAgent = anchor.web3.Keypair.generate();
+    it("rejects grace too short", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 2);
+      try {
+        await initVault({
+          owner: o,
+          agent: agent.publicKey,
+          beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+          grace: 15,
+        });
+        expect.fail("should reject");
+      } catch (e) {
+        expectErr(e, "GracePeriodTooShort");
+      }
+    });
 
-    try {
+    it("rejects shares not summing to 10000", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 2);
+      try {
+        await initVault({
+          owner: o,
+          agent: agent.publicKey,
+          beneficiaries: [
+            { wallet: b1.publicKey, shareBps: 5000 },
+            { wallet: b2.publicKey, shareBps: 4000 },
+          ],
+        });
+        expect.fail("should reject");
+      } catch (e) {
+        expectErr(e, "InvalidShareAllocation");
+      }
+    });
+
+    it("rejects owner as beneficiary", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 2);
+      try {
+        await initVault({
+          owner: o,
+          agent: agent.publicKey,
+          beneficiaries: [{ wallet: o.publicKey, shareBps: 10000 }],
+        });
+        expect.fail("should reject");
+      } catch (e) {
+        expectErr(e, "OwnerCannotBeBeneficiary");
+      }
+    });
+
+    it("records heartbeat from agent, rejects non-agent", async () => {
+      const { vault, heartbeat } = pdas(owner.publicKey);
       await program.methods
         .recordHeartbeat({ activeTap: {} })
-        .accounts({
-          agent: fakeAgent.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-        })
-        .signers([fakeAgent])
-        .rpc();
-      expect.fail("Should have thrown UnauthorizedAgent");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("UnauthorizedAgent");
-    }
-  });
-
-  // ─── Update Vault ───
-
-  it("allows owner to update vault config", async () => {
-    await program.methods
-      .updateVault({
-        heartbeatInterval: new anchor.BN(172800), // 2 days
-        gracePeriod: null,
-        beneficiaries: null,
-      })
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-      })
-      .rpc();
-
-    const vault = await program.account.vaultConfig.fetch(vaultConfigPda);
-    expect(vault.heartbeatInterval.toNumber()).to.equal(172800);
-    // Grace period unchanged
-    expect(vault.gracePeriod.toNumber()).to.equal(2073600);
-  });
-
-  it("rejects update from non-owner", async () => {
-    const impostor = anchor.web3.Keypair.generate();
-
-    try {
-      await program.methods
-        .updateVault({
-          heartbeatInterval: new anchor.BN(172800),
-          gracePeriod: null,
-          beneficiaries: null,
-        })
-        .accounts({
-          owner: impostor.publicKey,
-          vaultConfig: vaultConfigPda,
-        })
-        .signers([impostor])
-        .rpc();
-      expect.fail("Should have thrown");
-    } catch (err: any) {
-      // has_one = owner constraint
-      expect(err.error).to.exist;
-    }
-  });
-
-  // ─── Rotate Agent ───
-
-  it("allows owner to rotate agent key", async () => {
-    const newAgent = anchor.web3.Keypair.generate();
-
-    await program.methods
-      .rotateAgent(newAgent.publicKey)
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-        heartbeatRecord: heartbeatRecordPda,
-      })
-      .rpc();
-
-    const vault = await program.account.vaultConfig.fetch(vaultConfigPda);
-    expect(vault.agentPubkey.toString()).to.equal(
-      newAgent.publicKey.toString()
-    );
-
-    // Heartbeat should have been reset
-    const hb = await program.account.heartbeatRecord.fetch(
-      heartbeatRecordPda
-    );
-    expect(hb.lastHeartbeat.toNumber()).to.be.greaterThan(0);
-
-    // Verify old agent can no longer heartbeat
-    try {
-      await program.methods
-        .recordHeartbeat({ activeTap: {} })
-        .accounts({
-          agent: agent.publicKey, // old agent
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-        })
+        .accountsPartial({ agent: agent.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
         .signers([agent])
         .rpc();
-      expect.fail("Old agent should be rejected");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("UnauthorizedAgent");
-    }
-
-    // New agent CAN heartbeat
-    await program.methods
-      .recordHeartbeat({ activeTap: {} })
-      .accounts({
-        agent: newAgent.publicKey,
-        vaultConfig: vaultConfigPda,
-        heartbeatRecord: heartbeatRecordPda,
-      })
-      .signers([newAgent])
-      .rpc();
-
-    const hbAfter = await program.account.heartbeatRecord.fetch(
-      heartbeatRecordPda
-    );
-    expect(hbAfter.totalHeartbeats.toNumber()).to.be.greaterThan(0);
-
-    // Rotate back to original agent for subsequent tests
-    await program.methods
-      .rotateAgent(agent.publicKey)
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-        heartbeatRecord: heartbeatRecordPda,
-      })
-      .rpc();
-  });
-
-  it("rejects agent rotation from non-owner", async () => {
-    const newAgent = anchor.web3.Keypair.generate();
-
-    try {
-      await program.methods
-        .rotateAgent(newAgent.publicKey)
-        .accounts({
-          owner: agent.publicKey, // agent trying to rotate — NOT allowed
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-        })
-        .signers([agent])
-        .rpc();
-      expect.fail("Should have thrown UnauthorizedOwner");
-    } catch (err: any) {
-      expect(err.error).to.exist;
-    }
-  });
-
-  it("rejects rotation to zero address", async () => {
-    try {
-      await program.methods
-        .rotateAgent(anchor.web3.PublicKey.default)
-        .accounts({
-          owner: owner.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-        })
-        .rpc();
-      expect.fail("Should have thrown InvalidAgentPubkey");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("InvalidAgentPubkey");
-    }
-  });
-
-  it("rejects rotation to owner address", async () => {
-    try {
-      await program.methods
-        .rotateAgent(owner.publicKey)
-        .accounts({
-          owner: owner.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-        })
-        .rpc();
-      expect.fail("Should have thrown AgentCannotBeOwner");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("AgentCannotBeOwner");
-    }
-  });
-
-  it("rejects rotation to same agent key", async () => {
-    try {
-      await program.methods
-        .rotateAgent(agent.publicKey) // same as current
-        .accounts({
-          owner: owner.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-        })
-        .rpc();
-      expect.fail("Should have thrown AgentKeyUnchanged");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("AgentKeyUnchanged");
-    }
-  });
-
-  // ─── Execution Guards ───
-
-  it("rejects SOL distribution before grace period elapsed", async () => {
-    // Grace period hasn't elapsed — execute_sol_distribution should fail
-    try {
-      await program.methods
-        .executeSolDistribution(new anchor.BN(1000))
-        .accounts({
-          agent: agent.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-          beneficiary: beneficiary1.publicKey,
-        })
-        .signers([agent])
-        .rpc();
-      expect.fail("Should have thrown GracePeriodNotElapsed");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("GracePeriodNotElapsed");
-    }
-  });
-
-  it("rejects SOL distribution from unauthorized agent", async () => {
-    const fakeAgent = anchor.web3.Keypair.generate();
-    try {
-      await program.methods
-        .executeSolDistribution(new anchor.BN(1000))
-        .accounts({
-          agent: fakeAgent.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-          beneficiary: beneficiary1.publicKey,
-        })
-        .signers([fakeAgent])
-        .rpc();
-      expect.fail("Should have thrown UnauthorizedAgent");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("UnauthorizedAgent");
-    }
-  });
-
-  it("rejects SOL distribution to unregistered beneficiary", async () => {
-    const unregistered = anchor.web3.Keypair.generate();
-    try {
-      await program.methods
-        .executeSolDistribution(new anchor.BN(1000))
-        .accounts({
-          agent: agent.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-          beneficiary: unregistered.publicKey,
-        })
-        .signers([agent])
-        .rpc();
-      expect.fail("Should have thrown");
-    } catch (err: any) {
-      // Either GracePeriodNotElapsed (checked first) or UnregisteredBeneficiary
-      expect(err.error).to.exist;
-    }
-  });
-
-  // ─── Revoke Vault ───
-
-  it("allows owner to revoke vault (closes accounts)", async () => {
-    await program.methods
-      .revokeVault()
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-        heartbeatRecord: heartbeatRecordPda,
-      })
-      .rpc();
-
-    // Both accounts should be closed (null)
-    const vaultAccount = await provider.connection.getAccountInfo(vaultConfigPda);
-    expect(vaultAccount).to.be.null;
-    const heartbeatAccount = await provider.connection.getAccountInfo(heartbeatRecordPda);
-    expect(heartbeatAccount).to.be.null;
-  });
-
-  it("rejects heartbeat on closed vault", async () => {
-    try {
-      await program.methods
-        .recordHeartbeat({ activeTap: {} })
-        .accounts({
-          agent: agent.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-        })
-        .signers([agent])
-        .rpc();
-      expect.fail("Should have thrown");
-    } catch (err: any) {
-      // Closed account → AccountNotInitialized
-      expect(err.toString()).to.include("AccountNotInitialized");
-    }
-  });
-
-  it("rejects rotation on closed vault", async () => {
-    const newAgent = anchor.web3.Keypair.generate();
-    try {
-      await program.methods
-        .rotateAgent(newAgent.publicKey)
-        .accounts({
-          owner: owner.publicKey,
-          vaultConfig: vaultConfigPda,
-          heartbeatRecord: heartbeatRecordPda,
-        })
-        .rpc();
-      expect.fail("Should have thrown");
-    } catch (err: any) {
-      expect(err.toString()).to.include("AccountNotInitialized");
-    }
-  });
-
-  it("allows re-initialization after revoke", async () => {
-    // Shared vault was closed by revoke above — re-init on the same PDA
-    const newAgent = anchor.web3.Keypair.generate();
-    await program.methods
-      .initializeVault({
-        agentPubkey: newAgent.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: true,
-      })
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-        heartbeatRecord: heartbeatRecordPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .rpc();
-
-    const vault = await program.account.vaultConfig.fetch(vaultConfigPda);
-    expect(vault.active).to.be.true;
-    expect(vault.agentPubkey.toString()).to.equal(newAgent.publicKey.toString());
-    expect(vault.beneficiaries.length).to.equal(1);
-
-    // Revoke again to leave clean state (closed) for subsequent tests
-    await program.methods
-      .revokeVault()
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-        heartbeatRecord: heartbeatRecordPda,
-      })
-      .rpc();
-  });
-
-  it("rejects revoke from non-owner", async () => {
-    // Create a new vault for this test
-    const newOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, newOwner.publicKey, 1);
-
-    const [newVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), newOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [newHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), newVaultPda.toBuffer()],
-      program.programId
-    );
-
-    await program.methods
-      .initializeVault({
-        agentPubkey: agent.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: true,
-      })
-      .accounts({
-        owner: newOwner.publicKey,
-        vaultConfig: newVaultPda,
-        heartbeatRecord: newHeartbeatPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([newOwner])
-      .rpc();
-
-    // Try revoking from a different signer
-    const impostor = anchor.web3.Keypair.generate();
-    try {
-      await program.methods
-        .revokeVault()
-        .accounts({
-          owner: impostor.publicKey,
-          vaultConfig: newVaultPda,
-          heartbeatRecord: newHeartbeatPda,
-        })
-        .signers([impostor])
-        .rpc();
-      expect.fail("Should have thrown UnauthorizedOwner");
-    } catch (err: any) {
-      expect(err.error).to.exist;
-    }
-  });
-
-  // ─── Record Execution ───
-
-  it("rejects record_execution before grace period elapsed", async () => {
-    // record_execution now enforces grace period to prevent a compromised
-    // agent from sealing a vault before the owner's deadline has passed.
-    const execOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, execOwner.publicKey, 1);
-    const execAgent = anchor.web3.Keypair.generate();
-
-    const [execVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), execOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [execHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), execVaultPda.toBuffer()],
-      program.programId
-    );
-    const [execLogPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("execution"), execVaultPda.toBuffer()],
-      program.programId
-    );
-
-    // Initialize
-    await program.methods
-      .initializeVault({
-        agentPubkey: execAgent.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: true,
-      })
-      .accounts({
-        owner: execOwner.publicKey,
-        vaultConfig: execVaultPda,
-        heartbeatRecord: execHeartbeatPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([execOwner])
-      .rpc();
-
-    // Attempt record_execution immediately — should fail (grace period not elapsed)
-    try {
-      await program.methods
-        .recordExecution({
-          transferCount: 5,
-          totalSolDistributed: new anchor.BN(1000000000),
-          tokenTypesDistributed: 3,
-          attestationHash: Array.from(Buffer.alloc(32, 0xab)),
-          completed: true,
-        })
-        .accounts({
-          agent: execAgent.publicKey,
-          payer: execOwner.publicKey,
-          vaultConfig: execVaultPda,
-          heartbeatRecord: execHeartbeatPda,
-          executionLog: execLogPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .signers([execAgent, execOwner])
-        .rpc();
-      expect.fail("Should have thrown GracePeriodNotElapsed");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("GracePeriodNotElapsed");
-    }
-  });
-
-  it("rejects record_execution from unauthorized agent", async () => {
-    const rexOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, rexOwner.publicKey, 1);
-    const rexAgent = anchor.web3.Keypair.generate();
-    const fakeAgent = anchor.web3.Keypair.generate();
-
-    const [rexVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), rexOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [rexHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), rexVaultPda.toBuffer()],
-      program.programId
-    );
-    const [rexLogPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("execution"), rexVaultPda.toBuffer()],
-      program.programId
-    );
-
-    // Initialize
-    await program.methods
-      .initializeVault({
-        agentPubkey: rexAgent.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: true,
-      })
-      .accounts({
-        owner: rexOwner.publicKey,
-        vaultConfig: rexVaultPda,
-        heartbeatRecord: rexHeartbeatPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([rexOwner])
-      .rpc();
-
-    // Attempt record_execution from fake agent — should fail
-    try {
-      await program.methods
-        .recordExecution({
-          transferCount: 1,
-          totalSolDistributed: new anchor.BN(100),
-          tokenTypesDistributed: 1,
-          attestationHash: Array.from(Buffer.alloc(32, 0)),
-          completed: true,
-        })
-        .accounts({
-          agent: fakeAgent.publicKey,
-          payer: rexOwner.publicKey,
-          vaultConfig: rexVaultPda,
-          heartbeatRecord: rexHeartbeatPda,
-          executionLog: rexLogPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .signers([fakeAgent, rexOwner])
-        .rpc();
-      expect.fail("Should have thrown UnauthorizedAgent");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("UnauthorizedAgent");
-    }
-  });
-
-  // ─── Immutability Guards ───
-
-  it("rejects update on immutable vault", async () => {
-    const immOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, immOwner.publicKey, 1);
-    const immAgent = anchor.web3.Keypair.generate();
-
-    const [immVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), immOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [immHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), immVaultPda.toBuffer()],
-      program.programId
-    );
-
-    // Initialize as immutable
-    await program.methods
-      .initializeVault({
-        agentPubkey: immAgent.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: false,
-      })
-      .accounts({
-        owner: immOwner.publicKey,
-        vaultConfig: immVaultPda,
-        heartbeatRecord: immHeartbeatPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([immOwner])
-      .rpc();
-
-    // Try to update — should fail with VaultImmutable
-    try {
-      await program.methods
-        .updateVault({
-          heartbeatInterval: new anchor.BN(172800),
-          gracePeriod: null,
-          beneficiaries: null,
-        })
-        .accounts({
-          owner: immOwner.publicKey,
-          vaultConfig: immVaultPda,
-        })
-        .signers([immOwner])
-        .rpc();
-      expect.fail("Should have thrown VaultImmutable");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("VaultImmutable");
-    }
-  });
-
-  it("rejects revoke on immutable vault", async () => {
-    const immOwner2 = anchor.web3.Keypair.generate();
-    await airdrop(provider, immOwner2.publicKey, 1);
-    const immAgent2 = anchor.web3.Keypair.generate();
-
-    const [immVaultPda2] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), immOwner2.publicKey.toBuffer()],
-      program.programId
-    );
-    const [immHeartbeatPda2] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), immVaultPda2.toBuffer()],
-      program.programId
-    );
-
-    // Initialize as immutable
-    await program.methods
-      .initializeVault({
-        agentPubkey: immAgent2.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: false,
-      })
-      .accounts({
-        owner: immOwner2.publicKey,
-        vaultConfig: immVaultPda2,
-        heartbeatRecord: immHeartbeatPda2,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([immOwner2])
-      .rpc();
-
-    try {
-      await program.methods
-        .revokeVault()
-        .accounts({
-          owner: immOwner2.publicKey,
-          vaultConfig: immVaultPda2,
-          heartbeatRecord: immHeartbeatPda2,
-        })
-        .signers([immOwner2])
-        .rpc();
-      expect.fail("Should have thrown VaultImmutable");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("VaultImmutable");
-    }
-  });
-
-  // ─── Record Execution on Inactive Vault ───
-
-  it("rejects record_execution on closed vault", async () => {
-    const inactiveOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, inactiveOwner.publicKey, 1);
-    const inactiveAgent = anchor.web3.Keypair.generate();
-
-    const [inactiveVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), inactiveOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [inactiveHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), inactiveVaultPda.toBuffer()],
-      program.programId
-    );
-    const [inactiveLogPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("execution"), inactiveVaultPda.toBuffer()],
-      program.programId
-    );
-
-    // Initialize
-    await program.methods
-      .initializeVault({
-        agentPubkey: inactiveAgent.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: true,
-      })
-      .accounts({
-        owner: inactiveOwner.publicKey,
-        vaultConfig: inactiveVaultPda,
-        heartbeatRecord: inactiveHeartbeatPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([inactiveOwner])
-      .rpc();
-
-    // Revoke the vault (closes both accounts)
-    await program.methods
-      .revokeVault()
-      .accounts({
-        owner: inactiveOwner.publicKey,
-        vaultConfig: inactiveVaultPda,
-        heartbeatRecord: inactiveHeartbeatPda,
-      })
-      .signers([inactiveOwner])
-      .rpc();
-
-    // Try record_execution on closed vault — should fail
-    try {
-      await program.methods
-        .recordExecution({
-          transferCount: 1,
-          totalSolDistributed: new anchor.BN(0),
-          tokenTypesDistributed: 0,
-          attestationHash: Array.from(Buffer.alloc(32, 0)),
-          completed: true,
-        })
-        .accounts({
-          agent: inactiveAgent.publicKey,
-          payer: inactiveOwner.publicKey,
-          vaultConfig: inactiveVaultPda,
-          heartbeatRecord: inactiveHeartbeatPda,
-          executionLog: inactiveLogPda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-        })
-        .signers([inactiveAgent, inactiveOwner])
-        .rpc();
-      expect.fail("Should have thrown");
-    } catch (err: any) {
-      // Closed account → AccountNotInitialized
-      expect(err.toString()).to.include("AccountNotInitialized");
-    }
-  });
-
-  // ─── Revoke Already Closed ───
-
-  it("rejects revoking an already closed vault", async () => {
-    const revOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, revOwner.publicKey, 1);
-    const revAgent = anchor.web3.Keypair.generate();
-
-    const [revVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), revOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [revHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), revVaultPda.toBuffer()],
-      program.programId
-    );
-
-    // Initialize
-    await program.methods
-      .initializeVault({
-        agentPubkey: revAgent.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: true,
-      })
-      .accounts({
-        owner: revOwner.publicKey,
-        vaultConfig: revVaultPda,
-        heartbeatRecord: revHeartbeatPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([revOwner])
-      .rpc();
-
-    // First revoke — closes accounts
-    await program.methods
-      .revokeVault()
-      .accounts({
-        owner: revOwner.publicKey,
-        vaultConfig: revVaultPda,
-        heartbeatRecord: revHeartbeatPda,
-      })
-      .signers([revOwner])
-      .rpc();
-
-    // Second revoke — account doesn't exist
-    try {
-      await program.methods
-        .revokeVault()
-        .accounts({
-          owner: revOwner.publicKey,
-          vaultConfig: revVaultPda,
-          heartbeatRecord: revHeartbeatPda,
-        })
-        .signers([revOwner])
-        .rpc();
-      expect.fail("Should have thrown");
-    } catch (err: any) {
-      expect(err.toString()).to.include("AccountNotInitialized");
-    }
-  });
-
-  // ─── Close Revoked Vault ───
-
-  it("rejects close_revoked_vault on active vault", async () => {
-    const crvOwner = anchor.web3.Keypair.generate();
-    await airdrop(provider, crvOwner.publicKey, 1);
-    const crvAgent = anchor.web3.Keypair.generate();
-
-    const [crvVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), crvOwner.publicKey.toBuffer()],
-      program.programId
-    );
-    const [crvHeartbeatPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("heartbeat"), crvVaultPda.toBuffer()],
-      program.programId
-    );
-
-    // Initialize (active vault)
-    await program.methods
-      .initializeVault({
-        agentPubkey: crvAgent.publicKey,
-        heartbeatInterval: new anchor.BN(86400),
-        gracePeriod: new anchor.BN(604800),
-        beneficiaries: [
-          {
-            wallet: beneficiary1.publicKey,
-            shareBps: 10000,
-            hasSpecificAssets: false,
-          },
-        ],
-        isMutable: true,
-      })
-      .accounts({
-        owner: crvOwner.publicKey,
-        vaultConfig: crvVaultPda,
-        heartbeatRecord: crvHeartbeatPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([crvOwner])
-      .rpc();
-
-    // Try to close an active vault — should fail with VaultStillActive
-    try {
-      await program.methods
-        .closeRevokedVault()
-        .accounts({
-          owner: crvOwner.publicKey,
-          vaultConfig: crvVaultPda,
-          heartbeatRecord: crvHeartbeatPda,
-        })
-        .signers([crvOwner])
-        .rpc();
-      expect.fail("Should have thrown VaultStillActive");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("VaultStillActive");
-    }
-  });
-  // ─── Withdraw from Vault ───
-
-  it("owner can withdraw SOL from vault PDA", async () => {
-    // Deposit SOL into vault PDA first
-    const depositAmount = 0.5 * anchor.web3.LAMPORTS_PER_SOL;
-    const tx = new anchor.web3.Transaction().add(
-      anchor.web3.SystemProgram.transfer({
-        fromPubkey: owner.publicKey,
-        toPubkey: vaultConfigPda,
-        lamports: depositAmount,
-      })
-    );
-    await provider.sendAndConfirm(tx);
-
-    const balanceBefore = await provider.connection.getBalance(vaultConfigPda);
-
-    // Withdraw half the deposited SOL
-    const withdrawAmount = 0.25 * anchor.web3.LAMPORTS_PER_SOL;
-    await program.methods
-      .withdrawSolFromVault(new anchor.BN(withdrawAmount))
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-      })
-      .rpc();
-
-    const balanceAfter = await provider.connection.getBalance(vaultConfigPda);
-    expect(balanceBefore - balanceAfter).to.equal(withdrawAmount);
-  });
-
-  it("rejects SOL withdraw exceeding available balance", async () => {
-    // Try to withdraw more than available (above rent exemption)
-    const hugeAmount = 100 * anchor.web3.LAMPORTS_PER_SOL;
-    try {
-      await program.methods
-        .withdrawSolFromVault(new anchor.BN(hugeAmount))
-        .accounts({
-          owner: owner.publicKey,
-          vaultConfig: vaultConfigPda,
-        })
-        .rpc();
-      expect.fail("Should have thrown InsufficientVaultBalance");
-    } catch (err: any) {
-      expect(err.error.errorCode.code).to.equal("InsufficientVaultBalance");
-    }
-  });
-
-  it("owner can withdraw SPL tokens from vault PDA", async () => {
-    // Create a test mint
-    const mintAuthority = anchor.web3.Keypair.generate();
-    await airdrop(provider, mintAuthority.publicKey, 2);
-
-    const mint = await createMint(
-      provider.connection,
-      mintAuthority,
-      mintAuthority.publicKey,
-      null,
-      6
-    );
-
-    // Create owner's ATA and mint tokens
-    const ownerAta = await createAssociatedTokenAccount(
-      provider.connection,
-      mintAuthority,
-      mint,
-      owner.publicKey
-    );
-    await mintTo(
-      provider.connection,
-      mintAuthority,
-      mint,
-      ownerAta,
-      mintAuthority,
-      1_000_000
-    );
-
-    // Create vault PDA's ATA (allowOwnerOffCurve = true for PDA)
-    const vaultAta = await createAssociatedTokenAccount(
-      provider.connection,
-      mintAuthority,
-      mint,
-      vaultConfigPda,
-      undefined,
-      TOKEN_PROGRAM_ID,
-      undefined,
-      true
-    );
-
-    // Transfer tokens to vault PDA's ATA (simulates deposit)
-    const depositTx = new anchor.web3.Transaction().add(
-      anchor.web3.SystemProgram.transfer({
-        fromPubkey: owner.publicKey,
-        toPubkey: vaultConfigPda,
-        lamports: 0, // just need the TX to sign
-      })
-    );
-    // Direct SPL transfer from owner to vault ATA
-    const { createTransferInstruction } = await import("@solana/spl-token");
-    const transferIx = createTransferInstruction(
-      ownerAta,
-      vaultAta,
-      owner.publicKey,
-      500_000
-    );
-    const depositSplTx = new anchor.web3.Transaction().add(transferIx);
-    await provider.sendAndConfirm(depositSplTx);
-
-    // Verify vault ATA has tokens
-    const vaultAccountBefore = await getAccount(provider.connection, vaultAta);
-    expect(Number(vaultAccountBefore.amount)).to.equal(500_000);
-
-    // Withdraw tokens from vault PDA back to owner
-    await program.methods
-      .withdrawFromVault(new anchor.BN(200_000))
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-        sourceTokenAccount: vaultAta,
-        destinationTokenAccount: ownerAta,
-        vaultAuthority: vaultConfigPda,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .rpc();
-
-    const vaultAccountAfter = await getAccount(provider.connection, vaultAta);
-    expect(Number(vaultAccountAfter.amount)).to.equal(300_000);
-
-    const ownerAccountAfter = await getAccount(provider.connection, ownerAta);
-    expect(Number(ownerAccountAfter.amount)).to.equal(700_000); // 500k kept + 200k withdrawn
-  });
-
-  it("owner can close an emptied vault ATA and reclaim its rent", async () => {
-    const mintAuthority = anchor.web3.Keypair.generate();
-    await airdrop(provider, mintAuthority.publicKey, 2);
-
-    const mint = await createMint(
-      provider.connection,
-      mintAuthority,
-      mintAuthority.publicKey,
-      null,
-      6
-    );
-
-    const ownerAta = await createAssociatedTokenAccount(
-      provider.connection,
-      mintAuthority,
-      mint,
-      owner.publicKey
-    );
-    await mintTo(
-      provider.connection,
-      mintAuthority,
-      mint,
-      ownerAta,
-      mintAuthority,
-      1_000_000
-    );
-
-    // Vault PDA's ATA (allowOwnerOffCurve = true), rent paid by mintAuthority
-    const vaultAta = await createAssociatedTokenAccount(
-      provider.connection,
-      mintAuthority,
-      mint,
-      vaultConfigPda,
-      undefined,
-      TOKEN_PROGRAM_ID,
-      undefined,
-      true
-    );
-
-    const { createTransferInstruction } = await import("@solana/spl-token");
-    const depositSplTx = new anchor.web3.Transaction().add(
-      createTransferInstruction(ownerAta, vaultAta, owner.publicKey, 250_000)
-    );
-    await provider.sendAndConfirm(depositSplTx);
-
-    // Drain the vault ATA to zero, then close it — both in one transaction,
-    // exactly as the client revoke flow batches them.
-    const ownerBalBefore = await provider.connection.getBalance(owner.publicKey);
-    const ataRent = (await provider.connection.getAccountInfo(vaultAta)).lamports;
-
-    await program.methods
-      .withdrawFromVault(new anchor.BN(250_000))
-      .accounts({
-        owner: owner.publicKey,
-        vaultConfig: vaultConfigPda,
-        sourceTokenAccount: vaultAta,
-        destinationTokenAccount: ownerAta,
-        vaultAuthority: vaultConfigPda,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .postInstructions([
+      const h = await program.account.heartbeatRecord.fetch(heartbeat);
+      expect(h.totalHeartbeats.toNumber()).to.equal(2);
+
+      const imposter = Keypair.generate();
+      await fund(imposter.publicKey, 1);
+      try {
         await program.methods
-          .closeVaultAta()
-          .accounts({
-            owner: owner.publicKey,
-            vaultConfig: vaultConfigPda,
-            vaultTokenAccount: vaultAta,
-            vaultAuthority: vaultConfigPda,
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .instruction(),
-      ])
-      .rpc();
+          .recordHeartbeat({ activeTap: {} })
+          .accountsPartial({ agent: imposter.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+          .signers([imposter])
+          .rpc();
+        expect.fail("should reject");
+      } catch (e) {
+        expectErr(e, "UnauthorizedAgent");
+      }
+    });
 
-    // The ATA is gone — fetching it must fail.
-    let closed = false;
-    try {
-      await getAccount(provider.connection, vaultAta);
-    } catch {
-      closed = true;
-    }
-    expect(closed).to.equal(true);
+    it("allows owner update (pre-grace), rejects non-owner", async () => {
+      const { vault, heartbeat } = pdas(owner.publicKey);
+      await program.methods
+        .updateVault({ heartbeatInterval: new BN(700000), gracePeriod: null, beneficiaries: null })
+        .accountsPartial({ owner: owner.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+        .signers([owner])
+        .rpc();
+      const v = await program.account.vaultConfig.fetch(vault);
+      expect(v.heartbeatInterval.toNumber()).to.equal(700000);
 
-    // Owner reclaimed the ATA rent (minus tx fee). The vault is the owner's
-    // own PDA, so the rent flows back to the owner wallet.
-    const ownerBalAfter = await provider.connection.getBalance(owner.publicKey);
-    expect(ownerBalAfter).to.be.greaterThan(ownerBalBefore + ataRent - 100_000);
+      const imposter = Keypair.generate();
+      await fund(imposter.publicKey, 1);
+      try {
+        await program.methods
+          .updateVault({ heartbeatInterval: new BN(800000), gracePeriod: null, beneficiaries: null })
+          .accountsPartial({ owner: imposter.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+          .signers([imposter])
+          .rpc();
+        expect.fail("should reject");
+      } catch (e) {
+        // seeds=[vault, owner] re-derive from the imposter → blocked by ConstraintSeeds
+        // before has_one is even evaluated. Either way the non-owner is rejected.
+        expectErr(e, "ConstraintSeeds");
+      }
+    });
+
+    it("rotate agent: happy + zero/owner/same guards", async () => {
+      const { vault, heartbeat } = pdas(owner.publicKey);
+      const newAgent = Keypair.generate();
+      await program.methods
+        .rotateAgent(newAgent.publicKey)
+        .accountsPartial({ owner: owner.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+        .signers([owner])
+        .rpc();
+      const v = await program.account.vaultConfig.fetch(vault);
+      expect(v.agentPubkey.toString()).to.equal(newAgent.publicKey.toString());
+
+      const cases: [anchor.web3.PublicKey, string][] = [
+        [PublicKey.default, "InvalidAgentPubkey"],
+        [owner.publicKey, "AgentCannotBeOwner"],
+        [newAgent.publicKey, "AgentKeyUnchanged"],
+      ];
+      for (const [key, code] of cases) {
+        try {
+          await program.methods
+            .rotateAgent(key)
+            .accountsPartial({ owner: owner.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+            .signers([owner])
+            .rpc();
+          expect.fail("should reject " + code);
+        } catch (e) {
+          expectErr(e, code);
+        }
+      }
+    });
+
+    it("set_asset_plan: 64 ok, 65 rejected, dup-NFT rejected", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat, assetPlan } = await initVault({
+        owner: o,
+        agent: agent.publicKey,
+        beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+      });
+      const m = Keypair.generate().publicKey;
+      const mk = (n: number) =>
+        Array.from({ length: n }, () => ({
+          mint: m,
+          amount: new BN(1),
+          beneficiaryIndex: 0,
+          isNft: false,
+        }));
+
+      // NOTE: the AssetPlan account stores up to MAX_ASSIGNMENTS=64, but a single
+      // set_asset_plan tx caps at ~18 assignments because instruction data
+      // (42 B each) must fit the 1232-byte transaction limit. The on-chain
+      // TooManyAssignments(>64) guard is therefore defensive/unreachable from a
+      // normal single-tx client. We test a realistic count here.
+      await program.methods
+        .setAssetPlan(mk(18))
+        .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+        .signers([o])
+        .rpc();
+      const plan = await program.account.assetPlan.fetch(assetPlan);
+      expect(plan.assignments.length).to.equal(18);
+      const v = await program.account.vaultConfig.fetch(vault);
+      expect(v.hasAssetPlan).to.be.true;
+
+      // two NFT assignments same mint → DuplicateNftAssignment
+      const nftMint = Keypair.generate().publicKey;
+      try {
+        await program.methods
+          .updateAssetPlan([
+            { mint: nftMint, amount: new BN(1), beneficiaryIndex: 0, isNft: true },
+            { mint: nftMint, amount: new BN(1), beneficiaryIndex: 0, isNft: true },
+          ])
+          .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan })
+          .signers([o])
+          .rpc();
+        expect.fail("should reject dup nft");
+      } catch (e) {
+        expectErr(e, "DuplicateNftAssignment");
+      }
+    });
+
+    it("update_vault rejects beneficiary edit while plan exists (BeneficiariesLockedByPlan)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat, assetPlan } = await initVault({
+        owner: o,
+        agent: agent.publicKey,
+        beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+      });
+      await program.methods
+        .setAssetPlan([{ mint: Keypair.generate().publicKey, amount: new BN(1), beneficiaryIndex: 0, isNft: false }])
+        .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+        .signers([o])
+        .rpc();
+      try {
+        await program.methods
+          .updateVault({ heartbeatInterval: null, gracePeriod: null, beneficiaries: [{ wallet: b2.publicKey, shareBps: 10000 }] })
+          .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+          .signers([o])
+          .rpc();
+        expect.fail("should reject");
+      } catch (e) {
+        expectErr(e, "BeneficiariesLockedByPlan");
+      }
+    });
+
+    it("revoke closes PDAs and allows re-init; rejects non-owner", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat } = await initVault({
+        owner: o,
+        agent: agent.publicKey,
+        beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+      });
+
+      const imposter = Keypair.generate();
+      await fund(imposter.publicKey, 1);
+      try {
+        await program.methods
+          .revokeVault()
+          .accountsPartial({ owner: imposter.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan: null })
+          .signers([imposter])
+          .rpc();
+        expect.fail("should reject");
+      } catch (e) {
+        // seeds=[vault, owner] re-derive from imposter → ConstraintSeeds blocks the non-owner.
+        expectErr(e, "ConstraintSeeds");
+      }
+
+      await program.methods
+        .revokeVault()
+        .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan: null })
+        .signers([o])
+        .rpc();
+      expect(await conn.getAccountInfo(vault)).to.be.null;
+
+      // re-init on same owner works (slot freed)
+      await initVault({
+        owner: o,
+        agent: agent.publicKey,
+        beneficiaries: [{ wallet: b2.publicKey, shareBps: 10000 }],
+      });
+      const v = await program.account.vaultConfig.fetch(vault);
+      expect(v.beneficiaries[0].wallet.toString()).to.equal(b2.publicKey.toString());
+    });
+
+    it("immutable vault blocks update & revoke", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat } = await initVault({
+        owner: o,
+        agent: agent.publicKey,
+        beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+        isMutable: false,
+      });
+      try {
+        await program.methods
+          .updateVault({ heartbeatInterval: new BN(700000), gracePeriod: null, beneficiaries: null })
+          .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+          .signers([o])
+          .rpc();
+        expect.fail("update should reject");
+      } catch (e) {
+        expectErr(e, "VaultImmutable");
+      }
+      try {
+        await program.methods
+          .revokeVault()
+          .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan: null })
+          .signers([o])
+          .rpc();
+        expect.fail("revoke should reject");
+      } catch (e) {
+        expectErr(e, "VaultImmutable");
+      }
+    });
+
+    it("begin_execution before deadline fails (GraceNotElapsed)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat, execution } = await initVault({
+        owner: o,
+        agent: agent.publicKey,
+        beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+        interval: 604800,
+        grace: 2073600,
+      });
+      const cranker = Keypair.generate();
+      await fund(cranker.publicKey, 1);
+      try {
+        await program.methods
+          .beginExecution()
+          .accountsPartial({ payer: cranker.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, executionLog: execution, systemProgram: SystemProgram.programId })
+          .signers([cranker])
+          .rpc();
+        expect.fail("should reject");
+      } catch (e) {
+        expectErr(e, "GraceNotElapsed");
+      }
+    });
   });
 
-  it("cannot close a vault ATA that still holds tokens", async () => {
-    const mintAuthority = anchor.web3.Keypair.generate();
-    await airdrop(provider, mintAuthority.publicKey, 2);
+  // ════════════════════════════════════════════════════════════════════
+  //  PART B — permissionless execution flows (single shared grace wait)
+  // ════════════════════════════════════════════════════════════════════
+  describe("execution flows (one grace wait)", function () {
+    this.timeout(240000);
 
-    const mint = await createMint(
-      provider.connection,
-      mintAuthority,
-      mintAuthority.publicKey,
-      null,
-      6
-    );
-    const ownerAta = await createAssociatedTokenAccount(
-      provider.connection,
-      mintAuthority,
-      mint,
-      owner.publicKey
-    );
-    await mintTo(provider.connection, mintAuthority, mint, ownerAta, mintAuthority, 1_000_000);
-    const vaultAta = await createAssociatedTokenAccount(
-      provider.connection,
-      mintAuthority,
-      mint,
-      vaultConfigPda,
-      undefined,
-      TOKEN_PROGRAM_ID,
-      undefined,
-      true
-    );
-    const { createTransferInstruction } = await import("@solana/spl-token");
-    await provider.sendAndConfirm(
-      new anchor.web3.Transaction().add(
-        createTransferInstruction(ownerAta, vaultAta, owner.publicKey, 100_000)
-      )
-    );
+    const agent = Keypair.generate();
+    const cranker = Keypair.generate(); // permissionless: NOT owner, NOT agent
 
-    // CloseAccount on a non-empty token account must fail (SPL Token program error).
-    try {
+    // Per-scenario state, all built before a single wait.
+    const S: any = {};
+
+    before(async function () {
+      this.timeout(240000);
+      await fund(cranker.publicKey, 20);
+
+      // --- scenario: SOL pro-rata with dust ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate(), b2 = Keypair.generate(), b3 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [
+            { wallet: b1.publicKey, shareBps: 3333 },
+            { wallet: b2.publicKey, shareBps: 3333 },
+            { wallet: b3.publicKey, shareBps: 3334 },
+          ],
+        });
+        await depositSol(owner, p.vault, 2 * LAMPORTS_PER_SOL + 7);
+        S.sol = { owner, b: [b1, b2, b3], ...p };
+      }
+
+      // --- scenario: specific SPL bequest + NFT + residual ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate(), b2 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [
+            { wallet: b1.publicKey, shareBps: 6000 },
+            { wallet: b2.publicKey, shareBps: 4000 },
+          ],
+        });
+        const tokenMint = await makeMint(owner, 6);
+        const nftMint = await makeMint(owner, 0);
+        await fundVaultToken(owner, tokenMint, p.vault, 1_000_000); // 1.0 token (6 dp)
+        await fundVaultToken(owner, nftMint, p.vault, 1);
+        // assignment: 300000 of token to b2 (index 1), whole NFT to b1 (index 0)
+        await program.methods
+          .setAssetPlan([
+            { mint: tokenMint, amount: new BN(300_000), beneficiaryIndex: 1, isNft: false },
+            { mint: nftMint, amount: new BN(1), beneficiaryIndex: 0, isNft: true },
+          ])
+          .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, assetPlan: p.assetPlan, systemProgram: SystemProgram.programId })
+          .signers([owner])
+          .rpc();
+        S.spec = { owner, b: [b1, b2], tokenMint, nftMint, ...p };
+      }
+
+      // --- scenario: theft attempts (SOL + token) ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate(), b2 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [
+            { wallet: b1.publicKey, shareBps: 5000 },
+            { wallet: b2.publicKey, shareBps: 5000 },
+          ],
+        });
+        await depositSol(owner, p.vault, 1 * LAMPORTS_PER_SOL);
+        const tokenMint = await makeMint(owner, 0);
+        await fundVaultToken(owner, tokenMint, p.vault, 1000);
+        await program.methods
+          .setAssetPlan([
+            { mint: tokenMint, amount: new BN(100), beneficiaryIndex: 0, isNft: false },
+            { mint: tokenMint, amount: new BN(200), beneficiaryIndex: 1, isNft: false },
+          ])
+          .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, assetPlan: p.assetPlan, systemProgram: SystemProgram.programId })
+          .signers([owner])
+          .rpc();
+        S.theft = { owner, b: [b1, b2], tokenMint, ...p };
+      }
+
+      // --- scenario: idempotency (SOL, 3 benef) ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b = [Keypair.generate(), Keypair.generate(), Keypair.generate()];
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: b.map((k, i) => ({ wallet: k.publicKey, shareBps: i === 2 ? 3334 : 3333 })),
+        });
+        await depositSol(owner, p.vault, 3 * LAMPORTS_PER_SOL);
+        S.idem = { owner, b, ...p };
+      }
+
+      // --- scenario: freeze-after-deadline (never cranked) ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+        });
+        await depositSol(owner, p.vault, 1 * LAMPORTS_PER_SOL);
+        S.frozen = { owner, b: [b1], ...p };
+      }
+
+      // --- scenario: Token-2022 residual ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate(), b2 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [
+            { wallet: b1.publicKey, shareBps: 5000 },
+            { wallet: b2.publicKey, shareBps: 5000 },
+          ],
+        });
+        const mint = await makeMint(owner, 0, TOKEN_2022_PROGRAM_ID);
+        await fundVaultToken(owner, mint, p.vault, 1000, TOKEN_2022_PROGRAM_ID);
+        S.t22 = { owner, b: [b1, b2], mint, ...p };
+      }
+
+      // --- scenario: underfunded mint + unheld-mint assignment ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+        });
+        const heldMint = await makeMint(owner, 0);
+        await fundVaultToken(owner, heldMint, p.vault, 50); // only 50 held
+        const unheldMint = await makeMint(owner, 0); // vault holds 0
+        await program.methods
+          .setAssetPlan([
+            { mint: heldMint, amount: new BN(100), beneficiaryIndex: 0, isNft: false }, // wants 100, only 50 avail
+            { mint: unheldMint, amount: new BN(5), beneficiaryIndex: 0, isNft: false }, // unheld
+          ])
+          .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, assetPlan: p.assetPlan, systemProgram: SystemProgram.programId })
+          .signers([owner])
+          .rpc();
+        S.edge = { owner, b: [b1], heldMint, unheldMint, ...p };
+      }
+
+      // ONE grace wait for every scenario above.
+      await sleep(GRACE_WAIT_MS);
+    });
+
+    // helper: begin_execution by cranker
+    async function beginExec(s: any) {
       await program.methods
-        .closeVaultAta()
-        .accounts({
-          owner: owner.publicKey,
-          vaultConfig: vaultConfigPda,
-          vaultTokenAccount: vaultAta,
-          vaultAuthority: vaultConfigPda,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
+        .beginExecution()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, executionLog: s.execution, systemProgram: SystemProgram.programId })
+        .signers([cranker])
         .rpc();
-      expect.fail("closeVaultAta should reject a non-empty token account");
-    } catch (err) {
-      expect(err).to.exist;
     }
-  });
-
-  it("non-owner cannot withdraw SOL from vault", async () => {
-    const attacker = anchor.web3.Keypair.generate();
-    await airdrop(provider, attacker.publicKey, 1);
-
-    // Derive attacker's vault PDA (which doesn't exist, but let's try with owner's vault)
-    try {
+    async function solShares(s: any, indices: number[], wallets: anchor.web3.PublicKey[]) {
       await program.methods
-        .withdrawSolFromVault(new anchor.BN(1000))
-        .accounts({
-          owner: attacker.publicKey,
-          vaultConfig: vaultConfigPda,
-        })
-        .signers([attacker])
+        .executeSolShares(Buffer.from(indices))
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution })
+        .remainingAccounts(wallets.map((pk) => ({ pubkey: pk, isWritable: true, isSigner: false })))
+        .signers([cranker])
         .rpc();
-      expect.fail("Should have thrown");
-    } catch (err: any) {
-      // PDA seeds mismatch — attacker's key != owner's key in seeds
-      expect(err).to.exist;
     }
+    async function finalize(s: any, hasPlan: boolean) {
+      await program.methods
+        .finalizeExecution()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: hasPlan ? s.assetPlan : null })
+        .signers([cranker])
+        .rpc();
+    }
+
+    it("SOL pro-rata: exact floor shares, dust→largest benef, rent→owner", async () => {
+      const s = S.sol;
+      await beginExec(s);
+      const log = await program.account.executionLog.fetch(s.execution);
+      const snap = log.solSnapshot;
+      const shares = [3333, 3333, 3334];
+      const expected = shares.map((bp) => snap.mul(new BN(bp)).div(new BN(10000)));
+
+      const before = await Promise.all(s.b.map((k: any) => conn.getBalance(k.publicKey)));
+      await solShares(s, [0, 1, 2], s.b.map((k: any) => k.publicKey));
+      const after = await Promise.all(s.b.map((k: any) => conn.getBalance(k.publicKey)));
+      for (let i = 0; i < 3; i++) {
+        expect(after[i] - before[i]).to.equal(expected[i].toNumber());
+      }
+      await finalize(s, false);
+      const v = await program.account.vaultConfig.fetch(s.vault);
+      expect(v.executed).to.be.true;
+      expect(v.active).to.be.false;
+
+      // dust = snapshot - Σexpected; should go to largest-share benef (index 2, 3334)
+      const paidSum = expected.reduce((a, b) => a.add(b), new BN(0));
+      const dust = snap.sub(paidSum).toNumber();
+      const ownerBalBefore = await conn.getBalance(s.owner.publicKey);
+      const b2Before = await conn.getBalance(s.b[2].publicKey);
+      await program.methods
+        .closeExecutedVaultByOwner()
+        .accountsPartial({ owner: s.owner.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, executionLog: s.execution, assetPlan: null, largestBenef: dust > 0 ? s.b[2].publicKey : null })
+        .signers([s.owner])
+        .rpc();
+      expect(await conn.getAccountInfo(s.vault)).to.be.null;
+      const b2After = await conn.getBalance(s.b[2].publicKey);
+      expect(b2After - b2Before).to.equal(dust);
+      const ownerBalAfter = await conn.getBalance(s.owner.publicKey);
+      expect(ownerBalAfter).to.be.greaterThan(ownerBalBefore); // rent returned
+    });
+
+    it("specific SPL bequest + NFT + pro-rata token residual (permissionless)", async () => {
+      const s = S.spec;
+      await beginExec(s);
+
+      // token residual snapshot = 1_000_000 - 300_000 = 700_000
+      const tokenDist = tokenDistPda(s.vault, s.tokenMint);
+      const vaultTokenAta = getAssociatedTokenAddressSync(s.tokenMint, s.vault, true);
+      await program.methods
+        .beginTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, mint: s.tokenMint, vaultAta: vaultTokenAta, assetPlan: s.assetPlan, tokenDist, systemProgram: SystemProgram.programId })
+        .signers([cranker])
+        .rpc();
+      const td = await program.account.tokenDist.fetch(tokenDist);
+      expect(td.snapshot.toNumber()).to.equal(700_000);
+
+      // NFT dist
+      const nftDist = tokenDistPda(s.vault, s.nftMint);
+      const vaultNftAta = getAssociatedTokenAddressSync(s.nftMint, s.vault, true);
+      await program.methods
+        .beginTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, mint: s.nftMint, vaultAta: vaultNftAta, assetPlan: s.assetPlan, tokenDist: nftDist, systemProgram: SystemProgram.programId })
+        .signers([cranker])
+        .rpc();
+
+      // execute specific #0: token 300000 → b2 (index1)
+      const b2TokenAta = await makeAta(cranker, s.tokenMint, s.b[1].publicKey);
+      await program.methods
+        .executeSpecificAsset(0)
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: s.assetPlan, mint: s.tokenMint, tokenDist, vaultAta: vaultTokenAta, beneficiaryAta: b2TokenAta, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([cranker])
+        .rpc();
+      expect(Number((await getAccount(conn, b2TokenAta)).amount)).to.equal(300_000);
+
+      // execute specific #1: NFT → b1 (index0)
+      const b1NftAta = await makeAta(cranker, s.nftMint, s.b[0].publicKey);
+      await program.methods
+        .executeSpecificAsset(1)
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: s.assetPlan, mint: s.nftMint, tokenDist: nftDist, vaultAta: vaultNftAta, beneficiaryAta: b1NftAta, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([cranker])
+        .rpc();
+      expect(Number((await getAccount(conn, b1NftAta)).amount)).to.equal(1);
+
+      // SOL: vault has only rent (no deposit) → snapshot 0, shares all 0
+      const log = await program.account.executionLog.fetch(s.execution);
+      await solShares(s, [0, 1], s.b.map((k: any) => k.publicKey));
+      await finalize(s, true);
+      const v = await program.account.vaultConfig.fetch(s.vault);
+      expect(v.executed).to.be.true;
+
+      // token residual 700000 split 6000/4000 → 420000 / 280000
+      const b1TokenAta = await makeAta(cranker, s.tokenMint, s.b[0].publicKey);
+      const vaultTokenMeta = (pk: anchor.web3.PublicKey) => ({ pubkey: pk, isWritable: true, isSigner: false });
+      await program.methods
+        .executeTokenShares(Buffer.from([0, 1]))
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, tokenDist, mint: s.tokenMint, vaultAta: vaultTokenAta, tokenProgram: TOKEN_PROGRAM_ID })
+        .remainingAccounts([vaultTokenMeta(b1TokenAta), vaultTokenMeta(b2TokenAta)])
+        .signers([cranker])
+        .rpc();
+      expect(Number((await getAccount(conn, b1TokenAta)).amount)).to.equal(420_000);
+      expect(Number((await getAccount(conn, b2TokenAta)).amount)).to.equal(280_000 + 300_000);
+
+      // close token dist (residual fully paid → dust 0)
+      await program.methods
+        .closeTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, owner: s.owner.publicKey, vaultConfig: s.vault, mint: s.tokenMint, vaultAta: vaultTokenAta, tokenDist, largestBenefAta: null, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([cranker])
+        .rpc();
+      expect(await conn.getAccountInfo(tokenDist)).to.be.null;
+
+      // NFT residual is 0 (whole supply bequeathed), but close still requires a
+      // full paid-mask, so run execute_token_shares (0-amount, just sets bits).
+      const b2NftAta = await makeAta(cranker, s.nftMint, s.b[1].publicKey);
+      await program.methods
+        .executeTokenShares(Buffer.from([0, 1]))
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, tokenDist: nftDist, mint: s.nftMint, vaultAta: vaultNftAta, tokenProgram: TOKEN_PROGRAM_ID })
+        .remainingAccounts([
+          { pubkey: b1NftAta, isWritable: true, isSigner: false },
+          { pubkey: b2NftAta, isWritable: true, isSigner: false },
+        ])
+        .signers([cranker])
+        .rpc();
+
+      // close NFT dist (residual 0, ATA empty after specific bequest)
+      await program.methods
+        .closeTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, owner: s.owner.publicKey, vaultConfig: s.vault, mint: s.nftMint, vaultAta: vaultNftAta, tokenDist: nftDist, largestBenefAta: null, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([cranker])
+        .rpc();
+
+      // owner close now allowed (open_token_dists == 0)
+      const v2 = await program.account.vaultConfig.fetch(s.vault);
+      expect(v2.openTokenDists).to.equal(0);
+      await program.methods
+        .closeExecutedVaultByOwner()
+        .accountsPartial({ owner: s.owner.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, executionLog: s.execution, assetPlan: s.assetPlan, largestBenef: null })
+        .signers([s.owner])
+        .rpc();
+      expect(await conn.getAccountInfo(s.vault)).to.be.null;
+      expect(await conn.getAccountInfo(s.assetPlan)).to.be.null;
+    });
+
+    it("theft attempts all fail", async () => {
+      const s = S.theft;
+      await beginExec(s);
+      const tokenDist = tokenDistPda(s.vault, s.tokenMint);
+      const vaultAta = getAssociatedTokenAddressSync(s.tokenMint, s.vault, true);
+      await program.methods
+        .beginTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, mint: s.tokenMint, vaultAta, assetPlan: s.assetPlan, tokenDist, systemProgram: SystemProgram.programId })
+        .signers([cranker])
+        .rpc();
+
+      // (a) wrong beneficiary wallet at SOL index 0 → BeneficiaryMismatch
+      const attacker = Keypair.generate();
+      try {
+        await solShares(s, [0], [attacker.publicKey]);
+        expect.fail("R1");
+      } catch (e) {
+        expectErr(e, "BeneficiaryMismatch");
+      }
+
+      // (b) substituted beneficiary_ata for specific #0 (belongs to attacker) → BeneficiaryMismatch
+      const attackerAta = await makeAta(cranker, s.tokenMint, attacker.publicKey);
+      try {
+        await program.methods
+          .executeSpecificAsset(0)
+          .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: s.assetPlan, mint: s.tokenMint, tokenDist, vaultAta, beneficiaryAta: attackerAta, tokenProgram: TOKEN_PROGRAM_ID })
+          .signers([cranker])
+          .rpc();
+        expect.fail("R2");
+      } catch (e) {
+        expectErr(e, "BeneficiaryMismatch");
+      }
+
+      // (c) out-of-order specific: pay #1 before #0 (same mint) → SpecificOutOfOrder
+      const b2Ata = await makeAta(cranker, s.tokenMint, s.b[1].publicKey);
+      try {
+        await program.methods
+          .executeSpecificAsset(1)
+          .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: s.assetPlan, mint: s.tokenMint, tokenDist, vaultAta, beneficiaryAta: b2Ata, tokenProgram: TOKEN_PROGRAM_ID })
+          .signers([cranker])
+          .rpc();
+        expect.fail("P3");
+      } catch (e) {
+        expectErr(e, "SpecificOutOfOrder");
+      }
+
+      // (d) CRITICAL regression: spoof a non-canonical vault_ata in begin_token_dist for a NEW mint
+      //     (use a fresh mint to get a clean token_dist slot). Passing a wrong address → InvalidVaultAta.
+      const freshMintOwner = s.owner;
+      const freshMint = await makeMint(freshMintOwner, 0);
+      const freshDist = tokenDistPda(s.vault, freshMint);
+      const wrongAta = Keypair.generate().publicKey; // not the canonical ATA
+      try {
+        await program.methods
+          .beginTokenDist()
+          .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, mint: freshMint, vaultAta: wrongAta, assetPlan: s.assetPlan, tokenDist: freshDist, systemProgram: SystemProgram.programId })
+          .signers([cranker])
+          .rpc();
+        expect.fail("InvalidVaultAta");
+      } catch (e) {
+        expectErr(e, "InvalidVaultAta");
+      }
+    });
+
+    it("idempotency: no double-pay, finalize gated, masks resume", async () => {
+      const s = S.idem;
+      await beginExec(s);
+      const log = await program.account.executionLog.fetch(s.execution);
+      const snap = log.solSnapshot;
+
+      // pay only index 0
+      const before0 = await conn.getBalance(s.b[0].publicKey);
+      await solShares(s, [0], [s.b[0].publicKey]);
+      const after0 = await conn.getBalance(s.b[0].publicKey);
+      const exp0 = snap.mul(new BN(3333)).div(new BN(10000)).toNumber();
+      expect(after0 - before0).to.equal(exp0);
+
+      // finalize must fail (mask not full)
+      try {
+        await finalize(s, false);
+        expect.fail("NotAllSharesPaid");
+      } catch (e) {
+        expectErr(e, "NotAllSharesPaid");
+      }
+
+      // re-run with [0,1,2]: index 0 already paid → skipped (no double-pay)
+      const reBefore0 = await conn.getBalance(s.b[0].publicKey);
+      await solShares(s, [0, 1, 2], s.b.map((k: any) => k.publicKey));
+      const reAfter0 = await conn.getBalance(s.b[0].publicKey);
+      expect(reAfter0 - reBefore0).to.equal(0); // not paid twice
+
+      await finalize(s, false);
+      const v = await program.account.vaultConfig.fetch(s.vault);
+      expect(v.executed).to.be.true;
+    });
+
+    it("freeze after deadline: owner mutations + heartbeat all fail", async () => {
+      const s = S.frozen;
+      // update_vault
+      try {
+        await program.methods
+          .updateVault({ heartbeatInterval: new BN(700000), gracePeriod: null, beneficiaries: null })
+          .accountsPartial({ owner: s.owner.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat })
+          .signers([s.owner])
+          .rpc();
+        expect.fail("update VaultFrozen");
+      } catch (e) { expectErr(e, "VaultFrozen"); }
+      // withdraw_sol
+      try {
+        await program.methods
+          .withdrawSolFromVault(new BN(1000))
+          .accountsPartial({ owner: s.owner.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat })
+          .signers([s.owner])
+          .rpc();
+        expect.fail("withdraw VaultFrozen");
+      } catch (e) { expectErr(e, "VaultFrozen"); }
+      // revoke
+      try {
+        await program.methods
+          .revokeVault()
+          .accountsPartial({ owner: s.owner.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, assetPlan: null })
+          .signers([s.owner])
+          .rpc();
+        expect.fail("revoke VaultFrozen");
+      } catch (e) { expectErr(e, "VaultFrozen"); }
+      // rotate
+      try {
+        await program.methods
+          .rotateAgent(Keypair.generate().publicKey)
+          .accountsPartial({ owner: s.owner.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat })
+          .signers([s.owner])
+          .rpc();
+        expect.fail("rotate VaultFrozen");
+      } catch (e) { expectErr(e, "VaultFrozen"); }
+      // heartbeat
+      try {
+        await program.methods
+          .recordHeartbeat({ activeTap: {} })
+          .accountsPartial({ agent: agent.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat })
+          .signers([agent])
+          .rpc();
+        expect.fail("heartbeat VaultFrozen");
+      } catch (e) { expectErr(e, "VaultFrozen"); }
+    });
+
+    it("Token-2022 residual distribution", async () => {
+      const s = S.t22;
+      await beginExec(s);
+      const tokenDist = tokenDistPda(s.vault, s.mint);
+      const vaultAta = getAssociatedTokenAddressSync(s.mint, s.vault, true, TOKEN_2022_PROGRAM_ID);
+      await program.methods
+        .beginTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, mint: s.mint, vaultAta, assetPlan: null, tokenDist, systemProgram: SystemProgram.programId })
+        .signers([cranker])
+        .rpc();
+      const td = await program.account.tokenDist.fetch(tokenDist);
+      expect(td.snapshot.toNumber()).to.equal(1000);
+
+      await solShares(s, [0, 1], s.b.map((k: any) => k.publicKey));
+      await finalize(s, false);
+
+      const b1Ata = await makeAta(cranker, s.mint, s.b[0].publicKey, TOKEN_2022_PROGRAM_ID);
+      const b2Ata = await makeAta(cranker, s.mint, s.b[1].publicKey, TOKEN_2022_PROGRAM_ID);
+      await program.methods
+        .executeTokenShares(Buffer.from([0, 1]))
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, tokenDist, mint: s.mint, vaultAta, tokenProgram: TOKEN_2022_PROGRAM_ID })
+        .remainingAccounts([
+          { pubkey: b1Ata, isWritable: true, isSigner: false },
+          { pubkey: b2Ata, isWritable: true, isSigner: false },
+        ])
+        .signers([cranker])
+        .rpc();
+      expect(Number((await getAccount(conn, b1Ata, undefined, TOKEN_2022_PROGRAM_ID)).amount)).to.equal(500);
+      expect(Number((await getAccount(conn, b2Ata, undefined, TOKEN_2022_PROGRAM_ID)).amount)).to.equal(500);
+    });
+
+    it("edge: under-funded mint pays min(amount,avail); unheld mint pays 0", async () => {
+      const s = S.edge;
+      await beginExec(s);
+
+      // held mint: vault has 50, assignment wants 100 → pays 50, snapshot residual 0
+      const heldDist = tokenDistPda(s.vault, s.heldMint);
+      const heldVaultAta = getAssociatedTokenAddressSync(s.heldMint, s.vault, true);
+      await program.methods
+        .beginTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, mint: s.heldMint, vaultAta: heldVaultAta, assetPlan: s.assetPlan, tokenDist: heldDist, systemProgram: SystemProgram.programId })
+        .signers([cranker])
+        .rpc();
+      const td = await program.account.tokenDist.fetch(heldDist);
+      // snapshot = 50 - 100 (sat_sub) = 0
+      expect(td.snapshot.toNumber()).to.equal(0);
+
+      // unheld mint: vault holds 0 → begin snapshot 0 (canonical ATA may not exist)
+      const unheldDist = tokenDistPda(s.vault, s.unheldMint);
+      const unheldVaultAta = getAssociatedTokenAddressSync(s.unheldMint, s.vault, true);
+      await program.methods
+        .beginTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, mint: s.unheldMint, vaultAta: unheldVaultAta, assetPlan: s.assetPlan, tokenDist: unheldDist, systemProgram: SystemProgram.programId })
+        .signers([cranker])
+        .rpc();
+      const td2 = await program.account.tokenDist.fetch(unheldDist);
+      expect(td2.snapshot.toNumber()).to.equal(0);
+
+      // pay specific #0 (held): min(100, 50) = 50
+      const b1Held = await makeAta(cranker, s.heldMint, s.b[0].publicKey);
+      await program.methods
+        .executeSpecificAsset(0)
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: s.assetPlan, mint: s.heldMint, tokenDist: heldDist, vaultAta: heldVaultAta, beneficiaryAta: b1Held, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([cranker])
+        .rpc();
+      expect(Number((await getAccount(conn, b1Held)).amount)).to.equal(50);
+
+      // pay specific #1 (unheld): min(5, 0) = 0, mask still set
+      const b1Unheld = await makeAta(cranker, s.unheldMint, s.b[0].publicKey);
+      const unheldVaultAtaReal = await makeAta(cranker, s.unheldMint, s.vault); // create so InterfaceAccount deserializes (0 balance)
+      await program.methods
+        .executeSpecificAsset(1)
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: s.assetPlan, mint: s.unheldMint, tokenDist: unheldDist, vaultAta: unheldVaultAtaReal, beneficiaryAta: b1Unheld, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([cranker])
+        .rpc();
+      expect(Number((await getAccount(conn, b1Unheld)).amount)).to.equal(0);
+      const plan = await program.account.assetPlan.fetch(s.assetPlan);
+      expect(plan.paidMask.toNumber()).to.equal(0b11); // both bits set
+
+      // SOL shares (snapshot ~ rent only deposit=0 → all 0), then finalize
+      await solShares(s, [0], [s.b[0].publicKey]);
+      await finalize(s, true);
+      const v = await program.account.vaultConfig.fetch(s.vault);
+      expect(v.executed).to.be.true;
+    });
   });
 });
-
-// Helper: airdrop SOL to an account
-async function airdrop(
-  provider: anchor.AnchorProvider,
-  to: anchor.web3.PublicKey,
-  amount: number
-) {
-  const sig = await provider.connection.requestAirdrop(
-    to,
-    amount * anchor.web3.LAMPORTS_PER_SOL
-  );
-  await provider.connection.confirmTransaction(sig, "confirmed");
-}

@@ -1,27 +1,31 @@
 use anchor_lang::prelude::*;
 
+/// Created by `begin_execution`. Its mere existence == "execution has begun"
+/// (and proves grace was elapsed at that point — downstream permissionless
+/// instructions gate on this account existing rather than re-checking grace).
 #[account]
 pub struct ExecutionLog {
     /// Associated vault config
     pub vault: Pubkey,
 
-    /// Timestamp of execution
-    pub executed_at: i64,
+    /// Lamports residual (vault balance - rent) frozen at begin_execution.
+    /// SOL is always pure pro-rata (no specific-SOL bequests in v1).
+    pub sol_snapshot: u64,
 
-    /// Number of transfers executed
+    /// Bit i set when beneficiary i has been paid their SOL share.
+    pub sol_paid_mask: u32,
+
+    /// Timestamp execution began
+    pub started_at: i64,
+
+    /// Whether finalize_execution has run (sol + asset masks full)
+    pub completed: bool,
+
+    /// Number of SOL transfers executed (incremented only on 0->1 mask transition)
     pub transfer_count: u32,
 
     /// Total SOL distributed (in lamports)
     pub total_sol_distributed: u64,
-
-    /// Total SPL token types distributed
-    pub token_types_distributed: u32,
-
-    /// TEE attestation data hash (32 bytes)
-    pub attestation_hash: [u8; 32],
-
-    /// Whether execution completed fully
-    pub completed: bool,
 
     /// Bump seed
     pub bump: u8,
@@ -30,12 +34,12 @@ pub struct ExecutionLog {
 impl ExecutionLog {
     pub const SPACE: usize = 8  // discriminator
         + 32    // vault
-        + 8     // executed_at
+        + 8     // sol_snapshot
+        + 4     // sol_paid_mask
+        + 8     // started_at
+        + 1     // completed
         + 4     // transfer_count
         + 8     // total_sol_distributed
-        + 4     // token_types_distributed
-        + 32    // attestation_hash
-        + 1     // completed
         + 1     // bump
         + 64;   // padding
 }

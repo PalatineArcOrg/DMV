@@ -93,6 +93,8 @@ pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> 
     vault.updated_at = clock.unix_timestamp;
     vault.bump = ctx.bumps.vault_config;
     vault.is_mutable = params.is_mutable;
+    vault.has_asset_plan = false;
+    vault.open_token_dists = 0;
 
     // Initialize heartbeat record with current time
     let heartbeat = &mut ctx.accounts.heartbeat_record;

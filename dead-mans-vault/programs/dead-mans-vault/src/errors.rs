@@ -58,4 +58,60 @@ pub enum VaultError {
 
     #[msg("Vault has not been executed yet")]
     VaultNotExecuted,
+
+    // ---- Permissionless autonomous execution (v2) ----
+
+    #[msg("Grace period has not elapsed yet")]
+    GraceNotElapsed,
+
+    #[msg("Execution has already been finalized")]
+    ExecutionFinalized,
+
+    #[msg("This vault requires an AssetPlan account")]
+    AssetPlanRequired,
+
+    #[msg("AssetPlan cannot be changed after grace has elapsed or execution has begun")]
+    AssetPlanImmutable,
+
+    #[msg("Provided account does not match the beneficiary at this index")]
+    BeneficiaryMismatch,
+
+    #[msg("Provided mint does not match the assignment or distribution")]
+    MintMismatch,
+
+    #[msg("Token account owner or mint does not match the expected value")]
+    TokenAccountMismatch,
+
+    #[msg("Specific bequests for a mint must be paid in ascending index order")]
+    SpecificOutOfOrder,
+
+    #[msg("This payout has already been recorded")]
+    MaskAlreadySet,
+
+    #[msg("Not all beneficiary shares have been paid yet")]
+    NotAllSharesPaid,
+
+    #[msg("Tokens remain in the vault — close all token distributions first")]
+    TokensRemain,
+
+    #[msg("Too many specific-bequest assignments (max 64)")]
+    TooManyAssignments,
+
+    #[msg("An NFT mint can have at most one assignment")]
+    DuplicateNftAssignment,
+
+    #[msg("Beneficiary index is out of range")]
+    InvalidBeneficiaryIndex,
+
+    #[msg("Account count does not match the provided indices")]
+    AccountCountMismatch,
+
+    #[msg("Vault PDA address does not match the derived associated token account")]
+    InvalidVaultAta,
+
+    #[msg("Grace period has elapsed — the vault is frozen pending execution")]
+    VaultFrozen,
+
+    #[msg("Beneficiaries cannot be changed while an AssetPlan exists — clear the plan first")]
+    BeneficiariesLockedByPlan,
 }

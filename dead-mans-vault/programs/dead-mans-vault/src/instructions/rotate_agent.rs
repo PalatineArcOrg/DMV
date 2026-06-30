@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::{VaultConfig, HeartbeatRecord};
 use crate::errors::VaultError;
+use crate::util::deadline;
 
 #[derive(Accounts)]
 pub struct RotateAgent<'info> {
@@ -26,6 +27,19 @@ pub struct RotateAgent<'info> {
 }
 
 pub fn handler(ctx: Context<RotateAgent>, new_agent_pubkey: Pubkey) -> Result<()> {
+    // Freeze once grace has elapsed (R8/B1) — a post-deadline rotation would
+    // reset the heartbeat and cancel an execution that is already permissionless.
+    {
+        let now = Clock::get()?.unix_timestamp;
+        let v = &ctx.accounts.vault_config;
+        let dl = deadline(
+            ctx.accounts.heartbeat_record.last_heartbeat,
+            v.heartbeat_interval,
+            v.grace_period,
+        )?;
+        require!(now < dl, VaultError::VaultFrozen);
+    }
+
     let vault = &mut ctx.accounts.vault_config;
     let heartbeat = &mut ctx.accounts.heartbeat_record;
 

@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::{VaultConfig, HeartbeatRecord, HeartbeatMethod};
 use crate::errors::VaultError;
+use crate::util::deadline;
 
 #[derive(Accounts)]
 pub struct RecordHeartbeat<'info> {
@@ -25,8 +26,20 @@ pub struct RecordHeartbeat<'info> {
 
 pub fn handler(ctx: Context<RecordHeartbeat>, method: HeartbeatMethod) -> Result<()> {
     let clock = Clock::get()?;
-    let heartbeat = &mut ctx.accounts.heartbeat_record;
 
+    // Freeze (B1): once grace has fully elapsed the deadline is reached and
+    // execution can begin permissionlessly — a heartbeat must not reset the
+    // clock and cancel it. Time only moves forward, so once an ExecutionLog
+    // could exist, every heartbeat is past the deadline and blocked here.
+    let vault = &ctx.accounts.vault_config;
+    let dl = deadline(
+        ctx.accounts.heartbeat_record.last_heartbeat,
+        vault.heartbeat_interval,
+        vault.grace_period,
+    )?;
+    require!(clock.unix_timestamp < dl, VaultError::VaultFrozen);
+
+    let heartbeat = &mut ctx.accounts.heartbeat_record;
     heartbeat.last_heartbeat = clock.unix_timestamp;
     heartbeat.last_method = method;
     heartbeat.total_heartbeats = heartbeat.total_heartbeats

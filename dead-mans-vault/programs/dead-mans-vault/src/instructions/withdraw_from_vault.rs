@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
-use crate::state::VaultConfig;
+use crate::state::{VaultConfig, HeartbeatRecord};
 use crate::errors::VaultError;
+use crate::util::deadline;
 
 #[derive(Accounts)]
 pub struct WithdrawFromVault<'info> {
@@ -15,6 +16,13 @@ pub struct WithdrawFromVault<'info> {
         has_one = owner @ VaultError::UnauthorizedOwner,
     )]
     pub vault_config: Account<'info, VaultConfig>,
+
+    #[account(
+        seeds = [b"heartbeat", vault_config.key().as_ref()],
+        bump = heartbeat_record.bump,
+        constraint = heartbeat_record.vault == vault_config.key() @ VaultError::HeartbeatVaultMismatch,
+    )]
+    pub heartbeat_record: Account<'info, HeartbeatRecord>,
 
     /// Vault PDA's token account to withdraw FROM — must be owned by the vault PDA
     #[account(
@@ -43,6 +51,18 @@ pub struct WithdrawFromVault<'info> {
 }
 
 pub fn handler(ctx: Context<WithdrawFromVault>, amount: u64) -> Result<()> {
+    // Freeze once grace has elapsed (R8/B1).
+    {
+        let now = Clock::get()?.unix_timestamp;
+        let v = &ctx.accounts.vault_config;
+        let dl = deadline(
+            ctx.accounts.heartbeat_record.last_heartbeat,
+            v.heartbeat_interval,
+            v.grace_period,
+        )?;
+        require!(now < dl, VaultError::VaultFrozen);
+    }
+
     let owner_key = ctx.accounts.vault_config.owner;
     let bump = ctx.accounts.vault_config.bump;
     let seeds = &[

@@ -6,7 +6,7 @@ pub struct VaultConfig {
     /// Owner wallet pubkey
     pub owner: Pubkey,
 
-    /// Agent's TEE-generated execution pubkey
+    /// Agent's TEE-generated execution pubkey (heartbeats only)
     pub agent_pubkey: Pubkey,
 
     /// Heartbeat interval in seconds (e.g., 604800 = 7 days)
@@ -15,7 +15,8 @@ pub struct VaultConfig {
     /// Total grace period in seconds from first missed heartbeat to execution
     pub grace_period: i64,
 
-    /// Registered beneficiaries (on-chain whitelist)
+    /// Registered beneficiaries (on-chain whitelist). Index is authoritative —
+    /// AssetPlan assignments and paid-masks reference beneficiaries by index.
     pub beneficiaries: Vec<Beneficiary>,
 
     /// Whether the vault has been executed (prevents double-execution)
@@ -35,6 +36,15 @@ pub struct VaultConfig {
 
     /// Whether the vault can be revoked/updated by the owner (false = immutable)
     pub is_mutable: bool,
+
+    /// Whether a canonical AssetPlan PDA exists for this vault. Set true by
+    /// `set_asset_plan`; gates whether execution instructions require the plan.
+    pub has_asset_plan: bool,
+
+    /// Number of TokenDist PDAs currently open (incremented by begin_token_dist,
+    /// decremented by close_token_dist). The owner-close requires this to be 0 so
+    /// a started token distribution can never be orphaned by a premature close.
+    pub open_token_dists: u16,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -44,9 +54,6 @@ pub struct Beneficiary {
 
     /// Percentage share (basis points, 10000 = 100%)
     pub share_bps: u16,
-
-    /// Whether this beneficiary has specific asset assignments
-    pub has_specific_assets: bool,
 }
 
 impl VaultConfig {
@@ -55,12 +62,14 @@ impl VaultConfig {
         + 32    // agent_pubkey
         + 8     // heartbeat_interval
         + 8     // grace_period
-        + 4 + (MAX_BENEFICIARIES * (32 + 2 + 1))  // beneficiaries vec
+        + 4 + (MAX_BENEFICIARIES * (32 + 2))  // beneficiaries vec (34 B each)
         + 1     // executed
         + 1     // active
         + 8     // created_at
         + 8     // updated_at
         + 1     // bump
         + 1     // is_mutable
-        + 63;   // padding for future fields
+        + 1     // has_asset_plan
+        + 2     // open_token_dists
+        + 61;   // padding for future fields
 }
