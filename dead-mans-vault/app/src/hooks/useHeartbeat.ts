@@ -115,7 +115,13 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
           stage1: escConfig.stage1Duration,
           stage2: escConfig.stage2Duration,
           stage3: escConfig.stage3Duration,
-        }).catch(() => {});
+        })
+          // FCM primary, local timeline as fallback: if the server is watching
+          // this vault it delivers the escalation alerts, so cancel the local
+          // pre-scheduled timeline to avoid duplicate notifications. If it isn't
+          // (no push token / no server / failed), keep the local timeline.
+          .then((registered) => escService.setFcmActive(registered))
+          .catch(() => escService.setFcmActive(false));
       } catch {
         // Non-fatal — push registration is best-effort.
       }

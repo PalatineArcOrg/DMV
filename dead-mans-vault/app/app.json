@@ -2,7 +2,7 @@
   "expo": {
     "name": "Dead Man's Vault",
     "slug": "dead-mans-vault",
-    "version": "1.7.0",
+    "version": "1.7.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -21,7 +21,7 @@
       },
       "package": "com.romulusol.deadmansvault",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 65,
+      "versionCode": 66,
       "permissions": [
         "POST_NOTIFICATIONS",
         "INTERNET",

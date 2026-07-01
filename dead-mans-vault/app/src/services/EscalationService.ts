@@ -25,6 +25,11 @@ export class EscalationService {
   private currentStage: EscalationStage = 0;
   private executionCallback: (() => void) | null = null;
   private beneficiaryCount: number = 0;
+  // When the FCM notify-server is confirmed watching this vault, IT delivers the
+  // stage 1-3 escalation alerts — so we must NOT also fire the local pre-scheduled
+  // timeline, or the user gets two notifications per stage. The local timeline is
+  // scheduled provisionally and used ONLY as a fallback when FCM isn't active.
+  private fcmActive: boolean = false;
 
   constructor(heartbeatService: HeartbeatService, config: EscalationConfig) {
     this.heartbeatService = heartbeatService;
@@ -42,6 +47,22 @@ export class EscalationService {
 
   setBeneficiaryCount(count: number): void {
     this.beneficiaryCount = count;
+  }
+
+  /**
+   * Called with the result of registering this vault with the FCM notify-server.
+   * When FCM is active, the server is the single source of escalation alerts, so
+   * we cancel the local pre-scheduled timeline to avoid duplicate notifications.
+   * When it's not (no push token / no server / register failed), we (re)schedule
+   * the local timeline as the fallback.
+   */
+  setFcmActive(active: boolean): void {
+    this.fcmActive = active;
+    if (active) {
+      NotificationService.cancelEscalationTimeline().catch(() => {});
+    } else {
+      this.scheduleBackgroundTimeline().catch(() => {});
+    }
   }
 
   start(): void {
@@ -150,6 +171,13 @@ export class EscalationService {
    * every heartbeat confirmation; each call replaces the prior timeline.
    */
   async scheduleBackgroundTimeline(): Promise<void> {
+    // FCM notify-server is the escalation-alert source when active — don't also
+    // schedule the local timeline (would double every stage notification).
+    if (this.fcmActive) {
+      await NotificationService.cancelEscalationTimeline();
+      return;
+    }
+
     const status = await this.heartbeatService.getStatus();
 
     // No heartbeat yet, or no valid due time — clear any stale timeline.
