@@ -16,6 +16,15 @@ Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
   local timeline remains as the offline fallback — no duplicates, no loss of
   killed-app coverage.
 
+### Website
+- New `dmv.palatinearc.com` homepage (permissionless design), now served from the VPS
+  via Caddy and moved off GitHub Pages (source at `website/`).
+- Fact-checked all copy against the shipped v2 build; corrected the download callout to
+  the latest release and refined the Stage 2 escalation copy.
+- Added the DMV logo to the header nav and a favicon.
+- Dropped the bundle's debug error overlay so visitors never see a red error box
+  (a benign error surfaced by Cloudflare's injected bot-detection script).
+
 ## [1.7.0] — 2026-07-01
 
 Permissionless autonomous execution + specific bequests. The dead-man's switch now
