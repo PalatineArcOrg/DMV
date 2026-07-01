@@ -60,11 +60,12 @@ Spec: `BUILD-SPEC-permissionless-execution.md` (§18 overrides §3–§13). Impl
 - [x] version 1.7.0 / versionCode 65 (NOTE: v1.6.4/64 was already released — 65 is the next free code)
 - [x] APK built: dead-mans-vault-v1.7.0.apk (70MB, embedded versionCode 65 verified via aapt2)
 - [x] emulator smoke test attempted — APK is arm64-v8a only (Seeker target), can't run on x86_64 VPS emulator (missing x86_64 NDK libs: libexpo-modules-core/libexpo-sqlite/librnscreens). arm64 slice complete; JS boot NOT verifiable on this emulator without an x86_64-inclusive throwaway build.
-- [ ] GitHub release: HELD per user — they sideload + verify on Seeker first, then I cut it (delete v1.6.4, create v1.7.0 w/ APK; repo redirects PalatineArcOrg/DMV → Romulus-Sol/DMV)
+- [x] GitHub release v1.7.0 CUT (2026-07-01) — deleted v1.6.4, created v1.7.0 as Latest with APK attached; /releases/latest → v1.7.0 (dmv.palatinearc.com serves it). Repo: Romulus-Sol/DMV.
 - [ ] USER: sideload dead-mans-vault-v1.7.0.apk → Seeker, confirm boot, then full app-closed e2e (server path already proven via standalone devnet e2e)
 - NOTE: live server has 0 registrations; old-program vaults (pre-redeploy) won't decode — runExecutor returns no_vault/errors caught. Clear any stale DB rows if they appear.
 
 ## Docs
 - [x] CLAUDE.md (/root/DMV/CLAUDE.md) refreshed for v2 (accounts, instructions, error codes, escalation, execution crank, permissionless model section, notify-server, test coverage, gotchas)
 - [x] README.md refreshed for v2 + committed + pushed to pre-prod (default branch, live on GitHub)
-- [ ] (optional) git remote URL has stale PAT + old org; push works via /root/.github_token + redirect
+- [x] whole feature committed (281a2c6 on-chain / f035f98 client / 9823cda server) + pushed to pre-prod
+- [x] git remote URL fixed → origin = Romulus-Sol/DMV with working PAT (plain git push/pull work)
