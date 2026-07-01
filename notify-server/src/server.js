@@ -14,6 +14,17 @@ import { executorReady, crankerPubkey, runExecutor } from './executor.js';
 const app = express();
 app.use(express.json({ limit: '16kb' }));
 
+// Strip any api-key from an RPC URL before exposing it (/health is public via Caddy).
+function maskRpc(url) {
+  try {
+    const u = new URL(url);
+    if (u.searchParams.has('api-key')) u.searchParams.set('api-key', '***');
+    return u.origin + u.pathname + (u.search ? u.search : '');
+  } catch {
+    return String(url).replace(/api-key=[^&]+/i, 'api-key=***');
+  }
+}
+
 function isPubkey(s) {
   try {
     // eslint-disable-next-line no-new
@@ -38,7 +49,7 @@ app.get('/health', (req, res) => {
     executorReady: executorReady(),
     cranker: crankerPubkey(),
     registrations: countRegistrations(),
-    rpc: config.rpcUrl,
+    rpc: maskRpc(config.rpcUrl),
     programId: config.programId,
   });
 });
