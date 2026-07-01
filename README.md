@@ -1,10 +1,12 @@
 # Dead Man's Vault
 
-An autonomous crypto inheritance protocol for Solana Seeker.
+An autonomous crypto inheritance protocol on Solana — built for the Seeker, runs on any modern Android.
 
 Dead Man's Vault monitors an owner's liveness through configurable heartbeat checks. When heartbeats stop, it escalates through a 4-stage warning system and then distributes assets to pre-configured beneficiaries.
 
 **Execution is permissionless and trustless.** Once the grace period elapses, the on-chain program computes every payout from on-chain state, and *anyone* — the app, a beneficiary, or a keyless watcher — can submit the distribution. The caller controls nothing: funds can only go to the pre-set beneficiaries, in the pre-set proportions, after the deadline. A bundled keyless watcher service distributes automatically even if the owner's app is never reopened — so the dead-man's switch actually fires.
+
+Owners can also leave **specific bequests** — exact SPL token amounts or whole NFTs assigned to particular beneficiaries — carved out before the remainder splits pro-rata by share.
 
 **Built for the Monolith — Solana Mobile Hackathon (Feb 2 -- Mar 9, 2026)**
 
@@ -16,8 +18,12 @@ Dead Man's Vault monitors an owner's liveness through configurable heartbeat che
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/PalatineArcOrg/DMV/releases/latest)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.7.0)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
+
+### Device Compatibility
+
+Runs on **any modern Android phone** — owner signing uses standard [Mobile Wallet Adapter](https://docs.solanamobile.com/) (Phantom, Solflare, or any MWA wallet), and the agent's heartbeat key uses the Android Keystore via `expo-secure-store`. There is no Seed-Vault-specific code. The Solana **Seeker** is the recommended device (its Seed Vault gives the strongest owner-key custody), but it is **not required** — and because execution is permissionless and off-device, the inheritance fires even if the owner's phone is lost, dead, or was never a Seeker. Android-only for now (the app uses MWA, which is Android-only); iOS is not yet supported. The release APK is `arm64-v8a`, covering effectively all current Android phones.
 
 ---
 
