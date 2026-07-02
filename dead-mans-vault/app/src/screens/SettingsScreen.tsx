@@ -185,9 +185,19 @@ export function SettingsScreen() {
           <Text style={styles.sectionLabel}>VAULT STATUS</Text>
           <View style={styles.card}>
             <View style={[styles.statusRow, { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }]}>
-              <View style={[styles.statusDot, { backgroundColor: stageCfg.color }]} />
-              <Text style={[styles.statusLabelText, { color: stageCfg.color }]}>{stageCfg.label}</Text>
-              <Text style={styles.statusStageBadge}>{'\u00B7'} Stage {escalationStage}</Text>
+              {vaultConfig.executed ? (
+                <>
+                  <View style={[styles.statusDot, { backgroundColor: COLORS.critical }]} />
+                  <Text style={[styles.statusLabelText, { color: COLORS.critical }]}>Executed</Text>
+                  <Text style={styles.statusStageBadge}>{'\u00B7'} distribution complete</Text>
+                </>
+              ) : (
+                <>
+                  <View style={[styles.statusDot, { backgroundColor: stageCfg.color }]} />
+                  <Text style={[styles.statusLabelText, { color: stageCfg.color }]}>{stageCfg.label}</Text>
+                  <Text style={styles.statusStageBadge}>{'\u00B7'} Stage {escalationStage}</Text>
+                </>
+              )}
             </View>
             <View style={styles.statusGrid}>
               <View style={styles.statusGridCell}>

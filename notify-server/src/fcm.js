@@ -62,12 +62,19 @@ export async function sendPush(deviceToken, { title, body, channel }) {
     body: JSON.stringify(message),
   });
 
-  if (res.ok) return { ok: true, status: res.status };
+  if (res.ok) {
+    let okBody = {};
+    try { okBody = await res.json(); } catch {}
+    // FCM returns { name: "projects/<id>/messages/<msgId>" } — accepted by FCM.
+    console.log(`[fcm] ACCEPTED "${title}" ch=${channel} -> ${okBody.name || '(no name)'} token ${deviceToken.slice(0, 14)}…`);
+    return { ok: true, status: res.status, name: okBody.name };
+  }
 
   let errBody = {};
   try {
     errBody = await res.json();
   } catch {}
+  console.log(`[fcm] REJECTED "${title}" ch=${channel} status=${res.status} body=${JSON.stringify(errBody).slice(0, 300)}`);
   // FCM returns UNREGISTERED / INVALID_ARGUMENT for dead/invalid tokens.
   const code = errBody?.error?.details?.[0]?.errorCode || errBody?.error?.status || '';
   const unregistered = code === 'UNREGISTERED' || res.status === 404;

@@ -99,6 +99,21 @@ app.post('/execute-now', requireSecret, async (req, res) => {
   }
 });
 
+// Debug: send a single test push to a token (isolates FCM delivery from stage logic).
+app.post('/debug/push', requireSecret, async (req, res) => {
+  const { token, title, body, channel } = req.body || {};
+  if (typeof token !== 'string' || token.length < 20) {
+    return res.status(400).json({ error: 'valid token required' });
+  }
+  const { sendPush } = await import('./fcm.js');
+  const r = await sendPush(token, {
+    title: title || 'DMV test',
+    body: body || 'If you see this once, FCM delivery works.',
+    channel: channel || 'escalation',
+  });
+  res.json(r);
+});
+
 app.listen(config.port, '127.0.0.1', () => {
   // eslint-disable-next-line no-console
   console.log(`dmv-notify-server listening on 127.0.0.1:${config.port} (fcm ${fcmReady() ? 'ready' : 'NOT configured'})`);

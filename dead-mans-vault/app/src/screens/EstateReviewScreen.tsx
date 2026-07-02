@@ -297,7 +297,7 @@ export function EstateReviewScreen() {
           <DetailRow label="Vault Rent" value="~0.015 SOL" />
           <DetailRow label="Agent Funding" value="~0.01 SOL" />
           <DetailRow label="Creation Fee" value="0.01 SOL" />
-          <DetailRow label="Total Est. Cost" value="~0.075 SOL" />
+          <DetailRow label="Total Est. Cost" value="~0.035 SOL" />
           <DetailRow label="Distribution" value="Per-beneficiary on-chain" />
         </View>
       </View>

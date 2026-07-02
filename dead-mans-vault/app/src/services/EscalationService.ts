@@ -1,22 +1,8 @@
 import { EscalationStage, EscalationConfig } from '../types';
 import { HeartbeatService } from './HeartbeatService';
-import { NotificationService, formatDuration } from '../notifications/NotificationService';
+import { NotificationService } from '../notifications/NotificationService';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { useDemoStore } from '../store/useDemoStore';
-
-// Notification frequency caps (seconds)
-const NOTIFICATION_INTERVALS: Record<number, number> = {
-  1: 8 * 3600,  // Stage 1: every 8 hours
-  2: 4 * 3600,  // Stage 2: every 4 hours
-  3: 1 * 3600,  // Stage 3: every 1 hour
-};
-
-// Dev mode: fast notification intervals for testing
-const DEV_NOTIFICATION_INTERVALS: Record<number, number> = {
-  1: 15,  // 15 seconds
-  2: 10,
-  3: 5,
-};
 
 export class EscalationService {
   private heartbeatService: HeartbeatService;
@@ -174,98 +160,11 @@ export class EscalationService {
    * every heartbeat confirmation; each call replaces the prior timeline.
    */
   async scheduleBackgroundTimeline(): Promise<void> {
-    // FCM notify-server is the escalation-alert source when active — don't also
-    // schedule the local timeline (would double every stage notification).
-    if (this.fcmActive) {
-      await NotificationService.cancelEscalationTimeline();
-      return;
-    }
-
-    const status = await this.heartbeatService.getStatus();
-
-    // No heartbeat yet, or no valid due time — clear any stale timeline.
-    if (status.lastHeartbeat === 0 || !status.nextDue) {
-      await NotificationService.cancelEscalationTimeline();
-      return;
-    }
-
-    const useDevTimers = __DEV__ || useDemoStore.getState().isDemoMode;
-    const intervals = useDevTimers ? DEV_NOTIFICATION_INTERVALS : NOTIFICATION_INTERVALS;
-
-    const s1 = this.config.stage1Duration;
-    const s2 = this.config.stage2Duration;
-    const s3 = this.config.stage3Duration;
-    const totalGrace = s1 + s2 + s3;
-    const dueAt = status.nextDue; // absolute unix ts when stage 1 begins
-    const now = Math.floor(Date.now() / 1000);
-
-    const bText =
-      this.beneficiaryCount > 0
-        ? ` ${this.beneficiaryCount} beneficiar${this.beneficiaryCount !== 1 ? 'ies' : 'y'} affected.`
-        : '';
-
-    type Ev = { at: number; entry: boolean; title: string; body: string; channelId: string };
-    const events: Ev[] = [];
-
-    const addStage = (
-      stage: 1 | 2 | 3,
-      stageStart: number,
-      stageDuration: number,
-      title: string,
-      channelId: string,
-      bodyFor: (at: number) => string,
-    ) => {
-      const interval = intervals[stage] ?? 3600;
-      // Stage entry, then recurring reminders until the stage ends.
-      for (let at = stageStart, first = true; at < stageStart + stageDuration; at += interval, first = false) {
-        events.push({ at, entry: first, title, body: bodyFor(at), channelId });
-      }
-    };
-
-    addStage(1, dueAt, s1, 'Heartbeat Due', 'heartbeat',
-      () => 'Your vault heartbeat is overdue. Open the app to confirm and keep your vault active.');
-    addStage(2, dueAt + s1, s2, 'Heartbeat Overdue', 'escalation',
-      () => `Emergency escalation active.${bText} Open the app to confirm.`);
-    addStage(3, dueAt + s1 + s2, s3, 'FINAL WARNING', 'execution',
-      (at) => `Estate plan executes in ${formatDuration(Math.max(0, dueAt + totalGrace - at))}. Confirm heartbeat NOW.`);
-
-    // Stage 4: grace elapsed. Execution itself requires the app to run, so this
-    // prompts the user to open it.
-    events.push({
-      at: dueAt + totalGrace,
-      entry: true,
-      title: 'Estate Plan Due',
-      body: 'Grace period has elapsed. Open Dead Man’s Vault to begin distribution to your beneficiaries.',
-      channelId: 'execution',
-    });
-
-    // Keep only future events, soonest first.
-    const future = events.filter((e) => e.at > now).sort((a, b) => a.at - b.at);
-
-    // Bound to the OS limit: always keep stage-entry events; evenly downsample
-    // the recurring reminders to fill the remaining budget so coverage spans
-    // the whole grace window instead of clustering at the start.
-    const MAX = NotificationService.MAX_ESCALATION_NOTIFS;
-    let selected = future;
-    if (future.length > MAX) {
-      const entries = future.filter((e) => e.entry);
-      const recurs = future.filter((e) => !e.entry);
-      const budget = Math.max(0, MAX - entries.length);
-      const step = recurs.length / budget;
-      const sampledRecurs = budget > 0
-        ? Array.from({ length: budget }, (_, i) => recurs[Math.floor(i * step)])
-        : [];
-      selected = [...entries, ...sampledRecurs].sort((a, b) => a.at - b.at);
-    }
-
-    await NotificationService.scheduleEscalationTimeline(
-      selected.map((e) => ({
-        title: e.title,
-        body: e.body,
-        channelId: e.channelId,
-        delaySeconds: e.at - now,
-      })),
-    );
+    // v1.7.3: the notify-server (FCM) is the SOLE source of escalation alerts —
+    // FCM delivery is confirmed (incl. killed-app), and the local pre-scheduled
+    // timeline double-fired with the server. We no longer schedule it; we only
+    // clear any timeline left over from a prior app version.
+    await NotificationService.cancelEscalationTimeline();
   }
 
   resetEscalation(): void {
