@@ -25,10 +25,15 @@ export function parseVaultConfig(data) {
   const interval = Number(data.readBigInt64LE(o)); o += 8;
   const grace = Number(data.readBigInt64LE(o)); o += 8;
   const benCount = data.readUInt32LE(o); o += 4;
-  o += benCount * (32 + 2); // Beneficiary { wallet:32, share_bps:2 }
+  const beneficiaries = [];
+  for (let i = 0; i < benCount; i++) {
+    const wallet = new PublicKey(data.subarray(o, o + 32)); o += 32;
+    const shareBps = data.readUInt16LE(o); o += 2;
+    beneficiaries.push({ wallet: wallet.toBase58(), shareBps });
+  }
   const executed = data[o] !== 0; o += 1;
   const active = data[o] !== 0; o += 1;
-  return { owner: owner.toBase58(), interval, grace, executed, active };
+  return { owner: owner.toBase58(), interval, grace, executed, active, beneficiaries };
 }
 
 /**

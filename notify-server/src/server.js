@@ -6,10 +6,12 @@ import {
   deleteRegistration,
   deleteRegistrationsByOwner,
   countRegistrations,
+  allRegistrations,
 } from './db.js';
 import { fcmReady } from './fcm.js';
 import { startPoller, pollOnce } from './poller.js';
 import { executorReady, crankerPubkey, runExecutor } from './executor.js';
+import { readVaultState } from './solana.js';
 
 const app = express();
 app.use(express.json({ limit: '16kb' }));
@@ -52,6 +54,49 @@ app.get('/health', (req, res) => {
     rpc: maskRpc(config.rpcUrl),
     programId: config.programId,
   });
+});
+
+// Public discovery: vaults (among those registered here) where `wallet` is a
+// beneficiary. Read-only, derived from on-chain state — grants no authority.
+// Powers the app's "Inheritances" screen / claim button.
+app.get('/inheritances', async (req, res) => {
+  const wallet = req.query.wallet;
+  if (!isPubkey(wallet)) return res.status(400).json({ error: 'valid wallet required' });
+  const now = Math.floor(Date.now() / 1000);
+  const out = [];
+  for (const reg of allRegistrations()) {
+    let state;
+    try {
+      state = await readVaultState(reg.vault);
+    } catch {
+      continue; // skip unreadable vaults rather than fail the whole list
+    }
+    if (!state.exists || !state.config) continue;
+    const benef = (state.config.beneficiaries || []).find((b) => b.wallet === wallet);
+    if (!benef) continue;
+
+    const { owner, interval, grace, executed } = state.config;
+    let deadline = null;
+    let status = 'active';
+    if (executed) {
+      status = 'executed';
+    } else if (state.lastHeartbeat) {
+      deadline = state.lastHeartbeat + interval + grace;
+      const overdue = now - (state.lastHeartbeat + interval);
+      if (now >= deadline) status = 'claimable';
+      else if (overdue > 0) status = 'warning';
+      else status = 'active';
+    }
+    out.push({
+      vault: reg.vault,
+      owner,
+      shareBps: benef.shareBps,
+      status, // active | warning | claimable | executed
+      deadline, // unix ts grace elapses (null if no heartbeat yet)
+      secondsToDeadline: deadline ? Math.max(0, deadline - now) : null,
+    });
+  }
+  res.json({ wallet, inheritances: out });
 });
 
 app.post('/register', requireSecret, (req, res) => {
