@@ -5,6 +5,25 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.7.2] — 2026-07-02
+
+### Added
+- **0.01 SOL vault-creation fee, enforced on-chain.** `initialize_vault` collects a
+  0.01 SOL fee to the project wallet as part of creation — required and not bypassable
+  (a `fee_recipient` account pinned by address + a CPI transfer).
+
+### Fixed
+- **Executed vaults no longer appear active.** Settings now shows a "Close Vault &
+  Reclaim Rent" action for executed vaults (which closes the account on-chain and
+  returns rent) instead of a Revoke that didn't persist across reopen.
+- **Duplicate escalation notifications** eliminated — the Stage-4 app/server overlap is
+  closed (the app defers to the server's push when FCM is active).
+- **Notification copy** rewritten and corrected across app + server (Stage 4 now
+  reflects that distribution happens automatically).
+
+> Because the fee is enforced on-chain, builds older than 1.7.2 can no longer create
+> vaults; 1.7.2 is required for vault creation.
+
 ## [1.7.1] — 2026-07-01
 
 ### Fixed
