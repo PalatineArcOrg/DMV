@@ -2,7 +2,7 @@
 
 A small, **keyless** Node service that watches Dead Man's Vault vaults on-chain and does two things:
 
-1. **Push escalation alerts** — sends FCM notifications as a vault escalates through its stages, so a killed/uninstalled app can't silence the warnings.
+1. **Push escalation alerts** — sends FCM notifications as a vault escalates through its stages, so a killed/uninstalled app can't silence the warnings. As of app v1.7.3 this is the **single source** of escalation notifications: the app no longer schedules a local OS timeline (it double-fired with the server), so every stage produces exactly one push.
 2. **Autonomously execute distribution** — once a vault's grace period elapses, it runs the permissionless execution crank to distribute the vault's assets **with no app and no owner action required**. This is what makes the dead-man's switch actually fire.
 
 It holds **no authority over funds**. Execution is permissionless: payouts are computed entirely on-chain and can only go to the pre-set beneficiaries in the pre-set proportions after the deadline. The server's keypair (`CRANKER_KEYPAIR`) pays transaction fees and new-PDA rent only — it is not a vault authority and cannot redirect anything.
@@ -13,7 +13,7 @@ Live at **`notify.palatinearc.com`** (Caddy → `127.0.0.1:8787`), running under
 
 ## How it works
 
-The app registers each vault with `POST /register` (owner, vault PDA, FCM device token, stage durations) on setup and heartbeat. A poller then runs every `POLL_INTERVAL_MS` (default 60s):
+The app registers each vault with `POST /register` (owner, vault PDA, FCM device token, stage durations) on setup and heartbeat. A poller then runs every `POLL_INTERVAL_MS` (set to **15s** — coarser intervals could skip short demo-mode stages, e.g. 30s each, and miss a notification):
 
 - Reads each registered vault's `VaultConfig` + `HeartbeatRecord` on-chain.
 - Computes the escalation stage; on a stage transition (or throttled recurring), sends the matching FCM push.
@@ -47,8 +47,11 @@ It never closes the core PDAs — that final cleanup is owner-signed by design (
 | `POST` | `/deregister` | `x-dmv-secret` | Remove by `{ vault }` or `{ owner }` |
 | `POST` | `/poll-now` | `x-dmv-secret` | Run one poll tick immediately (testing) |
 | `POST` | `/execute-now` | `x-dmv-secret` | Manually crank one vault's execution: `{ vault }` (testing) |
+| `POST` | `/debug/push` | `x-dmv-secret` | Send one test FCM push to a token: `{ token, title?, body?, channel? }` — isolates FCM delivery from the stage logic |
 
 `x-dmv-secret` must match `REGISTER_SECRET`. `/health` masks the RPC api-key so the (public) endpoint never leaks it.
+
+Every FCM send logs `[fcm] ACCEPTED`/`[fcm] REJECTED` (with the token truncated) so delivery can be traced in the journal.
 
 ---
 

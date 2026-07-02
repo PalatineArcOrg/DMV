@@ -61,8 +61,24 @@ Spec: `BUILD-SPEC-permissionless-execution.md` (§18 overrides §3–§13). Impl
 - [x] APK built: dead-mans-vault-v1.7.0.apk (70MB, embedded versionCode 65 verified via aapt2)
 - [x] emulator smoke test attempted — APK is arm64-v8a only (Seeker target), can't run on x86_64 VPS emulator (missing x86_64 NDK libs: libexpo-modules-core/libexpo-sqlite/librnscreens). arm64 slice complete; JS boot NOT verifiable on this emulator without an x86_64-inclusive throwaway build.
 - [x] GitHub release v1.7.0 CUT (2026-07-01) — deleted v1.6.4, created v1.7.0 as Latest with APK attached; /releases/latest → v1.7.0 (dmv.palatinearc.com serves it). Repo: Romulus-Sol/DMV.
-- [ ] USER: sideload dead-mans-vault-v1.7.0.apk → Seeker, confirm boot, then full app-closed e2e (server path already proven via standalone devnet e2e)
+- [x] USER: sideloaded on Seeker, confirmed boot, full on-device cycle validated through v1.7.4 (server crank + close & reclaim rent both confirmed on device)
 - NOTE: live server has 0 registrations; old-program vaults (pre-redeploy) won't decode — runExecutor returns no_vault/errors caught. Clear any stale DB rows if they appear.
+
+## Phase 7 — Post-launch fixes (v1.7.1 → v1.7.4) ✅ shipped, on-device confirmed
+- [x] v1.7.1: fixed duplicate escalation notifications (local timeline + FCM overlap); new VPS-served website (`dmv.palatinearc.com`, off GitHub Pages via Caddy), logo + favicon, dropped CF-injected debug error overlay
+- [x] v1.7.2: **0.01 SOL vault-creation fee, on-chain enforced** (`initialize_vault` `fee_recipient` pinned to `FEE_WALLET` 98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp + CPI transfer, `VAULT_CREATION_FEE_LAMPORTS`, `InvalidFeeRecipient`); executed-vault "Close & Reclaim Rent" in Settings; notification copy rewrite
+- [x] v1.7.3: **notifications now server-only** — removed the on-device local OS timeline (double-fired); notify-server is the single source; poll 60s→15s (was skipping short demo stages); added `[fcm] ACCEPTED/REJECTED` logging + secret-gated `/debug/push`; FCM delivery verified incl. killed-app; Total Est. Cost corrected to 0.035 SOL; Settings shows "Executed"
+- [x] v1.7.4: fixed stale "Configure Heartbeat" tick after autonomous execution — app now recognizes on-chain `vaultConfig.executed` and shows the "Vault Executed" summary instead of the partial wizard
+- [x] docs updated for the fee, server-only notifications, executed-vault close, VPS website (README ×2, notify-server README + .env.example, CLAUDE.md, IMPLEMENTATION.md, CHANGELOG through v1.7.4)
+
+## Fast-follows (backlog)
+- [ ] Specific-**SOL** bequests (currently SPL/NFT only; SOL is pro-rata by share only)
+- [ ] Beneficiary-facing **"Claim"** button in the app (anyone can crank; expose it in-UI for heirs)
+- [ ] Token-2022 **owner-withdraw** (`withdraw_from_vault` is legacy-Token only)
+- [ ] Cranker **fee reimbursement** (server pays fees/rent; no on-chain repay path yet)
+- [ ] `set_asset_plan` **>18 assignments** chunking/append ix (single tx caps ~18; storage cap 64)
+- [ ] Token-2022 transfer-fee mints can stick `close_token_dist` (non-zero residual after fee) — documented limitation
+- [ ] Harmless dev-console error from Cloudflare's injected bot-detection script on `dmv.palatinearc.com` (overlay suppressed; benign)
 
 ## Docs
 - [x] CLAUDE.md (/root/DMV/CLAUDE.md) refreshed for v2 (accounts, instructions, error codes, escalation, execution crank, permissionless model section, notify-server, test coverage, gotchas)

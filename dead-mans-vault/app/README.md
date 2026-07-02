@@ -30,6 +30,7 @@ Dead Man's Vault makes execution **permissionless**: your device configures the 
 - **Fires even if your phone never comes back** — a bundled keyless watcher distributes autonomously when the app is closed
 - **Pro-rata *and* specific bequests** — split the estate by percentage, and/or assign exact tokens and whole NFTs to specific heirs
 - **Reversible until execution** — Any heartbeat during stages 1–3 resets everything back to normal; once grace elapses the vault freezes and Stage 4 is irreversible
+- **One-time 0.01 SOL creation fee** — collected on-chain by `initialize_vault` (a `fee_recipient` account pinned by address + a CPI transfer), so it can't be bypassed
 
 ---
 
@@ -177,7 +178,7 @@ Distribution supports both the legacy Token program and **Token-2022**. Rounding
 | **Zustand** | 5.x | Reactive state management |
 | **expo-sqlite** | 15.x | Local persistence (heartbeats, execution progress mirror, settings) |
 | **expo-secure-store** | 14.0.1 | Agent heartbeat key storage |
-| **expo-notifications** | 0.29.14 | Push notifications (3 Android channels) |
+| **expo-notifications** | 0.29.14 | Local push (heartbeat-confirmed + foreground display); escalation alerts are pushed by the keyless watcher via FCM |
 | **Helius DAS API** | — | Token portfolio scanning |
 | **Jupiter Price API** | — | Real-time USD pricing |
 | **Keyless watcher** | Node + Express + SQLite | Autonomous off-device execution after grace |
@@ -277,7 +278,7 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **App version** | 1.7.0 (versionCode 65) |
+| **App version** | 1.7.4 (versionCode 69) |
 | **Tests** | 20/20 passing |
 
 ---

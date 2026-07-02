@@ -8,6 +8,8 @@ Dead Man's Vault monitors an owner's liveness through configurable heartbeat che
 
 Owners can also leave **specific bequests** — exact SPL token amounts or whole NFTs assigned to particular beneficiaries — carved out before the remainder splits pro-rata by share.
 
+Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initialize_vault` (a `fee_recipient` account pinned by address + a CPI transfer, so it cannot be bypassed).
+
 **Built for the Monolith — Solana Mobile Hackathon (Feb 2 -- Mar 9, 2026)**
 
 ### Demo Videos
@@ -18,7 +20,7 @@ Owners can also leave **specific bequests** — exact SPL token amounts or whole
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.7.0)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.7.4)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility
@@ -72,9 +74,9 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 - **Device migration** -- Detects missing agent key and triggers on-chain `rotate_agent` with 5 security guards
 
 ### Notifications
-- **Stage-aware push notifications** -- Each escalation stage triggers specific notifications with contextual details (time overdue, beneficiary count, time remaining)
-- **Background delivery** -- OS-scheduled notifications fire even when the app is killed, using per-stage throttle intervals (8h/4h/1h)
-- **Execution progress** -- Real-time notifications for each distribution step, completion summary, and failure alerts
+- **Stage-aware push notifications** -- Each escalation stage triggers a specific notification with contextual details (time overdue, beneficiary count, time remaining)
+- **Server-driven delivery (single source)** -- The keyless watcher service is the sole source of escalation alerts: it watches each registered vault's heartbeat on-chain and pushes stage alerts via FCM, so they arrive even when the app is killed and there are no duplicates. (Earlier builds also pre-scheduled a local OS timeline; that was removed in v1.7.3 because it double-fired alongside the server.)
+- **Execution progress** -- Notifications for completion summary and failures
 - **Heartbeat confirmation** -- Notification confirms heartbeat with next due date
 - **Foreground display** -- Notifications render in-app via foreground notification handler
 
@@ -155,7 +157,7 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 
 | Instruction | Signer | Description |
 |-------------|--------|-------------|
-| `initialize_vault` | Owner | Create vault with beneficiaries (`{wallet, share_bps}`), intervals, agent key, mutability flag |
+| `initialize_vault` | Owner | Create vault with beneficiaries (`{wallet, share_bps}`), intervals, agent key, mutability flag. Collects a 0.01 SOL creation fee to `FEE_WALLET` via CPI (`fee_recipient` pinned by `address` constraint) |
 | `update_vault` | Owner | Modify plan (beneficiaries, intervals). Blocked on immutable vaults / once a plan exists |
 | `set_asset_plan` / `update_asset_plan` | Owner | Define specific bequests (SPL + NFT) assigned to beneficiaries |
 | `record_heartbeat` | Agent | Record liveness confirmation on-chain (heartbeats only) |
@@ -191,7 +193,7 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 ### Error Codes
 
-37 custom error codes covering interval/share validation, signer authorization, the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, and vault lifecycle.
+38 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, and vault lifecycle.
 
 ### Security
 
@@ -226,7 +228,7 @@ Authentication screen guards app access with biometric/PIN when enabled.
 | **ExecutionService** | The permissionless crank — a mask-driven "do the next undone thing" loop (begin → bequests → pro-rata SOL → finalize → token residual → close), idempotent and resumable from on-chain state |
 | **VaultTransactionService** | Builds and sends all on-chain transactions (setup, owner ops, and the permissionless crank) with priority fees and raw byte parsing fallback |
 | **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker); signs heartbeats only |
-| **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX) with frequency caps |
+| **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX); local heartbeat-confirmed / foreground display. Escalation alerts come from the keyless watcher via FCM (the local timeline was removed in v1.7.3) |
 | **PortfolioScanner** | Token balances via Helius DAS, dual-oracle pricing (Pyth + Jupiter), DeFi detection |
 | **MigrationService** | Detects device migration and triggers on-chain agent rotation |
 
@@ -274,8 +276,8 @@ dead-mans-vault/
 +-- programs/dead-mans-vault/src/    # Anchor program (Rust)
 |   +-- instructions/                # 18 instruction handlers
 |   +-- state/                       # Account definitions (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist)
-|   +-- errors.rs                    # 37 error codes
-|   +-- constants.rs                 # On-chain constants + mask helpers
+|   +-- errors.rs                    # 38 error codes
+|   +-- constants.rs                 # On-chain constants (FEE_WALLET, VAULT_CREATION_FEE_LAMPORTS) + mask helpers
 +-- tests/                           # Anchor program tests (20/20 passing)
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
