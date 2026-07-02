@@ -66,6 +66,10 @@ pub fn handler(ctx: Context<ExecuteSpecificAsset>, assignment_index: u8) -> Resu
     // 3. load (Copy)
     let a = plan.assignments[j];
 
+    // This is the SPL/NFT path only. A SOL bequest (zero-pubkey sentinel mint)
+    // must be paid via execute_specific_sol, not here.
+    require!(a.mint != Pubkey::default(), VaultError::MintMismatch);
+
     // 4. beneficiary index in range
     let bi = a.beneficiary_index as usize;
     require!(bi < vault.beneficiaries.len(), VaultError::InvalidBeneficiaryIndex);

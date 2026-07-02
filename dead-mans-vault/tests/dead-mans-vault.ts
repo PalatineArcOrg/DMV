@@ -400,6 +400,41 @@ describe("dead-mans-vault — permissionless execution", () => {
       }
     });
 
+    it("set_asset_plan validates SOL bequests (InvalidSolBequest)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 2);
+      const b1 = Keypair.generate();
+      const { vault, heartbeat, assetPlan } = await initVault({
+        owner: o,
+        agent: Keypair.generate().publicKey,
+        beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+      });
+      const setPlan = (assignments: any[]) =>
+        program.methods
+          .setAssetPlan(assignments)
+          .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+          .signers([o])
+          .rpc();
+
+      // zero-amount SOL bequest → rejected (fails first; tx rolls back, no account)
+      try {
+        await setPlan([{ mint: PublicKey.default, amount: new BN(0), beneficiaryIndex: 0, isNft: false }]);
+        expect.fail("should reject zero-amount SOL bequest");
+      } catch (e) { expectErr(e, "InvalidSolBequest"); }
+
+      // SOL flagged as NFT → rejected
+      try {
+        await setPlan([{ mint: PublicKey.default, amount: new BN(1000), beneficiaryIndex: 0, isNft: true }]);
+        expect.fail("should reject SOL-as-NFT");
+      } catch (e) { expectErr(e, "InvalidSolBequest"); }
+
+      // valid SOL bequest accepted
+      await setPlan([{ mint: PublicKey.default, amount: new BN(1000), beneficiaryIndex: 0, isNft: false }]);
+      const plan = await program.account.assetPlan.fetch(assetPlan);
+      expect(plan.assignments.length).to.equal(1);
+      expect(plan.assignments[0].mint.equals(PublicKey.default)).to.be.true;
+    });
+
     it("update_vault rejects beneficiary edit while plan exists (BeneficiariesLockedByPlan)", async () => {
       const o = Keypair.generate();
       await fund(o.publicKey, 3);
@@ -511,7 +546,7 @@ describe("dead-mans-vault — permissionless execution", () => {
       try {
         await program.methods
           .beginExecution()
-          .accountsPartial({ payer: cranker.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, executionLog: execution, systemProgram: SystemProgram.programId })
+          .accountsPartial({ payer: cranker.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, executionLog: execution, assetPlan: null, systemProgram: SystemProgram.programId })
           .signers([cranker])
           .rpc();
         expect.fail("should reject");
@@ -681,15 +716,48 @@ describe("dead-mans-vault — permissionless execution", () => {
         S.edge = { owner, b: [b1], heldMint, unheldMint, ...p };
       }
 
+      // --- scenario: specific-SOL bequest + pro-rata residual ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate(), b2 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [
+            { wallet: b1.publicKey, shareBps: 6000 },
+            { wallet: b2.publicKey, shareBps: 4000 },
+          ],
+        });
+        await depositSol(owner, p.vault, 2 * LAMPORTS_PER_SOL);
+        // Bequeath exactly 0.5 SOL to b2 (index 1); the remaining residual splits 60/40.
+        await program.methods
+          .setAssetPlan([
+            { mint: PublicKey.default, amount: new BN(LAMPORTS_PER_SOL / 2), beneficiaryIndex: 1, isNft: false },
+          ])
+          .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, assetPlan: p.assetPlan, systemProgram: SystemProgram.programId })
+          .signers([owner])
+          .rpc();
+        S.specsol = { owner, b: [b1, b2], specificLamports: LAMPORTS_PER_SOL / 2, ...p };
+      }
+
       // ONE grace wait for every scenario above.
       await sleep(GRACE_WAIT_MS);
     });
 
-    // helper: begin_execution by cranker
-    async function beginExec(s: any) {
+    // helper: begin_execution by cranker (asset_plan required iff the vault has one)
+    async function beginExec(s: any, hasPlan: boolean = false) {
       await program.methods
         .beginExecution()
-        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, executionLog: s.execution, systemProgram: SystemProgram.programId })
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, executionLog: s.execution, assetPlan: hasPlan ? s.assetPlan : null, systemProgram: SystemProgram.programId })
+        .signers([cranker])
+        .rpc();
+    }
+    // helper: pay a specific-SOL bequest by cranker
+    async function specificSol(s: any, idx: number, benefWallet: anchor.web3.PublicKey) {
+      await program.methods
+        .executeSpecificSol(idx)
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: s.assetPlan, beneficiary: benefWallet })
         .signers([cranker])
         .rpc();
     }
@@ -747,7 +815,7 @@ describe("dead-mans-vault — permissionless execution", () => {
 
     it("specific SPL bequest + NFT + pro-rata token residual (permissionless)", async () => {
       const s = S.spec;
-      await beginExec(s);
+      await beginExec(s, true);
 
       // token residual snapshot = 1_000_000 - 300_000 = 700_000
       const tokenDist = tokenDistPda(s.vault, s.tokenMint);
@@ -846,9 +914,50 @@ describe("dead-mans-vault — permissionless execution", () => {
       expect(await conn.getAccountInfo(s.assetPlan)).to.be.null;
     });
 
+    it("specific-SOL bequest: carved out of residual; finalize gated on the SOL specific", async () => {
+      const s = S.specsol;
+      await beginExec(s, true);
+
+      // snapshot = distributable − 0.5 SOL (the specific bequest is carved out).
+      const log = await program.account.executionLog.fetch(s.execution);
+      const snap = log.solSnapshot;
+
+      // Pro-rata residual splits 60/40 from the post-carve snapshot.
+      const expB1 = snap.mul(new BN(6000)).div(new BN(10000));
+      const expB2 = snap.mul(new BN(4000)).div(new BN(10000));
+      const b2Start = await conn.getBalance(s.b[1].publicKey);
+      const before = await Promise.all(s.b.map((k: any) => conn.getBalance(k.publicKey)));
+      await solShares(s, [0, 1], s.b.map((k: any) => k.publicKey));
+      const after = await Promise.all(s.b.map((k: any) => conn.getBalance(k.publicKey)));
+      expect(after[0] - before[0]).to.equal(expB1.toNumber());
+      expect(after[1] - before[1]).to.equal(expB2.toNumber());
+
+      // finalize must FAIL while the SOL specific is unpaid (asset mask not full).
+      try {
+        await finalize(s, true);
+        expect.fail("finalize should be gated on the unpaid SOL specific");
+      } catch (e) {
+        expectErr(e, "NotAllSharesPaid");
+      }
+
+      // Pay the specific SOL bequest (0.5 SOL → b2 / index 1) via execute_specific_sol.
+      await specificSol(s, 0, s.b[1].publicKey);
+      const plan = await program.account.assetPlan.fetch(s.assetPlan);
+      expect(plan.paidMask.toNumber() & 1).to.equal(1);
+
+      // now finalize succeeds
+      await finalize(s, true);
+      const v = await program.account.vaultConfig.fetch(s.vault);
+      expect(v.executed).to.be.true;
+
+      // b2 total = 0.5 SOL specific + 40% residual; conservation holds (≤ distributable).
+      const b2End = await conn.getBalance(s.b[1].publicKey);
+      expect(b2End - b2Start).to.equal(s.specificLamports + expB2.toNumber());
+    });
+
     it("theft attempts all fail", async () => {
       const s = S.theft;
-      await beginExec(s);
+      await beginExec(s, true);
       const tokenDist = tokenDistPda(s.vault, s.tokenMint);
       const vaultAta = getAssociatedTokenAddressSync(s.tokenMint, s.vault, true);
       await program.methods
@@ -1024,7 +1133,7 @@ describe("dead-mans-vault — permissionless execution", () => {
 
     it("edge: under-funded mint pays min(amount,avail); unheld mint pays 0", async () => {
       const s = S.edge;
-      await beginExec(s);
+      await beginExec(s, true);
 
       // held mint: vault has 50, assignment wants 100 → pays 50, snapshot residual 0
       const heldDist = tokenDistPda(s.vault, s.heldMint);

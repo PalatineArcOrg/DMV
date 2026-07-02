@@ -117,4 +117,7 @@ pub enum VaultError {
 
     #[msg("Fee recipient account does not match the required fee wallet")]
     InvalidFeeRecipient,
+
+    #[msg("A SOL bequest must have is_nft = false and a non-zero amount")]
+    InvalidSolBequest,
 }

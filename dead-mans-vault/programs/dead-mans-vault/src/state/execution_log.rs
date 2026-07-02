@@ -8,8 +8,9 @@ pub struct ExecutionLog {
     /// Associated vault config
     pub vault: Pubkey,
 
-    /// Lamports residual (vault balance - rent) frozen at begin_execution.
-    /// SOL is always pure pro-rata (no specific-SOL bequests in v1).
+    /// Lamports residual for the pro-rata split = (vault balance − rent) − Σ
+    /// specific-SOL bequests, frozen at begin_execution. Specific-SOL amounts are
+    /// paid separately by execute_specific_sol (carved out here, like token specifics).
     pub sol_snapshot: u64,
 
     /// Bit i set when beneficiary i has been paid their SOL share.

@@ -104,6 +104,13 @@ pub mod dead_mans_vault {
         instructions::execute_specific_asset::handler(ctx, assignment_index)
     }
 
+    pub fn execute_specific_sol(
+        ctx: Context<ExecuteSpecificSol>,
+        assignment_index: u8,
+    ) -> Result<()> {
+        instructions::execute_specific_sol::handler(ctx, assignment_index)
+    }
+
     pub fn execute_sol_shares(
         ctx: Context<ExecuteSolShares>,
         indices: Vec<u8>,

@@ -105,6 +105,37 @@ export type DeadMansVault = {
           }
         },
         {
+          "name": "assetPlan",
+          "docs": [
+            "Required iff `vault_config.has_asset_plan` — read to carve specific-SOL",
+            "bequests out of the pro-rata residual (pinned by seeds; omitted otherwise)."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
@@ -777,6 +808,114 @@ export type DeadMansVault = {
         },
         {
           "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "assignmentIndex",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "executeSpecificSol",
+      "discriminator": [
+        141,
+        193,
+        131,
+        18,
+        244,
+        218,
+        140,
+        25
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executionLog",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "assetPlan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "docs": [
+            "`beneficiaries[assignment.beneficiary_index].wallet`."
+          ],
+          "writable": true
         }
       ],
       "args": [
@@ -2057,6 +2196,11 @@ export type DeadMansVault = {
       "code": 6037,
       "name": "invalidFeeRecipient",
       "msg": "Fee recipient account does not match the required fee wallet"
+    },
+    {
+      "code": 6038,
+      "name": "invalidSolBequest",
+      "msg": "A SOL bequest must have is_nft = false and a non-zero amount"
     }
   ],
   "types": [
@@ -2187,8 +2331,9 @@ export type DeadMansVault = {
           {
             "name": "solSnapshot",
             "docs": [
-              "Lamports residual (vault balance - rent) frozen at begin_execution.",
-              "SOL is always pure pro-rata (no specific-SOL bequests in v1)."
+              "Lamports residual for the pro-rata split = (vault balance − rent) − Σ",
+              "specific-SOL bequests, frozen at begin_execution. Specific-SOL amounts are",
+              "paid separately by execute_specific_sol (carved out here, like token specifics)."
             ],
             "type": "u64"
           },

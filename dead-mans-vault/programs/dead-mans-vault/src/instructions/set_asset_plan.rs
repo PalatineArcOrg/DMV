@@ -24,6 +24,12 @@ pub fn validate_assignments(
             (a.beneficiary_index as usize) < beneficiary_count,
             VaultError::InvalidBeneficiaryIndex
         );
+
+        // A SOL bequest is signalled by the zero-pubkey sentinel mint. It is a
+        // lamport transfer (never an NFT) and a zero amount is meaningless.
+        if a.mint == Pubkey::default() {
+            require!(!a.is_nft && a.amount > 0, VaultError::InvalidSolBequest);
+        }
     }
 
     for (i, a) in assignments.iter().enumerate() {
