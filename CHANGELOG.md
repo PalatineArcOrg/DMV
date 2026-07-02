@@ -5,6 +5,19 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.9.0] — 2026-07-02
+
+### Added
+- **Beneficiary claim.** A new **Inheritances** screen lists vaults where the connected
+  wallet is a beneficiary (auto-discovered via the notify-server, or imported by owner
+  address), with each vault's status and your share. Once grace has elapsed,
+  **"Distribute Estate"** lets the heir trigger the whole distribution from their own
+  wallet — the same permissionless on-chain crank the app/watcher run, MWA-signed with
+  the heir paying only network fees (they control nothing about destinations). Pure-SOL
+  estates distribute in a single transaction; mixed estates run across passes,
+  idempotent and resumable. First step toward a switch that needs no watcher server.
+  (Server: read-only `GET /inheritances` discovery endpoint; no program change.)
+
 ## [1.8.0] — 2026-07-02
 
 ### Added

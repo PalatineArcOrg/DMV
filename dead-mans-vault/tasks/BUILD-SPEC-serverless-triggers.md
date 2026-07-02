@@ -1,6 +1,8 @@
 # BUILD SPEC — Serverless Triggers (Claim + Bounty + Mutual Keeping)
 
-Status: **approved, not started** · Target: after v1.8.0 · Owner-approved decisions locked below.
+Status: **Phase 1 SHIPPED (v1.9.0)** · Phases 2-3 pending · Owner-approved decisions locked below.
+Phase 1 (claim) shipped 2026-07-02: `GET /inheritances` + InheritancesScreen + ClaimService (heir-paid
+MWA crank, resumable). Fast-path verified e2e on devnet; not yet device-tested. Phase 2 (bounty) is next.
 
 ## 0. Goal
 
