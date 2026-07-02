@@ -55,11 +55,19 @@ export function BequestsScreen() {
     });
   }, [vaultConfig, localBeneficiaries]);
 
-  // Bequeathable assets — exclude SOL (specific-SOL bequests are a fast-follow).
-  const assets = useMemo(
-    () => balances.filter((b) => b.symbol !== 'SOL'),
-    [balances],
-  );
+  // Bequeathable assets: SOL first (specific-SOL bequest via the zero-pubkey
+  // sentinel mint), then held tokens/NFTs.
+  const assets = useMemo(() => {
+    const solBal = balances.find((b) => b.symbol === 'SOL');
+    const sol: any = {
+      mint: PublicKey.default, // sentinel — the program reads this as native SOL
+      symbol: 'SOL',
+      decimals: 9,
+      amount: solBal?.amount ?? 0,
+    };
+    const tokens = balances.filter((b) => b.symbol !== 'SOL');
+    return [sol, ...tokens];
+  }, [balances]);
 
   const hasAssetPlan = !!vaultConfig?.hasAssetPlan;
   const isActiveVault = !!vaultConfig && vaultConfig.active && !vaultConfig.executed;

@@ -100,7 +100,7 @@ export class ExecutionService {
       // 1. begin_execution (idempotent — account already existing == done).
       let execLog = await this.txService.fetchExecutionLog(owner);
       if (!execLog) {
-        await this.txService.crankBeginExecution(agent, owner);
+        await this.txService.crankBeginExecution(agent, owner, hasAssetPlan);
         execLog = await this.txService.fetchExecutionLog(owner);
       }
 
@@ -111,7 +111,11 @@ export class ExecutionService {
       for (const t of tokenBalances) mintMap.set(t.mint.toString(), t.mint);
       let assetPlan = hasAssetPlan ? await this.txService.fetchAssetPlan(owner) : null;
       if (assetPlan) {
-        for (const a of assetPlan.assignments) mintMap.set(a.mint.toString(), a.mint);
+        // Skip specific-SOL bequests (zero-pubkey sentinel) — they have no token dist.
+        for (const a of assetPlan.assignments) {
+          if (a.mint.equals(PublicKey.default)) continue;
+          mintMap.set(a.mint.toString(), a.mint);
+        }
       }
       const mints = [...mintMap.values()];
 
@@ -138,8 +142,11 @@ export class ExecutionService {
             }
             const a = assetPlan.assignments[j];
             const benef = benefWallets[a.beneficiaryIndex];
+            const isSol = a.mint.equals(PublicKey.default);
             await this.runStep(ownerWallet, `spec_${j}`, () =>
-              this.txService.crankExecuteSpecificAsset(agent, owner, a.mint, j, benef),
+              isSol
+                ? this.txService.crankExecuteSpecificSol(agent, owner, j, benef)
+                : this.txService.crankExecuteSpecificAsset(agent, owner, a.mint, j, benef),
             );
           }
         }
@@ -274,7 +281,11 @@ export class ExecutionService {
 
     if (assetPlan) {
       assetPlan.assignments.forEach((a, j) =>
-        add(`spec_${j}`, 'distribute_specific_asset', `Bequest #${j + 1} (${a.mint.toString().slice(0, 6)}…)`),
+        add(
+          `spec_${j}`,
+          'distribute_specific_asset',
+          `Bequest #${j + 1} (${a.mint.equals(PublicKey.default) ? 'SOL' : a.mint.toString().slice(0, 6) + '…'})`,
+        ),
       );
     }
     for (let i = 0; i < n; i++) {

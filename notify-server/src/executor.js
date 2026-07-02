@@ -101,6 +101,8 @@ async function collectMints(connection, vault, plan) {
   }
   if (plan) {
     for (const a of plan.assignments) {
+      // Specific-SOL bequests use the zero-pubkey sentinel — they have no token dist.
+      if (a.mint.equals(PublicKey.default)) continue;
       const key = a.mint.toBase58();
       if (!found.has(key)) {
         const info = await connection.getAccountInfo(a.mint);
@@ -163,6 +165,10 @@ export async function runExecutor(vaultStr) {
         vaultConfig: vault,
         heartbeatRecord: heartbeatPda(vault),
         executionLog: execPda,
+        // Pass the plan explicitly so specific-SOL is carved out of the residual;
+        // must be null (not omitted) for no-plan vaults or Anchor auto-derives a
+        // non-existent PDA.
+        assetPlan: hasPlan ? assetPlanPda(vault) : null,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
@@ -199,6 +205,22 @@ export async function runExecutor(vaultStr) {
       if (bitSet(plan.paidMask, j)) continue;
       const a = plan.assignments[j];
       const benWallet = beneficiaries[a.beneficiaryIndex].wallet;
+
+      // Specific-SOL bequest (zero-pubkey sentinel) → dedicated lamport ix, no ATAs.
+      if (a.mint.equals(PublicKey.default)) {
+        await program.methods
+          .executeSpecificSol(j)
+          .accountsPartial({
+            payer,
+            vaultConfig: vault,
+            executionLog: execPda,
+            assetPlan: assetPlanPda(vault),
+            beneficiary: benWallet,
+          })
+          .rpc();
+        continue;
+      }
+
       const mintInfo = mints.find((m) => m.mint.equals(a.mint));
       const programId = mintInfo ? mintInfo.programId : TOKEN_PROGRAM_ID;
       const vaultAta = getAssociatedTokenAddressSync(a.mint, vault, true, programId);

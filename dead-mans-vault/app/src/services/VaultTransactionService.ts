@@ -608,12 +608,16 @@ export class VaultTransactionService {
 
   // ─── Permissionless execution crank (build + send with a payer keypair) ───
 
-  async crankBeginExecution(payer: Keypair, owner: PublicKey): Promise<string> {
+  async crankBeginExecution(payer: Keypair, owner: PublicKey, hasAssetPlan: boolean): Promise<string> {
     const [vaultPda] = this.getVaultPDA(owner);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
     const [executionPda] = this.getExecutionPDA(vaultPda);
+    const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
     const program = this.programAs(payer.publicKey);
 
+    // The optional asset_plan MUST be passed explicitly (the PDA when a plan
+    // exists — so begin_execution can carve specific-SOL out of the residual —
+    // otherwise null; omitting it makes Anchor auto-derive a non-existent PDA).
     const ix = await program.methods
       .beginExecution()
       .accountsPartial({
@@ -621,11 +625,38 @@ export class VaultTransactionService {
         vaultConfig: vaultPda,
         heartbeatRecord: heartbeatPda,
         executionLog: executionPda,
+        assetPlan: hasAssetPlan ? assetPlanPda : null,
         systemProgram: SystemProgram.programId,
       })
       .instruction();
 
     return this.sendWithPayer([ix], payer, [vaultPda, heartbeatPda, executionPda, payer.publicKey], 120_000);
+  }
+
+  /** Pay a specific-SOL bequest (assignment whose mint is the zero-pubkey sentinel). */
+  async crankExecuteSpecificSol(
+    payer: Keypair,
+    owner: PublicKey,
+    assignmentIndex: number,
+    beneficiaryWallet: PublicKey,
+  ): Promise<string> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const [executionPda] = this.getExecutionPDA(vaultPda);
+    const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
+    const program = this.programAs(payer.publicKey);
+
+    const ix = await program.methods
+      .executeSpecificSol(assignmentIndex)
+      .accountsPartial({
+        payer: payer.publicKey,
+        vaultConfig: vaultPda,
+        executionLog: executionPda,
+        assetPlan: assetPlanPda,
+        beneficiary: beneficiaryWallet,
+      })
+      .instruction();
+
+    return this.sendWithPayer([ix], payer, [vaultPda, beneficiaryWallet, payer.publicKey], 120_000);
   }
 
   async crankBeginTokenDist(
