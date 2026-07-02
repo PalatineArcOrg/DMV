@@ -50,10 +50,17 @@ export function SetupWizardScreen() {
   const [hasVaultAssets, setHasVaultAssets] = useState(false);
   const [hasPastExecution, setHasPastExecution] = useState<boolean | null>(null);
 
-  // Check if a past execution exists (vault PDAs closed but execution log in DB)
+  // Check if a past execution exists. A vault executed autonomously by the
+  // notify-server leaves NO local execution-log steps, so an on-chain executed
+  // vault counts too — otherwise the screen would fall through to the setup
+  // wizard and show a stale "Configure Heartbeat" tick (synced from the vault).
   useEffect(() => {
     if (isActuallySetup || !publicKey) {
       setHasPastExecution(false);
+      return;
+    }
+    if (vaultConfig?.executed) {
+      setHasPastExecution(true);
       return;
     }
     (async () => {
@@ -65,7 +72,7 @@ export function SetupWizardScreen() {
         setHasPastExecution(false);
       }
     })();
-  }, [isActuallySetup, publicKey]);
+  }, [isActuallySetup, publicKey, vaultConfig?.executed]);
 
   // Check if vault has withdrawable assets
   useEffect(() => {
