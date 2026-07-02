@@ -412,6 +412,42 @@ export class VaultTransactionService {
     return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda, executionPda], 420_000);
   }
 
+  /**
+   * Close an EXECUTED vault's core PDAs (VaultConfig + HeartbeatRecord +
+   * ExecutionLog, and the AssetPlan if present), reclaiming rent to the owner
+   * and sweeping any SOL dust to the largest-share beneficiary. No reinit.
+   * Requires open_token_dists == 0 (all token dists closed first).
+   */
+  async buildCloseExecutedVaultTx(owner: PublicKey): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+    const [executionPda] = this.getExecutionPDA(vaultPda);
+    const program = this.programAs(owner);
+
+    // Pin the AssetPlan + largest-share beneficiary (for SOL dust) before close.
+    const oldConfig = await this.fetchVaultConfig(owner);
+    const hasAssetPlan = !!oldConfig?.hasAssetPlan;
+    const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
+    const largestBenef = oldConfig?.beneficiaries?.length
+      ? VaultTransactionService.largestShareWallet(oldConfig.beneficiaries)
+      : null;
+
+    const closeIx = await program.methods
+      .closeExecutedVaultByOwner()
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+        executionLog: executionPda,
+        assetPlan: hasAssetPlan ? assetPlanPda : null,
+        largestBenef,
+      })
+      .instruction();
+
+    const tx = new Transaction().add(closeIx);
+    return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda, executionPda], 250_000);
+  }
+
   async buildFundVaultTx(owner: PublicKey, amountLamports: number): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
     const tx = new Transaction().add(

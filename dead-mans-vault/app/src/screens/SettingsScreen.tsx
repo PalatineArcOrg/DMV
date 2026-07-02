@@ -115,6 +115,47 @@ export function SettingsScreen() {
     );
   }, [publicKey, signTransaction]);
 
+  const handleCloseExecuted = useCallback(async () => {
+    if (!publicKey) return;
+
+    Alert.alert(
+      'Close Executed Vault?',
+      'Your estate plan already executed. This closes the vault on-chain and returns its remaining rent to your wallet. It removes the vault from this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Close Vault',
+          style: 'destructive',
+          onPress: async () => {
+            setIsRevoking(true);
+            try {
+              const { revokeVault, formatRevokeSummary } = require('../services/revokeVault');
+              const result = await revokeVault(publicKey, signTransaction);
+              const summary = formatRevokeSummary(result);
+              const buttons = [
+                ...summary.txs.slice(0, 2).map((t: { label: string; sig: string }, i: number) => ({
+                  text: `View tx ${i + 1}`,
+                  onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${t.sig}?cluster=devnet`),
+                })),
+                { text: 'Done' },
+              ];
+              Alert.alert(summary.title, summary.message, buttons);
+            } catch (err: any) {
+              const msg = err.message || String(err);
+              if (msg.includes('CancellationException') || msg.includes('cancelled')) {
+                Alert.alert('Cancelled', 'Wallet signing was cancelled.');
+              } else {
+                Alert.alert('Error', msg);
+              }
+            } finally {
+              setIsRevoking(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [publicKey, signTransaction]);
+
   const handleEditBeneficiaries = useCallback(() => {
     navigation.navigate('Vault', {
       screen: 'Beneficiaries',
@@ -273,6 +314,12 @@ export function SettingsScreen() {
           <SettingRow icon="clock-outline" iconColor={COLORS.blueAccent} label="Heartbeat Interval" value={heartbeatConfig ? formatDuration(heartbeatConfig.intervalSeconds) : vaultConfig ? formatDuration(vaultConfig.heartbeatInterval.toNumber()) : 'Not set'} />
           <View style={styles.rowDivider} />
           <SettingRow icon="lock-outline" iconColor={vaultConfig?.isMutable === false ? COLORS.critical : COLORS.accent} label="Vault Type" value={vaultConfig?.isMutable === false ? 'Immutable' : 'Mutable'} />
+          {vaultConfig && (
+            <>
+              <View style={styles.rowDivider} />
+              <SettingRow icon="circle-slice-8" iconColor={vaultConfig.executed ? COLORS.critical : COLORS.accent} label="Status" value={vaultConfig.executed ? 'Executed' : 'Active'} />
+            </>
+          )}
           <View style={styles.rowDivider} />
           <SettingRow icon="web" iconColor="rgba(255,255,255,0.3)" label="Network" value="Devnet" />
           {isOwner && vaultConfig && vaultConfig.active && !vaultConfig.executed && vaultConfig.isMutable !== false && (
@@ -303,11 +350,26 @@ export function SettingsScreen() {
       </View>
 
       {/* Danger Zone */}
-      {isOwner && (
+      {isOwner && vaultConfig && (vaultConfig.active || vaultConfig.executed) && (
         <View style={styles.sectionBlock}>
           <Text style={[styles.sectionLabel, { color: 'rgba(239,68,68,0.4)' }]}>DANGER ZONE</Text>
           <View style={[styles.card, { borderColor: 'rgba(239,68,68,0.15)' }]}>
-            {vaultConfig?.isMutable === false ? (
+            {vaultConfig.executed ? (
+              <TouchableOpacity style={styles.actionRow} onPress={handleCloseExecuted} disabled={isRevoking}>
+                <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
+                  {isRevoking ? (
+                    <ActivityIndicator size="small" color="#EF4444" />
+                  ) : (
+                    <MaterialCommunityIcons name="broom" size={15} color="#EF4444" />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.actionLabel, { color: '#EF4444', flex: 0 }]}>Close Vault & Reclaim Rent</Text>
+                  <Text style={styles.actionDesc}>Estate plan executed. Close on-chain and return rent.</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />
+              </TouchableOpacity>
+            ) : vaultConfig.isMutable === false ? (
               <View style={styles.actionRow}>
                 <View style={[styles.actionIcon, { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }]}>
                   <MaterialCommunityIcons name="lock" size={15} color="rgba(255,255,255,0.3)" />

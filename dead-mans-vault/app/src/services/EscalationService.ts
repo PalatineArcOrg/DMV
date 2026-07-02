@@ -152,9 +152,12 @@ export class EscalationService {
       }
 
       store.setExecutionStarted(true);
-      // Immediate, accurate "execution has begun" notice — the app is running
-      // to perform the distribution at this point.
-      NotificationService.sendExecutionStarted().catch(() => {});
+      // "Execution has begun" notice — but ONLY when the FCM server isn't the
+      // notification source. When FCM is active the server sends its own Stage-4
+      // push, so firing this too would double the notification (v1.7.2 fix).
+      if (!this.fcmActive) {
+        NotificationService.sendExecutionStarted().catch(() => {});
+      }
       store.recordNotification();
       if (this.executionCallback) {
         this.executionCallback();

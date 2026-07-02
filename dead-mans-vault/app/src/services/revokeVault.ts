@@ -173,7 +173,32 @@ export async function revokeVault(
     };
   }
 
-  // Vault executed, inactive, or PDAs already closed — just clean up
+  // Vault executed: close its core PDAs on-chain (owner-signed) so it no longer
+  // lingers and reappears on reopen, reclaiming the rent. Best-effort — it may
+  // already be closed, or hold undistributed tokens (open_token_dists > 0).
+  if (vault && vault.executed) {
+    try {
+      const closeTx = await txService.buildCloseExecutedVaultTx(publicKey);
+      closeTx.feePayer = publicKey;
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash('confirmed');
+      closeTx.recentBlockhash = blockhash;
+      const signed = await signTransaction(closeTx);
+      const sig = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+      await connection.confirmTransaction(
+        { signature: sig, blockhash, lastValidBlockHeight },
+        'confirmed',
+      );
+      txs.push({ label: 'Close executed vault', sig });
+    } catch (e: any) {
+      if (!refundError) refundError = e?.message || 'close failed';
+    }
+  }
+
+  // Executed / inactive / already-closed — clean up local state.
   try {
     await KeyManager.getInstance().destroyKey();
   } catch {}

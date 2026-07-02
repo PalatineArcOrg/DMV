@@ -36,26 +36,26 @@ export function stageMessage(stage, ctx = {}) {
   switch (stage) {
     case 1:
       return {
-        title: 'Heartbeat Due',
-        body: 'Your vault heartbeat is overdue. Open Dead Man’s Vault to confirm and keep your vault active.',
+        title: 'Heartbeat due',
+        body: "Your Dead Man's Vault check-in is overdue. Open the app to confirm you're OK and reset the timer.",
         channel: 'heartbeat',
       };
     case 2:
       return {
-        title: 'Heartbeat Overdue',
-        body: 'Emergency escalation active. Open the app to confirm your heartbeat.',
+        title: 'Heartbeat overdue',
+        body: `Still no check-in. Confirm soon, or your estate plan begins distributing to your beneficiaries.${ctx.timeText ? ` (~${ctx.timeText} left)` : ''}`,
         channel: 'escalation',
       };
     case 3:
       return {
-        title: 'FINAL WARNING',
-        body: `Estate plan executes soon${ctx.timeText ? ` (${ctx.timeText})` : ''}. Confirm your heartbeat NOW.`,
+        title: 'Final warning',
+        body: `Your estate plan executes in ${ctx.timeText || 'soon'}. Confirm your heartbeat now to cancel it.`,
         channel: 'execution',
       };
     case 4:
       return {
-        title: 'Estate Plan Due',
-        body: 'Grace period elapsed. Open Dead Man’s Vault to begin distribution to your beneficiaries.',
+        title: 'Estate plan executing',
+        body: 'The grace period elapsed. Your assets are being distributed to your beneficiaries on-chain — automatically, nothing to do.',
         channel: 'execution',
       };
     default:
