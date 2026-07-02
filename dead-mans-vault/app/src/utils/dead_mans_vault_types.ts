@@ -1042,6 +1042,15 @@ export type DeadMansVault = {
           }
         },
         {
+          "name": "feeRecipient",
+          "docs": [
+            "Recipient of the on-chain vault-creation fee. Pinned to the hardcoded",
+            "FEE_WALLET, so a vault cannot be created without paying the fee."
+          ],
+          "writable": true,
+          "address": "98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp"
+        },
+        {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
@@ -2043,6 +2052,11 @@ export type DeadMansVault = {
       "code": 6036,
       "name": "beneficiariesLockedByPlan",
       "msg": "Beneficiaries cannot be changed while an AssetPlan exists — clear the plan first"
+    },
+    {
+      "code": 6037,
+      "name": "invalidFeeRecipient",
+      "msg": "Fee recipient account does not match the required fee wallet"
     }
   ],
   "types": [

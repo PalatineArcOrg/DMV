@@ -26,6 +26,11 @@ pub struct InitializeVault<'info> {
     )]
     pub heartbeat_record: Account<'info, HeartbeatRecord>,
 
+    /// Recipient of the on-chain vault-creation fee. Pinned to the hardcoded
+    /// FEE_WALLET, so a vault cannot be created without paying the fee.
+    #[account(mut, address = FEE_WALLET @ VaultError::InvalidFeeRecipient)]
+    pub fee_recipient: SystemAccount<'info>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -103,6 +108,18 @@ pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> 
     heartbeat.last_method = HeartbeatMethod::ActiveTap;
     heartbeat.total_heartbeats = 1;
     heartbeat.bump = ctx.bumps.heartbeat_record;
+
+    // Collect the vault-creation fee (owner -> fee wallet), enforced on-chain.
+    anchor_lang::system_program::transfer(
+        CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            anchor_lang::system_program::Transfer {
+                from: ctx.accounts.owner.to_account_info(),
+                to: ctx.accounts.fee_recipient.to_account_info(),
+            },
+        ),
+        VAULT_CREATION_FEE_LAMPORTS,
+    )?;
 
     Ok(())
 }

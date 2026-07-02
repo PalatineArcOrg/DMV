@@ -1,3 +1,13 @@
+use anchor_lang::prelude::Pubkey;
+
+/// Vault creation fee (0.01 SOL), paid by the owner to `FEE_WALLET` on
+/// `initialize_vault`. Enforced on-chain — a vault cannot be created without it.
+pub const VAULT_CREATION_FEE_LAMPORTS: u64 = 10_000_000;
+
+/// Recipient of the vault creation fee.
+pub const FEE_WALLET: Pubkey =
+    anchor_lang::pubkey!("98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp");
+
 /// Minimum heartbeat interval: 10 seconds (devnet demo-friendly).
 /// MAINNET: Restore to 86_400 (1 day) before mainnet deployment.
 pub const MIN_HEARTBEAT_INTERVAL: i64 = 10;

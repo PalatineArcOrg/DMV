@@ -114,4 +114,7 @@ pub enum VaultError {
 
     #[msg("Beneficiaries cannot be changed while an AssetPlan exists — clear the plan first")]
     BeneficiariesLockedByPlan,
+
+    #[msg("Fee recipient account does not match the required fee wallet")]
+    InvalidFeeRecipient,
 }
