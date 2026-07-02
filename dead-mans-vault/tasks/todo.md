@@ -72,7 +72,7 @@ Spec: `BUILD-SPEC-permissionless-execution.md` (§18 overrides §3–§13). Impl
 - [x] docs updated for the fee, server-only notifications, executed-vault close, VPS website (README ×2, notify-server README + .env.example, CLAUDE.md, IMPLEMENTATION.md, CHANGELOG through v1.7.4)
 
 ## Fast-follows (backlog)
-- [ ] Specific-**SOL** bequests (currently SPL/NFT only; SOL is pro-rata by share only)
+- [x] Specific-**SOL** bequests — DONE (shipped v1.8.0: `execute_specific_sol` + `begin_execution` carve-out via zero-pubkey sentinel mint; 22/22 tests; devnet e2e verified)
 - [ ] Beneficiary-facing **"Claim"** button in the app (anyone can crank; expose it in-UI for heirs)
 - [ ] Token-2022 **owner-withdraw** (`withdraw_from_vault` is legacy-Token only)
 - [ ] Cranker **fee reimbursement** (server pays fees/rent; no on-chain repay path yet)

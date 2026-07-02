@@ -6,7 +6,7 @@ Dead Man's Vault monitors an owner's liveness through configurable heartbeat che
 
 **Execution is permissionless and trustless.** Once the grace period elapses, the on-chain program computes every payout from on-chain state, and *anyone* — the app, a beneficiary, or a keyless watcher — can submit the distribution. The caller controls nothing: funds can only go to the pre-set beneficiaries, in the pre-set proportions, after the deadline. A bundled keyless watcher service distributes automatically even if the owner's app is never reopened — so the dead-man's switch actually fires.
 
-Owners can also leave **specific bequests** — exact SPL token amounts or whole NFTs assigned to particular beneficiaries — carved out before the remainder splits pro-rata by share.
+Owners can also leave **specific bequests** — exact SOL or SPL token amounts, or whole NFTs, assigned to particular beneficiaries — carved out before the remainder splits pro-rata by share.
 
 Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initialize_vault` (a `fee_recipient` account pinned by address + a CPI transfer, so it cannot be bypassed).
 
@@ -20,7 +20,7 @@ Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initi
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.7.4)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.8.0)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility
@@ -54,7 +54,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 
 ### Core
 - **Permissionless autonomous execution** -- After grace, the program computes every payout from on-chain state; the app, a beneficiary, or a keyless watcher can submit it. No trusted trigger, no server holding keys, no app required for the switch to fire.
-- **Specific bequests + pro-rata** -- Assign exact SPL token amounts or whole NFTs to specific beneficiaries (carved out first); the remainder splits pro-rata by share. A beneficiary can receive both.
+- **Specific bequests + pro-rata** -- Assign exact SOL or SPL token amounts, or whole NFTs, to specific beneficiaries (carved out first); the remainder splits pro-rata by share. A beneficiary can receive both.
 - **4-stage escalation system** -- Graduated warnings (Reminder -> Alert -> Warning -> Execution) with configurable durations
 - **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key (the agent signs heartbeats only)
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
@@ -159,7 +159,7 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 |-------------|--------|-------------|
 | `initialize_vault` | Owner | Create vault with beneficiaries (`{wallet, share_bps}`), intervals, agent key, mutability flag. Collects a 0.01 SOL creation fee to `FEE_WALLET` via CPI (`fee_recipient` pinned by `address` constraint) |
 | `update_vault` | Owner | Modify plan (beneficiaries, intervals). Blocked on immutable vaults / once a plan exists |
-| `set_asset_plan` / `update_asset_plan` | Owner | Define specific bequests (SPL + NFT) assigned to beneficiaries |
+| `set_asset_plan` / `update_asset_plan` | Owner | Define specific bequests (SOL + SPL + NFT) assigned to beneficiaries |
 | `record_heartbeat` | Agent | Record liveness confirmation on-chain (heartbeats only) |
 | `rotate_agent` | Owner | Rotate agent key (device migration) with 6 security guards |
 | `withdraw_sol_from_vault` / `withdraw_from_vault` | Owner | Withdraw SOL / SPL from the vault PDA back to owner |
@@ -171,9 +171,10 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 
 | Instruction | Description |
 |-------------|-------------|
-| `begin_execution` | Snapshot the SOL residual; its existence proves grace for all downstream ix |
+| `begin_execution` | Snapshot the SOL residual (carving out any specific-SOL bequests); takes an optional `asset_plan` account (pass the PDA when a plan exists, else `null`). Its existence proves grace for all downstream ix |
 | `begin_token_dist` | Snapshot a mint's residual (balance − specific bequests) from the canonical, anti-spoof vault ATA |
 | `execute_specific_asset` | Pay one specific bequest (SPL/NFT) to its assigned beneficiary, in order |
+| `execute_specific_sol` | Pay one specific-SOL bequest (zero-pubkey sentinel mint) to its assigned beneficiary by direct lamport debit |
 | `execute_sol_shares` | Batched SOL pro-rata payout by `share_bps` |
 | `execute_token_shares` | Batched token residual pro-rata payout (`transfer_checked`) |
 | `finalize_execution` | Mark executed once all SOL + bequest masks are full |
@@ -193,7 +194,7 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 ### Error Codes
 
-38 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, and vault lifecycle.
+39 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), specific-bequest shape including SOL bequests (`InvalidSolBequest`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, and vault lifecycle.
 
 ### Security
 
@@ -201,7 +202,7 @@ The permissionless design was hardened by a multi-agent security review — incl
 
 ### Tests
 
-20/20 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SPL + NFT bequests, Token-2022, dust→largest beneficiary), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof), idempotency/resume, the post-grace freeze, and all setup/owner paths.
+22/22 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof), idempotency/resume, the post-grace freeze, and all setup/owner paths.
 
 ---
 
@@ -274,11 +275,11 @@ React Native's Hermes runtime requires several workarounds:
 ```
 dead-mans-vault/
 +-- programs/dead-mans-vault/src/    # Anchor program (Rust)
-|   +-- instructions/                # 18 instruction handlers
+|   +-- instructions/                # 19 instruction handlers
 |   +-- state/                       # Account definitions (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist)
-|   +-- errors.rs                    # 38 error codes
+|   +-- errors.rs                    # 39 error codes
 |   +-- constants.rs                 # On-chain constants (FEE_WALLET, VAULT_CREATION_FEE_LAMPORTS) + mask helpers
-+-- tests/                           # Anchor program tests (20/20 passing)
++-- tests/                           # Anchor program tests (22/22 passing)
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
         +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.

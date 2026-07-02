@@ -5,6 +5,17 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.8.0] — 2026-07-02
+
+### Added
+- **Specific-SOL bequests.** Assign an exact amount of SOL to a specific beneficiary
+  (alongside specific SPL-token and NFT bequests). The amount is carved out of the
+  estate first; the remaining SOL still splits pro-rata by share. A SOL assignment
+  reuses the existing bequest structure via a zero-pubkey sentinel mint (no on-chain
+  layout change), and is paid by a dedicated `execute_specific_sol` instruction —
+  enforced on-chain and distributed autonomously by the permissionless crank.
+  On-chain program: 19 instructions / 39 error codes; 22/22 tests; verified e2e on devnet.
+
 ## [1.7.4] — 2026-07-02
 
 ### Fixed

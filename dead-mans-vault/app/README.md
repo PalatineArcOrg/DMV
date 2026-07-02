@@ -28,7 +28,7 @@ Dead Man's Vault makes execution **permissionless**: your device configures the 
 - **4-stage escalation** — Overdue → Emergency Alert → Final Warning → Execution
 - **Permissionless distribution** — After grace, payouts are computed on-chain and submittable by anyone; the caller cannot change who gets what
 - **Fires even if your phone never comes back** — a bundled keyless watcher distributes autonomously when the app is closed
-- **Pro-rata *and* specific bequests** — split the estate by percentage, and/or assign exact tokens and whole NFTs to specific heirs
+- **Pro-rata *and* specific bequests** — split the estate by percentage, and/or assign exact SOL amounts, exact tokens, and whole NFTs to specific heirs
 - **Reversible until execution** — Any heartbeat during stages 1–3 resets everything back to normal; once grace elapses the vault freezes and Stage 4 is irreversible
 - **One-time 0.01 SOL creation fee** — collected on-chain by `initialize_vault` (a `fee_recipient` account pinned by address + a CPI transfer), so it can't be bypassed
 
@@ -114,11 +114,12 @@ And because execution is permissionless and off-device, the inheritance fires re
 │  │  • AssetPlan       ["asset_plan", vault]  (bequests)│ │
 │  │  • TokenDist       ["token_dist", vault, mint]      │ │
 │  │                                                     │ │
-│  │  18 instructions — owner setup + permissionless     │ │
+│  │  19 instructions — owner setup + permissionless     │ │
 │  │  execution (begin_execution, begin_token_dist,      │ │
-│  │  execute_specific_asset, execute_sol_shares,        │ │
-│  │  execute_token_shares, finalize_execution,          │ │
-│  │  close_token_dist, set_asset_plan, …)               │ │
+│  │  execute_specific_asset, execute_specific_sol,      │ │
+│  │  execute_sol_shares, execute_token_shares,          │ │
+│  │  finalize_execution, close_token_dist,              │ │
+│  │  set_asset_plan, …)                                 │ │
 │  └─────────────────────────────────────────────────────┘ │
 │  External APIs: Helius DAS (tokens) · Jupiter (prices)   │
 └─────────────────────────────┬────────────────────────────┘
@@ -156,7 +157,7 @@ Because the cranker controls nothing, execution is **trustless**: funds can only
 Two modes, combined:
 
 - **Pro-rata** — SOL and each token's residual are split among beneficiaries by their `share_bps` (basis points that sum to 100%).
-- **Specific bequests** — An owner-defined plan assigns exact SPL token amounts or whole NFTs to specific beneficiaries. These are carved out **first**; whatever remains splits pro-rata. A beneficiary can receive both a specific bequest and a share of the residual.
+- **Specific bequests** — An owner-defined plan assigns exact SOL or SPL token amounts, or whole NFTs, to specific beneficiaries. These are carved out **first**; whatever remains splits pro-rata. A beneficiary can receive both a specific bequest and a share of the residual.
 
 Distribution supports both the legacy Token program and **Token-2022**. Rounding dust is swept to the largest-share beneficiary on close; rent returns to the owner.
 
@@ -261,7 +262,7 @@ cd android && ./gradlew assembleRelease
 # Build the Anchor program
 anchor build
 
-# Run program tests (20/20 passing; execution tests use real ~40s grace waits)
+# Run program tests (22/22 passing; execution tests use real ~40s grace waits)
 anchor test
 
 # Deploy to devnet
@@ -278,8 +279,8 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **App version** | 1.7.4 (versionCode 69) |
-| **Tests** | 20/20 passing |
+| **App version** | 1.8.0 (versionCode 70) |
+| **Tests** | 22/22 passing |
 
 ---
 
@@ -287,10 +288,10 @@ anchor deploy --provider.cluster devnet
 
 | Metric | Value |
 |--------|-------|
-| Program instructions | 18 |
+| Program instructions | 19 |
 | Program accounts (PDAs) | 5 (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist) |
-| Program error codes | 37 |
-| Program tests | 20/20 passing |
+| Program error codes | 39 |
+| Program tests | 22/22 passing |
 | App screens | 13 |
 | App services | 9 |
 | Zustand stores | 6 |
