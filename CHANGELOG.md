@@ -5,6 +5,19 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.7.3] — 2026-07-02
+
+### Fixed
+- **Duplicate escalation notifications — root cause resolved.** The on-device local
+  notification timeline double-fired alongside the notify-server. FCM delivery is
+  confirmed reliable (including killed-app), so the local timeline was removed and the
+  server is now the single source — exactly one notification per stage.
+- **Skipped stages** — the server poll interval (60s) was coarser than short demo
+  stages (30s) and could skip one; tightened to 15s so every stage is delivered.
+- **Executed-vault status** — Settings now shows "Executed" (not "Active") after execution.
+- **Setup cost** — "Total Est. Cost" corrected to 0.035 SOL (0.015 rent + 0.01 agent +
+  0.01 creation fee).
+
 ## [1.7.2] — 2026-07-02
 
 ### Added
