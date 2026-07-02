@@ -5,6 +5,16 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.10.2] — 2026-07-02
+
+### Fixed
+- **Transaction links restored in execution history.** The execution detail again shows
+  each distribution transaction as a clickable Solana Explorer link. The history parser
+  still looked for v1 instruction names and grouped sessions on the removed
+  `record_execution` instruction, so it found nothing for v2 executions; it now identifies
+  instructions on-chain by Anchor discriminator and groups one session per
+  `begin_execution`. Verified against a real devnet execution.
+
 ## [1.10.1] — 2026-07-02
 
 ### Fixed
