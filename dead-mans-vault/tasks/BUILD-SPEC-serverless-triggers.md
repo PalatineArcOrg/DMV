@@ -26,7 +26,7 @@ program-enforced distribution.
 | # | Decision | Choice |
 |---|----------|--------|
 | D1 | Claim discovery | **(a) Server API** ("vaults where X is a beneficiary") now, with **(c) manual import** (owner-shared link/code) as a no-infra fallback. On-chain scan deferred. |
-| D2 | Bounty funding & amount | **Fixed protocol constant, owner-funded reserve** (`KEEPER_BOUNTY_LAMPORTS`, start 0.01 SOL). Carved out of the SOL snapshot — never reduces beneficiary payouts. |
+| D2 | Bounty funding & amount | **Fixed protocol constant, owner-funded reserve** (`KEEPER_BOUNTY_LAMPORTS`, start 0.005 SOL). Carved out of the SOL snapshot — never reduces beneficiary payouts. |
 | D3 | Bounty recipient | **Whole bounty → the `finalize_execution` payer** for v1. Proportional split across crankers = fast-follow. |
 | D4 | Mutual-keeping coordination | **v1 = server-dispatched jobs** (server hands crank work to heartbeating clients). **v2 = on-chain registry/queue** (fully serverless) — later milestone. |
 
@@ -79,7 +79,7 @@ A small program-paid reward makes cranking profitable → permissionless keeper 
 - `VaultConfig.keeper_bounty: u64` (lamports) — **repurpose padding** (non-breaking). Old vaults = 0.
 
 ### 3.2 `initialize_vault`
-- Accept an optional `keeper_bounty` param (default `KEEPER_BOUNTY_LAMPORTS` = 10_000_000 = 0.01 SOL,
+- Accept an optional `keeper_bounty` param (default `KEEPER_BOUNTY_LAMPORTS` = 5_000_000 = 0.005 SOL,
   or 0 to opt out). The owner funds it by depositing it into the vault PDA at setup (part of the
   same deposit flow — it just sits in the vault above rent, earmarked by the field).
 - Add `KEEPER_BOUNTY_LAMPORTS` to `constants.rs`.
@@ -111,7 +111,7 @@ is a **fast-follow**. Document it.
 - program: `keeper_bounty` field, `initialize_vault` param + constant, `begin_execution` carve,
   `finalize_execution` payout + idempotency, tests (bounty paid once; carved out; underfunded
   clamp; 0-bounty legacy path). Redeploy devnet + `anchor idl upgrade`.
-- client/server: `initialize_vault` builder passes bounty; EstateReview cost line "+0.01 keeper
+- client/server: `initialize_vault` builder passes bounty; EstateReview cost line "+0.005 keeper
   bounty"; crankers already are the `payer` so they auto-collect — surface "you earned X" in the
   claim/crank result. Re-sync IDL. Version bump (minor).
 
@@ -164,7 +164,7 @@ Each phase is independently shippable and testable. After all three, the notify-
 what it should be: a best-effort **notifications** relay (the one part that must stay off-chain).
 
 ## 6. Open sub-decisions (defer to implementation)
-- Exact `KEEPER_BOUNTY_LAMPORTS` (0.01 SOL placeholder) and whether owner-configurable later.
+- Exact `KEEPER_BOUNTY_LAMPORTS` (0.005 SOL placeholder) and whether owner-configurable later.
 - `ExecutionLog` bounty-paid flag placement (padding vs new bool).
 - Claim screen home (new tab vs under Status).
 - Job-lease TTL + whether v1 dispatch also serves non-app keepers (bots).
