@@ -1,4 +1,5 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -39,7 +40,6 @@ export function BequestsScreen() {
 
   const [drafts, setDrafts] = useState<DraftAssignment[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [loadedPlan, setLoadedPlan] = useState(false);
 
   // On-chain beneficiary order is authoritative for assignment indices.
   const beneficiaries = useMemo(() => {
@@ -73,55 +73,56 @@ export function BequestsScreen() {
   const hasAssetPlan = !!vaultConfig?.hasAssetPlan;
   const isActiveVault = !!vaultConfig && vaultConfig.active && !vaultConfig.executed;
 
-  // Load the existing on-chain AssetPlan so already-saved bequests are shown (and
-  // editable) when the screen opens — otherwise it looks empty even though a plan
-  // exists. Runs once per mount; only when a plan is present and drafts are empty.
-  useEffect(() => {
-    if (!publicKey || !hasAssetPlan || loadedPlan) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const txService = new VaultTransactionService();
-        const plan = await txService.fetchAssetPlan(publicKey);
-        if (cancelled) return;
-        if (plan && plan.assignments.length > 0) {
-          const existing: DraftAssignment[] = plan.assignments.map((a) => {
-            const raw = BN.isBN(a.amount) ? (a.amount as BN) : new BN(a.amount as any);
-            if (a.mint.equals(PublicKey.default)) {
-              return {
-                mint: PublicKey.default.toBase58(),
-                symbol: 'SOL',
-                decimals: 9,
-                isNft: false,
-                uiAmount: (raw.toNumber() / Math.pow(10, 9)).toString(),
-                beneficiaryIndex: a.beneficiaryIndex,
-                holding: balances.find((b) => b.symbol === 'SOL')?.amount ?? 0,
-              };
-            }
-            const bal = balances.find((b) => b.mint.toBase58() === a.mint.toBase58());
-            const decimals = bal?.decimals ?? 0;
-            return {
-              mint: a.mint.toBase58(),
-              symbol: bal?.symbol ?? `${a.mint.toBase58().slice(0, 4)}…`,
-              decimals,
-              isNft: a.isNft,
-              uiAmount: a.isNft ? '1' : (raw.toNumber() / Math.pow(10, decimals)).toString(),
-              beneficiaryIndex: a.beneficiaryIndex,
-              holding: bal?.amount ?? 0,
-            };
-          });
-          if (!cancelled) setDrafts(existing);
+  // Load the existing on-chain AssetPlan into the draft list so already-saved
+  // bequests are shown (and editable). Reads live from chain (`fetchAssetPlan`)
+  // rather than relying on the possibly-stale store flag.
+  const loadPlan = useCallback(async () => {
+    if (!publicKey) return;
+    try {
+      const txService = new VaultTransactionService();
+      const plan = await txService.fetchAssetPlan(publicKey);
+      if (!plan || plan.assignments.length === 0) return;
+      const existing: DraftAssignment[] = plan.assignments.map((a) => {
+        const raw = BN.isBN(a.amount) ? (a.amount as BN) : new BN(a.amount as any);
+        if (a.mint.equals(PublicKey.default)) {
+          return {
+            mint: PublicKey.default.toBase58(),
+            symbol: 'SOL',
+            decimals: 9,
+            isNft: false,
+            uiAmount: (raw.toNumber() / Math.pow(10, 9)).toString(),
+            beneficiaryIndex: a.beneficiaryIndex,
+            holding: balances.find((b) => b.symbol === 'SOL')?.amount ?? 0,
+          };
         }
-      } catch {
-        // leave drafts empty on failure — the user can still add bequests
-      } finally {
-        if (!cancelled) setLoadedPlan(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [publicKey, hasAssetPlan, loadedPlan, balances]);
+        const bal = balances.find((b) => b.mint.toBase58() === a.mint.toBase58());
+        const decimals = bal?.decimals ?? 0;
+        return {
+          mint: a.mint.toBase58(),
+          symbol: bal?.symbol ?? `${a.mint.toBase58().slice(0, 4)}…`,
+          decimals,
+          isNft: a.isNft,
+          uiAmount: a.isNft ? '1' : (raw.toNumber() / Math.pow(10, decimals)).toString(),
+          beneficiaryIndex: a.beneficiaryIndex,
+          holding: bal?.amount ?? 0,
+        };
+      });
+      setDrafts(existing);
+    } catch {
+      // leave drafts as-is on failure — the user can still add bequests
+    }
+  }, [publicKey, balances]);
+
+  // React Navigation keeps this screen mounted, so a one-time mount effect never
+  // re-runs on return. Reload from chain on every focus — but only when the draft
+  // list is empty, so in-progress (unsaved) edits are never clobbered.
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  useFocusEffect(
+    useCallback(() => {
+      if (draftsRef.current.length === 0) loadPlan();
+    }, [loadPlan]),
+  );
 
   const addDraft = () => {
     if (drafts.length >= MAX_ASSIGNMENTS_PER_TX) {
@@ -252,7 +253,9 @@ export function BequestsScreen() {
       if (fresh) useVaultStore.getState().setVaultConfig(fresh);
 
       Alert.alert('Bequests saved', 'Your specific bequests are now recorded on-chain.');
-      setDrafts([]);
+      // Re-load the canonical saved plan so the list keeps showing the bequests
+      // (instead of going blank) right after saving.
+      await loadPlan();
     } catch (e: any) {
       Alert.alert('Could not save bequests', e?.message ?? 'Transaction failed.');
     } finally {

@@ -429,7 +429,9 @@ export function SetupWizardScreen() {
             onPress={() => navigation.navigate('Bequests')}
           >
             <MaterialCommunityIcons name="gift-outline" size={16} color={COLORS.accent} />
-            <Text style={[styles.execLogBtnText, { color: COLORS.accent }]}>Manage Specific Bequests</Text>
+            <Text style={[styles.execLogBtnText, { color: COLORS.accent }]}>
+              {vaultConfig.hasAssetPlan ? 'Specific Bequests · Configured' : 'Manage Specific Bequests'}
+            </Text>
             <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.3)" />
           </TouchableOpacity>
         )}
