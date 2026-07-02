@@ -2482,6 +2482,13 @@ export type DeadMansVault = {
           {
             "name": "isMutable",
             "type": "bool"
+          },
+          {
+            "name": "keeperBounty",
+            "docs": [
+              "Keeper bounty (lamports) reserved for the finalize cranker. 0 = opt out."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -2671,6 +2678,17 @@ export type DeadMansVault = {
               "a started token distribution can never be orphaned by a premature close."
             ],
             "type": "u16"
+          },
+          {
+            "name": "keeperBounty",
+            "docs": [
+              "Keeper bounty (lamports) reserved in the vault at init and paid to the",
+              "cranker that runs finalize_execution. Carved out of the SOL snapshot at",
+              "begin_execution so it never reduces beneficiary payouts. 0 = no bounty.",
+              "Taken from the account's existing padding — non-breaking (legacy vaults",
+              "deserialize this as 0)."
+            ],
+            "type": "u64"
           }
         ]
       }

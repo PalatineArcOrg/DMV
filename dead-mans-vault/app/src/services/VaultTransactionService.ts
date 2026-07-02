@@ -19,7 +19,7 @@ import {
 } from '@solana/spl-token';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
-import { PROGRAM_ID, RPC_URL, HELIUS_API_KEY } from '../utils/constants';
+import { PROGRAM_ID, RPC_URL, HELIUS_API_KEY, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
 import type { PriorityFeeEstimateResult } from '../types/api';
 import type { AssetAssignment } from '../types/vault';
@@ -218,6 +218,7 @@ export class VaultTransactionService {
         gracePeriod: new BN(gracePeriod),
         beneficiaries: beneficiaries.map(VaultTransactionService.toOnChainBenef),
         isMutable,
+        keeperBounty: new BN(KEEPER_BOUNTY_LAMPORTS),
       })
       .accountsPartial({
         owner,
@@ -340,6 +341,7 @@ export class VaultTransactionService {
         gracePeriod: new BN(gracePeriod),
         beneficiaries: beneficiaries.map(VaultTransactionService.toOnChainBenef),
         isMutable,
+        keeperBounty: new BN(KEEPER_BOUNTY_LAMPORTS),
       })
       .accountsPartial({
         owner,
@@ -399,6 +401,7 @@ export class VaultTransactionService {
         gracePeriod: new BN(gracePeriod),
         beneficiaries: beneficiaries.map(VaultTransactionService.toOnChainBenef),
         isMutable,
+        keeperBounty: new BN(KEEPER_BOUNTY_LAMPORTS),
       })
       .accountsPartial({
         owner,

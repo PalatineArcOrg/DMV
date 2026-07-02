@@ -6,6 +6,10 @@ export const HELIUS_API_KEY = process.env.EXPO_PUBLIC_HELIUS_API_KEY || '';
 
 // DMV push-notification server (FCM relay). Empty = push registration disabled.
 export const NOTIFY_URL = process.env.EXPO_PUBLIC_NOTIFY_URL || '';
+
+/** Keeper bounty (0.005 SOL) reserved in the vault at creation, paid to whoever
+ *  cranks finalize_execution. Carved out on-chain so it never reduces payouts. */
+export const KEEPER_BOUNTY_LAMPORTS = 5_000_000;
 export const NOTIFY_SECRET = process.env.EXPO_PUBLIC_NOTIFY_SECRET || '';
 
 // Derive Helius REST endpoints from RPC_URL — zero-config for mainnet migration

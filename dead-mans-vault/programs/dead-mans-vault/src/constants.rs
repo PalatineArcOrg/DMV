@@ -8,6 +8,11 @@ pub const VAULT_CREATION_FEE_LAMPORTS: u64 = 10_000_000;
 pub const FEE_WALLET: Pubkey =
     anchor_lang::pubkey!("98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp");
 
+/// Default keeper bounty (0.005 SOL) — reserved in the vault at init and paid to
+/// whoever cranks finalize_execution. Client default; the owner may pass 0 to opt
+/// out. Carved out of the SOL snapshot so it never touches beneficiary payouts.
+pub const KEEPER_BOUNTY_LAMPORTS: u64 = 5_000_000;
+
 /// Minimum heartbeat interval: 10 seconds (devnet demo-friendly).
 /// MAINNET: Restore to 86_400 (1 day) before mainnet deployment.
 pub const MIN_HEARTBEAT_INTERVAL: i64 = 10;

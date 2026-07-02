@@ -41,6 +41,8 @@ pub struct InitializeVaultParams {
     pub grace_period: i64,
     pub beneficiaries: Vec<Beneficiary>,
     pub is_mutable: bool,
+    /// Keeper bounty (lamports) reserved for the finalize cranker. 0 = opt out.
+    pub keeper_bounty: u64,
 }
 
 pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> Result<()> {
@@ -100,6 +102,7 @@ pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> 
     vault.is_mutable = params.is_mutable;
     vault.has_asset_plan = false;
     vault.open_token_dists = 0;
+    vault.keeper_bounty = params.keeper_bounty;
 
     // Initialize heartbeat record with current time
     let heartbeat = &mut ctx.accounts.heartbeat_record;

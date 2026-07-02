@@ -61,5 +61,29 @@ pub fn handler(ctx: Context<FinalizeExecution>) -> Result<()> {
     ctx.accounts.vault_config.active = false;
     ctx.accounts.execution_log.completed = true;
 
+    // Pay the keeper bounty (if any) to the cranker that finalized — the incentive
+    // that makes permissionless cranking profitable. finalize runs exactly once
+    // (guarded by the !executed constraint), so this pays at most once. The bounty
+    // was carved out of the SOL snapshot at begin_execution, so the vault still
+    // holds it above rent here; min() clamps if the vault was underfunded.
+    let bounty = ctx.accounts.vault_config.keeper_bounty;
+    if bounty > 0 {
+        let vault_info = ctx.accounts.vault_config.to_account_info();
+        let rent_min = Rent::get()?.minimum_balance(vault_info.data_len());
+        let available = vault_info.lamports().saturating_sub(rent_min);
+        let amt = bounty.min(available);
+        if amt > 0 {
+            **vault_info.try_borrow_mut_lamports()? = vault_info
+                .lamports()
+                .checked_sub(amt)
+                .ok_or(VaultError::InsufficientVaultBalance)?;
+            let payer_info = ctx.accounts.payer.to_account_info();
+            **payer_info.try_borrow_mut_lamports()? = payer_info
+                .lamports()
+                .checked_add(amt)
+                .ok_or(VaultError::InsufficientVaultBalance)?;
+        }
+    }
+
     Ok(())
 }

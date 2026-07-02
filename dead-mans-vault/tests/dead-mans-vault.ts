@@ -73,6 +73,7 @@ describe("dead-mans-vault — permissionless execution", () => {
     interval?: number;
     grace?: number;
     isMutable?: boolean;
+    keeperBounty?: number;
   }) {
     const { vault, heartbeat } = pdas(opts.owner.publicKey);
     await program.methods
@@ -82,6 +83,7 @@ describe("dead-mans-vault — permissionless execution", () => {
         gracePeriod: new BN(opts.grace ?? GRACE),
         beneficiaries: opts.beneficiaries,
         isMutable: opts.isMutable ?? true,
+        keeperBounty: new BN(opts.keeperBounty ?? 0),
       })
       .accountsPartial({
         owner: opts.owner.publicKey,
@@ -741,6 +743,21 @@ describe("dead-mans-vault — permissionless execution", () => {
         S.specsol = { owner, b: [b1, b2], specificLamports: LAMPORTS_PER_SOL / 2, ...p };
       }
 
+      // --- scenario: keeper bounty ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+          keeperBounty: 5_000_000, // 0.005 SOL
+        });
+        await depositSol(owner, p.vault, 1 * LAMPORTS_PER_SOL);
+        S.bounty = { owner, b: [b1], bounty: 5_000_000, ...p };
+      }
+
       // ONE grace wait for every scenario above.
       await sleep(GRACE_WAIT_MS);
     });
@@ -953,6 +970,34 @@ describe("dead-mans-vault — permissionless execution", () => {
       // b2 total = 0.5 SOL specific + 40% residual; conservation holds (≤ distributable).
       const b2End = await conn.getBalance(s.b[1].publicKey);
       expect(b2End - b2Start).to.equal(s.specificLamports + expB2.toNumber());
+    });
+
+    it("keeper bounty: carved out of the snapshot, paid to the finalize cranker", async () => {
+      const s = S.bounty;
+      const vaultBalBefore = await conn.getBalance(s.vault);
+      await beginExec(s);
+      const log = await program.account.executionLog.fetch(s.execution);
+      const rent = await conn.getMinimumBalanceForRentExemption(
+        (await conn.getAccountInfo(s.vault))!.data.length,
+      );
+      // snapshot = (vault balance − rent) − bounty (bounty carved out).
+      expect(log.solSnapshot.toNumber()).to.equal(vaultBalBefore - rent - s.bounty);
+
+      // sole beneficiary (100%) receives exactly the snapshot; the bounty is NOT in it.
+      const b1Before = await conn.getBalance(s.b[0].publicKey);
+      await solShares(s, [0], [s.b[0].publicKey]);
+      expect((await conn.getBalance(s.b[0].publicKey)) - b1Before).to.equal(log.solSnapshot.toNumber());
+
+      // finalize (by the permissionless cranker) pays the bounty to that cranker.
+      const crankerBefore = await conn.getBalance(cranker.publicKey);
+      await finalize(s, false);
+      const crankerAfter = await conn.getBalance(cranker.publicKey);
+      const v = await program.account.vaultConfig.fetch(s.vault);
+      expect(v.executed).to.be.true;
+      expect(v.keeperBounty.toNumber()).to.equal(s.bounty);
+      const delta = crankerAfter - crankerBefore; // bounty minus the finalize tx fee
+      expect(delta).to.be.greaterThan(s.bounty - 20000);
+      expect(delta).to.be.at.most(s.bounty);
     });
 
     it("theft attempts all fail", async () => {

@@ -22,7 +22,7 @@ import { useEscalationStore } from '../store/useEscalationStore';
 import { clearHeartbeatHistory, recordHeartbeat } from '../db/heartbeatRepo';
 import { clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
 import { truncateAddress, formatDuration } from '../utils/formatting';
-import { COLORS, FONTS, PROGRAM_ID } from '../utils/constants';
+import { COLORS, FONTS, PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
 import { StepIndicator } from '../components/StepIndicator';
 
 // Agent only needs heartbeat fees now — execution is permissionless and nothing
@@ -75,9 +75,9 @@ export function EstateReviewScreen() {
 
       // Pre-flight balance check — need enough for vault init rent (~0.015) + agent funding (~0.01) + creation fee (0.01)
       const ownerBalance = await connection.getBalance(publicKey);
-      const MIN_BALANCE = 0.04 * LAMPORTS_PER_SOL;
+      const MIN_BALANCE = 0.045 * LAMPORTS_PER_SOL;
       if (ownerBalance < MIN_BALANCE) {
-        Alert.alert('Insufficient Balance', `You need at least 0.04 SOL to activate the vault (0.015 rent + 0.01 agent funding + 0.01 creation fee).\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+        Alert.alert('Insufficient Balance', `You need at least 0.045 SOL to activate the vault (0.015 rent + 0.01 agent funding + 0.01 creation fee + 0.005 keeper reward).\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
         setIsRegistering(false);
         return;
       }
@@ -135,6 +135,17 @@ export function EstateReviewScreen() {
           }),
         );
       }
+
+      // Reserve the keeper bounty in the vault so it's available to pay whoever
+      // cranks the distribution. It's carved out on-chain (begin_execution), so it
+      // doesn't reduce beneficiary payouts — it's a separate reserve on top.
+      vaultTx.add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: vaultPda,
+          lamports: KEEPER_BOUNTY_LAMPORTS,
+        }),
+      );
 
       vaultTx.feePayer = publicKey;
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
@@ -297,7 +308,8 @@ export function EstateReviewScreen() {
           <DetailRow label="Vault Rent" value="~0.015 SOL" />
           <DetailRow label="Agent Funding" value="~0.01 SOL" />
           <DetailRow label="Creation Fee" value="0.01 SOL" />
-          <DetailRow label="Total Est. Cost" value="~0.035 SOL" />
+          <DetailRow label="Keeper Reward" value="0.005 SOL" />
+          <DetailRow label="Total Est. Cost" value="~0.04 SOL" />
           <DetailRow label="Distribution" value="Per-beneficiary on-chain" />
         </View>
       </View>

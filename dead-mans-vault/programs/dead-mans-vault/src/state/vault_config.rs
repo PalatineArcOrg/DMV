@@ -45,6 +45,13 @@ pub struct VaultConfig {
     /// decremented by close_token_dist). The owner-close requires this to be 0 so
     /// a started token distribution can never be orphaned by a premature close.
     pub open_token_dists: u16,
+
+    /// Keeper bounty (lamports) reserved in the vault at init and paid to the
+    /// cranker that runs finalize_execution. Carved out of the SOL snapshot at
+    /// begin_execution so it never reduces beneficiary payouts. 0 = no bounty.
+    /// Taken from the account's existing padding — non-breaking (legacy vaults
+    /// deserialize this as 0).
+    pub keeper_bounty: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -71,5 +78,6 @@ impl VaultConfig {
         + 1     // is_mutable
         + 1     // has_asset_plan
         + 2     // open_token_dists
-        + 61;   // padding for future fields
+        + 8     // keeper_bounty (from former padding — SPACE unchanged)
+        + 53;   // padding for future fields
 }

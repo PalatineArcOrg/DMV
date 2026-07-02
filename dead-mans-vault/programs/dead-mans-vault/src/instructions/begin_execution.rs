@@ -77,8 +77,12 @@ pub fn handler(ctx: Context<BeginExecution>) -> Result<()> {
     // paid separately by execute_specific_sol.
     let vault_info = vault.to_account_info();
     let rent_min = Rent::get()?.minimum_balance(vault_info.data_len());
+    // Also carve out the keeper bounty (paid to the finalize cranker) so it never
+    // reduces beneficiary payouts.
     let distributable = vault_info.lamports().saturating_sub(rent_min) as u128;
-    let sol_snapshot = distributable.saturating_sub(specific_sol) as u64;
+    let sol_snapshot = distributable
+        .saturating_sub(specific_sol)
+        .saturating_sub(vault.keeper_bounty as u128) as u64;
 
     let log = &mut ctx.accounts.execution_log;
     log.vault = vault.key();
