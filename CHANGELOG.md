@@ -5,6 +5,16 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.7.4] — 2026-07-02
+
+### Fixed
+- **Stale "Configure Heartbeat" tick on the Vault screen** after a vault executed. When
+  the notify-server distributed a vault autonomously, the app had no local execution
+  record and fell back to the partial setup wizard, where the heartbeat config (synced
+  from the on-chain vault) showed a tick that reappeared on every reopen. An on-chain
+  executed vault is now recognized as a past execution and shows the "Vault Executed"
+  summary instead.
+
 ## [1.7.3] — 2026-07-02
 
 ### Fixed
