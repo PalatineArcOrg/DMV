@@ -5,6 +5,18 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.10.0] — 2026-07-02
+
+### Added
+- **On-chain keeper reward.** Each vault reserves a small bounty (0.005 SOL) that the
+  program pays to whoever submits the final distribution transaction, making
+  permissionless cranking profitable — so the estate can be distributed by anyone (a
+  beneficiary, a keeper bot, or the watcher) who's rewarded for it, without depending on
+  any single server. Stored in `VaultConfig` (reused padding — non-breaking), set at
+  creation (opt out with 0), carved out of the SOL snapshot at `begin_execution` so it
+  **never reduces beneficiary payouts**, and paid to the `finalize_execution` cranker.
+  Program now 39 error codes; 23/23 tests; verified e2e on devnet.
+
 ## [1.9.0] — 2026-07-02
 
 ### Added

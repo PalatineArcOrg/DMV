@@ -1,8 +1,10 @@
 # BUILD SPEC — Serverless Triggers (Claim + Bounty + Mutual Keeping)
 
-Status: **Phase 1 SHIPPED (v1.9.0)** · Phases 2-3 pending · Owner-approved decisions locked below.
-Phase 1 (claim) shipped 2026-07-02: `GET /inheritances` + InheritancesScreen + ClaimService (heir-paid
-MWA crank, resumable). Fast-path verified e2e on devnet; not yet device-tested. Phase 2 (bounty) is next.
+Status: **Phases 1-2 SHIPPED (v1.9.0, v1.10.0)** · Phase 3 pending · Owner-approved decisions locked below.
+Phase 1 (claim) shipped 2026-07-02: `GET /inheritances` + InheritancesScreen + ClaimService (heir-paid MWA crank, resumable).
+Phase 2 (bounty) shipped 2026-07-02: `keeper_bounty` (from padding, non-breaking) carved out at begin_execution + paid to
+the finalize cranker; 23/23 tests + devnet e2e. Known: keeper fronts the ExecutionLog rent (~0.00185 SOL) → net ≈0.003 SOL.
+Neither device-tested yet. Phase 3 (mutual keeping) is next.
 
 ## 0. Goal
 
