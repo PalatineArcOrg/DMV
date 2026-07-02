@@ -885,6 +885,259 @@ export class VaultTransactionService {
     return this.sendWithPayer([ix], payer, [vaultPda, tokenDistPda, mint, payer.publicKey], 150_000);
   }
 
+  // ─── Beneficiary claim (MWA — heir is the fee payer, not a local Keypair) ───
+
+  /**
+   * Build the unsigned distribution transactions for a beneficiary "claim". Same
+   * permissionless crank the owner app / server run, but with `heir` as the fee
+   * payer so it can be MWA-signed. Returns ordered `{label, tx}` groups (each tx
+   * carries its compute-budget + priority-fee ixs; the caller sets feePayer +
+   * blockhash and signs). Idempotent: skips steps already recorded in the on-chain
+   * masks. Token-dist CLOSE is handled separately (see buildCloseTokenDistTransactions)
+   * because dust is only known after the residual shares land.
+   */
+  async buildClaimTransactions(
+    heir: PublicKey,
+    owner: PublicKey,
+  ): Promise<{ label: string; tx: Transaction }[]> {
+    const config = await this.fetchVaultConfig(owner);
+    if (!config) throw new Error('No vault found for this owner.');
+    // NOTE: do NOT bail on config.executed — token residual shares
+    // (execute_token_shares) legitimately run AFTER finalize sets executed=true.
+    // This builder is idempotent (skips work already recorded on-chain) and is
+    // called in a loop by ClaimService until it returns no further steps, so a
+    // fresh token vault completes across passes (begin_token_dist must land before
+    // its residual shares/TokenDist are visible). Returns [] when nothing remains.
+
+    const shareInfos = config.beneficiaries.map((b: any) => ({
+      wallet: new PublicKey(b.wallet),
+      shareBps: b.shareBps as number,
+    }));
+    const benefWallets: PublicKey[] = shareInfos.map((b: { wallet: PublicKey }) => b.wallet);
+    const n = benefWallets.length;
+    const hasAssetPlan = !!config.hasAssetPlan;
+
+    const [vaultPda] = this.getVaultPDA(owner);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+    const [executionPda] = this.getExecutionPDA(vaultPda);
+    const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
+    const program = this.programAs(heir);
+
+    const execLog = await this.fetchExecutionLog(owner);
+    const tokenBalances = await this.getVaultTokenBalances(vaultPda);
+    const mintMap = new Map<string, PublicKey>();
+    for (const t of tokenBalances) mintMap.set(t.mint.toString(), t.mint);
+    const assetPlan = hasAssetPlan ? await this.fetchAssetPlan(owner) : null;
+    if (assetPlan) {
+      for (const a of assetPlan.assignments) {
+        if (!a.mint.equals(PublicKey.default)) mintMap.set(a.mint.toString(), a.mint);
+      }
+    }
+    const mints = [...mintMap.values()];
+
+    const range = (k: number) => Array.from({ length: k }, (_, i) => i);
+    const unpaid = (mask: number) => range(n).filter((i) => ((mask >>> i) & 1) === 0);
+    const chunk8 = (a: number[]) => {
+      const o: number[][] = [];
+      for (let i = 0; i < a.length; i += 8) o.push(a.slice(i, i + 8));
+      return o;
+    };
+    const wrap = async (ixs: TransactionInstruction[], keys: PublicKey[], cu: number) => {
+      const raw = new Transaction();
+      for (const ix of ixs) raw.add(ix);
+      return this.addPriorityFee(raw, keys, cu);
+    };
+    const walletMetas = (idxs: number[]) =>
+      idxs.map((i) => ({ pubkey: benefWallets[i], isWritable: true, isSigner: false }));
+
+    const out: { label: string; tx: Transaction }[] = [];
+
+    // FAST PATH: fresh + pure SOL + ≤8 beneficiaries → one transaction.
+    if (!execLog && mints.length === 0 && !hasAssetPlan && n <= 8) {
+      const ixs: TransactionInstruction[] = [
+        await program.methods
+          .beginExecution()
+          .accountsPartial({ payer: heir, vaultConfig: vaultPda, heartbeatRecord: heartbeatPda, executionLog: executionPda, assetPlan: null, systemProgram: SystemProgram.programId })
+          .instruction(),
+        await program.methods
+          .executeSolShares(Buffer.from(range(n)))
+          .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda })
+          .remainingAccounts(walletMetas(range(n)))
+          .instruction(),
+        await program.methods
+          .finalizeExecution()
+          .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda, assetPlan: null })
+          .instruction(),
+      ];
+      out.push({ label: 'Distribute estate', tx: await wrap(ixs, [vaultPda, executionPda, heir], 400_000) });
+      return out;
+    }
+
+    // GENERAL PATH — mirrors ExecutionService step order.
+    if (!execLog) {
+      const ix = await program.methods
+        .beginExecution()
+        .accountsPartial({ payer: heir, vaultConfig: vaultPda, heartbeatRecord: heartbeatPda, executionLog: executionPda, assetPlan: hasAssetPlan ? assetPlanPda : null, systemProgram: SystemProgram.programId })
+        .instruction();
+      out.push({ label: 'Begin distribution', tx: await wrap([ix], [vaultPda, heartbeatPda, executionPda, heir], 120_000) });
+    }
+
+    for (const mint of mints) {
+      if (await this.fetchTokenDist(owner, mint)) continue;
+      const tokenProgram = await this.getTokenProgramForMint(mint);
+      const vaultAta = this.ataFor(mint, vaultPda, true, tokenProgram);
+      const [tokenDistPda] = this.getTokenDistPDA(vaultPda, mint);
+      const ix = await program.methods
+        .beginTokenDist()
+        .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda, mint, vaultAta, assetPlan: hasAssetPlan ? assetPlanPda : null, tokenDist: tokenDistPda, systemProgram: SystemProgram.programId })
+        .instruction();
+      out.push({ label: `Snapshot ${mint.toString().slice(0, 4)}… balance`, tx: await wrap([ix], [vaultPda, executionPda, tokenDistPda, mint, heir], 120_000) });
+    }
+
+    if (assetPlan) {
+      for (let j = 0; j < assetPlan.assignments.length; j++) {
+        if ((assetPlan.paidMask & (1n << BigInt(j))) !== 0n) continue;
+        const a = assetPlan.assignments[j];
+        const benef = benefWallets[a.beneficiaryIndex];
+        if (a.mint.equals(PublicKey.default)) {
+          const ix = await program.methods
+            .executeSpecificSol(j)
+            .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda, assetPlan: assetPlanPda, beneficiary: benef })
+            .instruction();
+          out.push({ label: `Pay bequest #${j + 1} (SOL)`, tx: await wrap([ix], [vaultPda, benef, heir], 120_000) });
+        } else {
+          const tokenProgram = await this.getTokenProgramForMint(a.mint);
+          const vaultAta = this.ataFor(a.mint, vaultPda, true, tokenProgram);
+          const benefAta = this.ataFor(a.mint, benef, false, tokenProgram);
+          const [tokenDistPda] = this.getTokenDistPDA(vaultPda, a.mint);
+          const ixs: TransactionInstruction[] = [];
+          if (!(await this.accountExists(benefAta))) {
+            ixs.push(createAssociatedTokenAccountIdempotentInstruction(heir, benefAta, benef, a.mint, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID));
+          }
+          ixs.push(
+            await program.methods
+              .executeSpecificAsset(j)
+              .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda, assetPlan: assetPlanPda, mint: a.mint, tokenDist: tokenDistPda, vaultAta, beneficiaryAta: benefAta, tokenProgram })
+              .instruction(),
+          );
+          out.push({ label: `Pay bequest #${j + 1}`, tx: await wrap(ixs, [vaultPda, tokenDistPda, a.mint, benefAta, heir], 200_000) });
+        }
+      }
+    }
+
+    for (const batch of chunk8(unpaid(execLog ? execLog.solPaidMask : 0))) {
+      const ix = await program.methods
+        .executeSolShares(Buffer.from(batch))
+        .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda })
+        .remainingAccounts(walletMetas(batch))
+        .instruction();
+      out.push({ label: 'Distribute SOL shares', tx: await wrap([ix], [vaultPda, executionPda, heir], 250_000) });
+    }
+
+    if (!execLog?.completed) {
+      const ix = await program.methods
+        .finalizeExecution()
+        .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda, assetPlan: hasAssetPlan ? assetPlanPda : null })
+        .instruction();
+      out.push({ label: 'Finalize distribution', tx: await wrap([ix], [vaultPda, executionPda, heir], 100_000) });
+    }
+
+    for (const mint of mints) {
+      const td = await this.fetchTokenDist(owner, mint);
+      if (!td) continue;
+      const tokenProgram = await this.getTokenProgramForMint(mint);
+      const vaultAta = this.ataFor(mint, vaultPda, true, tokenProgram);
+      const [tokenDistPda] = this.getTokenDistPDA(vaultPda, mint);
+      for (const batch of chunk8(unpaid(td.paidMask))) {
+        const ixs: TransactionInstruction[] = [];
+        const atas: PublicKey[] = [];
+        for (const i of batch) {
+          const ata = this.ataFor(mint, benefWallets[i], false, tokenProgram);
+          atas.push(ata);
+          if (!(await this.accountExists(ata))) {
+            ixs.push(createAssociatedTokenAccountIdempotentInstruction(heir, ata, benefWallets[i], mint, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID));
+          }
+        }
+        ixs.push(
+          await program.methods
+            .executeTokenShares(Buffer.from(batch))
+            .accountsPartial({ payer: heir, vaultConfig: vaultPda, tokenDist: tokenDistPda, mint, vaultAta, tokenProgram })
+            .remainingAccounts(atas.map((a) => ({ pubkey: a, isWritable: true, isSigner: false })))
+            .instruction(),
+        );
+        out.push({ label: `Distribute ${mint.toString().slice(0, 4)}…`, tx: await wrap(ixs, [vaultPda, tokenDistPda, mint, heir], 250_000) });
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * Close any fully-paid TokenDists after a claim's residual shares have landed
+   * (built here, not in buildClaimTransactions, because the dust sweep depends on
+   * the post-distribution ATA balance). Sweeps dust → largest-share beneficiary,
+   * closes the vault ATA + TokenDist. Best-effort cleanup — the distribution is
+   * already complete without it.
+   */
+  async buildCloseTokenDistTransactions(
+    heir: PublicKey,
+    owner: PublicKey,
+  ): Promise<{ label: string; tx: Transaction }[]> {
+    const config = await this.fetchVaultConfig(owner);
+    if (!config) return [];
+    const shareInfos = config.beneficiaries.map((b: any) => ({ wallet: new PublicKey(b.wallet), shareBps: b.shareBps as number }));
+    const n = shareInfos.length;
+    const largestBenef = VaultTransactionService.largestShareWallet(shareInfos);
+    const fullMask = n >= 32 ? 0xffffffff : (((1 << n) - 1) >>> 0);
+
+    const [vaultPda] = this.getVaultPDA(owner);
+    const program = this.programAs(heir);
+
+    const tokenBalances = await this.getVaultTokenBalances(vaultPda);
+    const mintMap = new Map<string, PublicKey>();
+    for (const t of tokenBalances) mintMap.set(t.mint.toString(), t.mint);
+    const assetPlan = config.hasAssetPlan ? await this.fetchAssetPlan(owner) : null;
+    if (assetPlan) {
+      for (const a of assetPlan.assignments) {
+        if (!a.mint.equals(PublicKey.default)) mintMap.set(a.mint.toString(), a.mint);
+      }
+    }
+
+    const out: { label: string; tx: Transaction }[] = [];
+    for (const mint of [...mintMap.values()]) {
+      const td = await this.fetchTokenDist(owner, mint);
+      if (!td || (td.paidMask >>> 0) !== fullMask) continue;
+      const tokenProgram = await this.getTokenProgramForMint(mint);
+      const vaultAta = this.ataFor(mint, vaultPda, true, tokenProgram);
+      const [tokenDistPda] = this.getTokenDistPDA(vaultPda, mint);
+
+      let dust = 0n;
+      try {
+        const bal = await this.connection.getTokenAccountBalance(vaultAta);
+        dust = BigInt(bal.value.amount);
+      } catch { dust = 0n; }
+
+      const ixs: TransactionInstruction[] = [];
+      let largestBenefAta: PublicKey | null = null;
+      if (dust > 0n) {
+        largestBenefAta = this.ataFor(mint, largestBenef, false, tokenProgram);
+        if (!(await this.accountExists(largestBenefAta))) {
+          ixs.push(createAssociatedTokenAccountIdempotentInstruction(heir, largestBenefAta, largestBenef, mint, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID));
+        }
+      }
+      ixs.push(
+        await program.methods
+          .closeTokenDist()
+          .accountsPartial({ payer: heir, owner, vaultConfig: vaultPda, mint, vaultAta, tokenDist: tokenDistPda, largestBenefAta, tokenProgram })
+          .instruction(),
+      );
+      const raw = new Transaction();
+      for (const ix of ixs) raw.add(ix);
+      out.push({ label: `Close ${mint.toString().slice(0, 4)}… account`, tx: await this.addPriorityFee(raw, [vaultPda, tokenDistPda, mint, heir], 150_000) });
+    }
+    return out;
+  }
+
   // ─── Account reads ───
 
   private async accountExists(pubkey: PublicKey): Promise<boolean> {

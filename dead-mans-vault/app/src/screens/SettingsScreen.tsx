@@ -221,6 +221,22 @@ export function SettingsScreen() {
         </View>
       )}
 
+      {/* Inheritances */}
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionLabel}>INHERITANCES</Text>
+        <View style={styles.card}>
+          <TouchableOpacity onPress={() => navigation.navigate('Status', { screen: 'Inheritances' })}>
+            <SettingRow
+              icon="gift-outline"
+              iconColor={COLORS.accent}
+              label="Claim an Inheritance"
+              value=""
+              link
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Security */}
       <View style={styles.sectionBlock}>
         <Text style={styles.sectionLabel}>SECURITY</Text>

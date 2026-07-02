@@ -7,6 +7,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ExecutionLogsScreen } from '../screens/ExecutionLogsScreen';
 import { ExecutionDetailScreen } from '../screens/ExecutionDetailScreen';
+import { InheritancesScreen } from '../screens/InheritancesScreen';
 import { SetupWizardScreen } from '../screens/SetupWizardScreen';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { HeartbeatConfigScreen } from '../screens/HeartbeatConfigScreen';
@@ -51,6 +52,11 @@ function DashboardStackScreen() {
         name="ExecutionDetail"
         component={ExecutionDetailScreen}
         options={{ title: 'Execution Detail' }}
+      />
+      <DashboardStack.Screen
+        name="Inheritances"
+        component={InheritancesScreen}
+        options={{ headerShown: false }}
       />
     </DashboardStack.Navigator>
   );
