@@ -18,13 +18,13 @@ import { getExecutionSteps } from '../db/executionRepo';
 const STEP_TYPE_MAP: Record<string, string> = {
   revoke_approvals: 'RevokeApprovals',
   close_defi_position: 'CloseDeFiPosition',
-  distribute_specific_asset: 'DistributeSpecificAsset',
-  distribute_sol: 'ExecuteSolDistribution',
-  distribute_token: 'ExecuteDistribution',
+  distribute_specific_asset: 'execute_specific_asset',
+  distribute_sol: 'execute_sol_shares',
+  distribute_token: 'execute_token_shares',
   burn_asset: 'BurnAsset',
   close_accounts: 'CloseAccounts',
-  record_execution_log: 'RecordExecution',
-  close_executed_vault: 'CloseExecutedVault',
+  record_execution_log: 'finalize_execution',
+  close_executed_vault: 'close_executed_vault_by_owner',
   refund_agent_sol: 'RefundAgentSol',
   self_terminate: 'SelfTerminate',
 };
@@ -152,8 +152,8 @@ function ExecutionCard({
   onPress: () => void;
 }) {
   const date = new Date(execution.executedAt * 1000);
-  const transferCount = execution.steps.filter(
-    (s) => s.type === 'ExecuteSolDistribution' || s.type === 'ExecuteDistribution',
+  const transferCount = execution.steps.filter((s) =>
+    ['execute_sol_shares', 'execute_token_shares', 'execute_specific_asset', 'execute_specific_sol'].includes(s.type),
   ).length;
 
   return (

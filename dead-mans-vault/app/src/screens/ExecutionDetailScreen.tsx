@@ -15,10 +15,15 @@ import { HistoryStep } from '../services/ExecutionHistoryService';
 const IS_DEVNET = RPC_URL.includes('devnet');
 
 const TYPE_ICONS: Record<string, string> = {
-  ExecuteSolDistribution: 'currency-usd',
-  ExecuteDistribution: 'swap-horizontal',
-  RecordExecution: 'file-document-check',
-  CloseExecutedVault: 'archive-check',
+  begin_execution: 'play-circle-outline',
+  begin_token_dist: 'camera-outline',
+  execute_specific_asset: 'gift-outline',
+  execute_specific_sol: 'gift-outline',
+  execute_sol_shares: 'currency-usd',
+  execute_token_shares: 'swap-horizontal',
+  finalize_execution: 'check-decagram',
+  close_token_dist: 'archive-outline',
+  close_executed_vault_by_owner: 'archive-check',
 };
 
 function openExplorer(signature: string) {
@@ -37,8 +42,8 @@ export function ExecutionDetailScreen() {
     tokenTransferCount: number;
   };
 
-  const solDistributions = steps.filter((s) => s.type === 'ExecuteSolDistribution');
-  const tokenDistributions = steps.filter((s) => s.type === 'ExecuteDistribution');
+  const solDistributions = steps.filter((s) => (s.solAmount ?? 0) > 0);
+  const tokenDistributions = steps.filter((s) => (s.tokenAmount ?? 0) > 0);
   const date = new Date(executedAt * 1000);
 
   return (
@@ -107,7 +112,7 @@ function StepRow({ step, isLast }: { step: HistoryStep; isLast: boolean }) {
       <View style={styles.stepContent}>
         <View style={styles.stepHeader}>
           <MaterialCommunityIcons name={iconName} size={14} color={COLORS.accent} />
-          <Text style={styles.stepType}>{step.type.replace(/([A-Z])/g, ' $1').trim()}</Text>
+          <Text style={styles.stepType}>{step.type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</Text>
         </View>
 
         <Text style={styles.stepDescription}>{step.description}</Text>
