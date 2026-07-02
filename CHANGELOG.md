@@ -5,6 +5,14 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.10.1] — 2026-07-02
+
+### Fixed
+- **Bequests screen shows saved bequests.** It opened with an empty list and never
+  loaded the on-chain `AssetPlan`, so already-configured bequests looked absent (they
+  were saved and distributed correctly). It now loads the plan on open and displays your
+  existing bequests, editable.
+
 ## [1.10.0] — 2026-07-02
 
 ### Added
