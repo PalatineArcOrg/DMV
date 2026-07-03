@@ -5,6 +5,19 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.12.0] — 2026-07-03
+
+### Added
+- **Custom RPC endpoint (Settings → Network).** Set your own RPC/DAS URL (Helius, Triton,
+  QuickNode, Aura…) so NFT/portfolio data uses your own rate limits. Test / Save / Reset,
+  masked display, DAS-support probe; loaded at bootstrap, "restart to apply". Default
+  behavior unchanged if unset. New `src/utils/rpcConfig.ts` is the single source of truth
+  for the RPC URL + Helius endpoints/key; all consumers migrated off `constants.ts`.
+- **On-chain Metaplex-metadata fallback.** NFT names + images resolve directly from the
+  on-chain Metadata account (batched read + manual borsh parse, no dependency) with the
+  image from the metadata uri, cached in SQLite — so NFTs show name + artwork even when the
+  DAS index is rate-limited, over any RPC. Standard NFTs only (cNFTs remain DAS-only).
+
 ## [1.11.3] — 2026-07-03
 
 ### Fixed
