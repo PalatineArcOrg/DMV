@@ -337,14 +337,23 @@ export function BequestsScreen() {
               {!d.isNft && (
                 <View style={styles.row}>
                   <Text style={styles.cardLabel}>Amount</Text>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="decimal-pad"
-                    placeholder={`max ${d.holding}`}
-                    placeholderTextColor="rgba(255,255,255,0.3)"
-                    value={d.uiAmount}
-                    onChangeText={(t) => updateDraft(i, { uiAmount: t })}
-                  />
+                  <View style={styles.amountGroup}>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="decimal-pad"
+                      placeholder={`max ${d.holding}`}
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      value={d.uiAmount}
+                      onChangeText={(t) => updateDraft(i, { uiAmount: t })}
+                    />
+                    <TouchableOpacity
+                      style={[styles.maxBtn, d.holding <= 0 && styles.maxBtnDisabled]}
+                      disabled={d.holding <= 0}
+                      onPress={() => updateDraft(i, { uiAmount: String(d.holding) })}
+                    >
+                      <Text style={styles.maxBtnText}>MAX</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
 
@@ -425,9 +434,21 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontFamily: FONTS.primary,
-    minWidth: 140,
+    minWidth: 96,
     textAlign: 'right',
   },
+  amountGroup: { flexDirection: 'row', alignItems: 'center' },
+  maxBtn: {
+    marginLeft: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,255,163,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,163,0.3)',
+  },
+  maxBtnDisabled: { opacity: 0.35 },
+  maxBtnText: { color: COLORS.accent, fontSize: 12, fontFamily: FONTS.primaryMedium },
   remove: { color: COLORS.critical, fontSize: 12, fontFamily: FONTS.primary, marginTop: 4 },
   addBtn: {
     borderWidth: 1,
