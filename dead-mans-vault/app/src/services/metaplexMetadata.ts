@@ -38,7 +38,10 @@ export function parseMetadataAccount(
       const len = data.readUInt32LE(off);
       off += 4;
       if (off + len > data.length) throw new Error('out of bounds');
-      const s = data.subarray(off, off + len).toString('utf8');
+      // Use Buffer.toString(encoding, start, end) — NOT subarray().toString('utf8'):
+      // in RN's buffer polyfill, subarray() returns a plain Uint8Array whose toString
+      // ignores the encoding and emits comma-joined byte codes ("68,77,86…").
+      const s = data.toString('utf8', off, off + len);
       off += len;
       return s.replace(/\0+$/, '').trim();
     };
