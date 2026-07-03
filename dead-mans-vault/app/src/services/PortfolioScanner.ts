@@ -1,9 +1,11 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { TokenBalance, DeFiPosition } from '../types';
-import { RPC_URL, KNOWN_TOKEN_LOGOS } from '../utils/constants';
+import { KNOWN_TOKEN_LOGOS } from '../utils/constants';
 import { DeFiDetector } from '../defi/detector';
 import { KNOWN_TOKEN_SYMBOLS } from '../defi/registry';
 import { fetchWithRetry, rpcWithRetry } from '../utils/fetchWithRetry';
+import { metadataPda, parseMetadataAccount } from './metaplexMetadata';
+import { getNftMeta, setNftMeta } from '../db/nftMetaRepo';
 import type {
   DASGetAssetsByOwnerResult,
   PythPriceFeed,
@@ -54,6 +56,7 @@ export class PortfolioScanner {
 
     // RPC fallback: fetch SPL token accounts directly
     if (!gotTokens) {
+      const fallbackNfts: { balance: TokenBalance; mint: PublicKey }[] = [];
       try {
         const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
           wallet,
@@ -71,17 +74,28 @@ export class PortfolioScanner {
           // uses). Without this, NFTs land in the fungible token list (and the NFTs
           // tab/section reads empty) whenever the DAS path is unavailable.
           const isNft = amount.decimals === 0 && Number(amount.amount) === 1;
-          balances.push({
+          const balance: TokenBalance = {
             mint: new PublicKey(mintStr),
             symbol: known?.symbol || mintStr.slice(0, 6),
             amount: Number(amount.uiAmountString),
             decimals: amount.decimals,
             usdValue: 0,
             isNft,
-          });
+          };
+          balances.push(balance);
+          if (isNft) fallbackNfts.push({ balance, mint: balance.mint });
         }
       } catch {
         // RPC token fetch is non-fatal
+      }
+      // Resolve NFT names/images from on-chain Metaplex metadata (no DAS needed).
+      // Non-fatal: on any failure the NFTs still show with mint-slice symbols.
+      if (fallbackNfts.length > 0) {
+        try {
+          await this.enrichNftMetadata(fallbackNfts);
+        } catch {
+          // metadata enrichment is best-effort
+        }
       }
     }
 
@@ -97,6 +111,76 @@ export class PortfolioScanner {
     }
 
     return balances;
+  }
+
+  /**
+   * Resolve names/images for fallback-path NFTs from on-chain Metaplex Metadata
+   * accounts — works over any standard RPC (no DAS). Mutates the balance objects in
+   * place. Compressed NFTs (cNFTs) have no Metadata PDA and are not handled here.
+   */
+  private async enrichNftMetadata(
+    nfts: { balance: TokenBalance; mint: PublicKey }[],
+  ): Promise<void> {
+    // 1. Cache hits first — NFTs are immutable so a cached entry is authoritative.
+    const uncached: { balance: TokenBalance; mint: PublicKey }[] = [];
+    for (const n of nfts) {
+      const cached = await getNftMeta(n.mint.toBase58());
+      if (cached) {
+        n.balance.symbol = cached.name || cached.symbol || n.balance.symbol;
+        if (cached.image) n.balance.image = cached.image;
+      } else {
+        uncached.push(n);
+      }
+    }
+    if (uncached.length === 0) return;
+
+    // 2. Batch-read the Metadata accounts (chunk <=100) and parse name/symbol/uri.
+    const parsed = new Map<string, { name: string; symbol: string; uri: string }>();
+    for (let i = 0; i < uncached.length; i += 100) {
+      const chunk = uncached.slice(i, i + 100);
+      const infos = await this.connection.getMultipleAccountsInfo(
+        chunk.map((n) => metadataPda(n.mint)),
+      );
+      infos.forEach((info, idx) => {
+        if (!info?.data) return;
+        const md = parseMetadataAccount(info.data as Buffer);
+        if (md) parsed.set(chunk[idx].mint.toBase58(), md);
+      });
+    }
+
+    // 3. Apply names immediately; fetch images (uri JSON) with a small concurrency pool.
+    const withMeta = uncached.filter((n) => parsed.has(n.mint.toBase58()));
+    for (const n of withMeta) {
+      const md = parsed.get(n.mint.toBase58())!;
+      n.balance.symbol = md.name || md.symbol || n.balance.symbol;
+    }
+    let cursor = 0;
+    const worker = async (): Promise<void> => {
+      while (cursor < withMeta.length) {
+        const n = withMeta[cursor++];
+        const mintStr = n.mint.toBase58();
+        const md = parsed.get(mintStr)!;
+        let image: string | null = null;
+        try {
+          if (md.uri) {
+            const res = await fetchWithRetry(md.uri, {}, 1);
+            const json = await res.json();
+            image = typeof json?.image === 'string' ? json.image : null;
+          }
+        } catch {
+          // missing/unreachable image is fine — name still resolves
+        }
+        if (image) n.balance.image = image;
+        try {
+          await setNftMeta(mintStr, { name: md.name, symbol: md.symbol, image });
+        } catch {
+          // cache write is best-effort
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(4, withMeta.length) }, () => worker()),
+    );
   }
 
   /**

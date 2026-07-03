@@ -12,7 +12,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { DeFiPosition, TokenBalance } from '../types/defi';
 import { HELIUS_SOURCE_MAP } from './registry';
-import { HELIUS_ENHANCED_API } from '../utils/constants';
+import { heliusEnhancedApi } from '../utils/rpcConfig';
 import { fetchWithRetry } from '../utils/fetchWithRetry';
 import type { HeliusEnhancedTransaction } from '../types/api';
 
@@ -89,7 +89,7 @@ export class DeFiDetector {
       const MAX_PAGES = 3;
 
       for (let page = 0; page < MAX_PAGES; page++) {
-        let url = `${HELIUS_ENHANCED_API}/addresses/${wallet.toString()}/transactions/?api-key=${this.heliusApiKey}&limit=50&commitment=confirmed`;
+        let url = `${heliusEnhancedApi()}/addresses/${wallet.toString()}/transactions/?api-key=${this.heliusApiKey}&limit=50&commitment=confirmed`;
         if (beforeSig) {
           url += `&before-signature=${beforeSig}`;
         }

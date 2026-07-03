@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
   ScrollView,
   Animated,
   Alert,
@@ -15,7 +16,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Connection } from '@solana/web3.js';
 import { useWallet } from '../hooks/useWallet';
 import { useDemoStore } from '../store/useDemoStore';
 import { useVaultStore } from '../store/useVaultStore';
@@ -23,8 +24,17 @@ import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
 import { truncateAddress, formatDuration } from '../utils/formatting';
+import { getRpcUrl, maskRpc, isCustomRpc, RPC_OVERRIDE_KEY } from '../utils/rpcConfig';
+import { getSetting, setSetting, deleteSetting } from '../db/settingsRepo';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
+
+function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
@@ -37,6 +47,81 @@ export function SettingsScreen() {
   const [copied, setCopied] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
   const [notifStatus, setNotifStatus] = useState<string>('...');
+
+  // Custom RPC setting
+  const [rpcInput, setRpcInput] = useState('');
+  const [rpcSaved, setRpcSaved] = useState<string | null>(null);
+  const [rpcTesting, setRpcTesting] = useState(false);
+  const [rpcTestResult, setRpcTestResult] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      getSetting(RPC_OVERRIDE_KEY)
+        .then((v) => {
+          setRpcSaved(v);
+          setRpcInput(v ?? '');
+        })
+        .catch(() => {});
+    }, []),
+  );
+
+  const handleTestRpc = useCallback(async () => {
+    const url = rpcInput.trim();
+    if (!url) return;
+    setRpcTesting(true);
+    setRpcTestResult(null);
+    try {
+      const conn = new Connection(url);
+      await raceTimeout(conn.getVersion(), 5000);
+      let das = false;
+      try {
+        const resp = (await raceTimeout(
+          fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: '1',
+              method: 'getAssetsByOwner',
+              params: { ownerAddress: PublicKey.default.toBase58(), page: 1, limit: 1 },
+            }),
+          }),
+          5000,
+        )) as Response;
+        const j = await resp.json();
+        das = !j.error;
+      } catch {
+        das = false;
+      }
+      setRpcTestResult(
+        `Reachable · ${das ? 'DAS supported (full NFT data)' : 'DAS not supported (NFT data limited)'}`,
+      );
+    } catch {
+      setRpcTestResult('Unreachable — check the URL');
+    } finally {
+      setRpcTesting(false);
+    }
+  }, [rpcInput]);
+
+  const handleSaveRpc = useCallback(async () => {
+    const url = rpcInput.trim();
+    if (!url) return;
+    if (!/^https:\/\/[^\s]+$/i.test(url)) {
+      Alert.alert('Invalid URL', 'Enter a valid https:// RPC URL.');
+      return;
+    }
+    await setSetting(RPC_OVERRIDE_KEY, url);
+    setRpcSaved(url);
+    Alert.alert('Saved', 'Custom RPC saved. Restart the app to apply.');
+  }, [rpcInput]);
+
+  const handleResetRpc = useCallback(async () => {
+    await deleteSetting(RPC_OVERRIDE_KEY);
+    setRpcSaved(null);
+    setRpcInput('');
+    setRpcTestResult(null);
+    Alert.alert('Reset', 'Reverted to the default RPC. Restart the app to apply.');
+  }, []);
 
   useFocusEffect(useCallback(() => {
     Notifications.getPermissionsAsync().then(({ status }) => {
@@ -258,6 +343,57 @@ export function SettingsScreen() {
               value={notifStatus}
             />
           </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Network */}
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionLabel}>NETWORK</Text>
+        <View style={styles.card}>
+          <View style={styles.netRow}>
+            <Text style={styles.netLabel}>Current RPC</Text>
+            <View style={styles.netBadge}>
+              <Text style={styles.netBadgeText}>{isCustomRpc() ? 'Custom' : 'Default'}</Text>
+            </View>
+          </View>
+          <Text style={styles.netEndpoint} numberOfLines={1}>{maskRpc(getRpcUrl())}</Text>
+          <TextInput
+            style={styles.netInput}
+            value={rpcInput}
+            onChangeText={setRpcInput}
+            placeholder="https://your-rpc-url"
+            placeholderTextColor="rgba(255,255,255,0.25)"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          {rpcTestResult ? <Text style={styles.netTestResult}>{rpcTestResult}</Text> : null}
+          <View style={styles.netBtnRow}>
+            <TouchableOpacity
+              style={styles.netBtn}
+              onPress={handleTestRpc}
+              disabled={rpcTesting || !rpcInput.trim()}
+            >
+              {rpcTesting ? (
+                <ActivityIndicator size="small" color={COLORS.accent} />
+              ) : (
+                <Text style={styles.netBtnText}>Test</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.netBtn, styles.netBtnPrimary]}
+              onPress={handleSaveRpc}
+              disabled={!rpcInput.trim()}
+            >
+              <Text style={[styles.netBtnText, styles.netBtnTextPrimary]}>Save</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.netBtn} onPress={handleResetRpc} disabled={!rpcSaved}>
+              <Text style={styles.netBtnText}>Reset</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.netHelp}>
+            For NFT &amp; full portfolio data, use a Helius-compatible (DAS) RPC URL. Restart the app to apply.
+          </Text>
         </View>
       </View>
 
@@ -520,6 +656,84 @@ const styles = StyleSheet.create({
   rowDivider: {
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  /* Network / custom RPC */
+  netRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  netLabel: { fontSize: 13, color: '#FFFFFF', fontFamily: FONTS.primaryMedium },
+  netBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  netBadgeText: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.5)',
+    fontFamily: FONTS.primarySemiBold,
+    letterSpacing: 0.5,
+  },
+  netEndpoint: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+    fontFamily: FONTS.mono,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+  },
+  netInput: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontFamily: FONTS.mono,
+  },
+  netTestResult: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.55)',
+    fontFamily: FONTS.primary,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  netBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  netBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  netBtnPrimary: {
+    backgroundColor: 'rgba(0,255,163,0.12)',
+    borderColor: 'rgba(0,255,163,0.3)',
+  },
+  netBtnText: { fontSize: 12, color: 'rgba(255,255,255,0.7)', fontFamily: FONTS.primaryMedium },
+  netBtnTextPrimary: { color: COLORS.accent },
+  netHelp: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: FONTS.primary,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 14,
+    lineHeight: 15,
   },
   /* Vault Status */
   statusRow: {

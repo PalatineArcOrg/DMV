@@ -1,13 +1,8 @@
 import { Platform } from 'react-native';
 
 export const PROGRAM_ID = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
-export const RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
-// The standalone EXPO_PUBLIC_HELIUS_API_KEY doesn't reliably inline into the release
-// bundle, which silently disabled DAS (NFT names/images), Helius tx-history, and priority
-// fees. Fall back to the api-key embedded in the Helius RPC_URL so all three work from the
-// single RPC URL that does embed.
-const RPC_API_KEY_MATCH = RPC_URL.match(/[?&]api-key=([^&]+)/);
-export const HELIUS_API_KEY = process.env.EXPO_PUBLIC_HELIUS_API_KEY || (RPC_API_KEY_MATCH ? RPC_API_KEY_MATCH[1] : '');
+// RPC URL + Helius endpoints/key now live in ./rpcConfig (runtime-overridable via the
+// Settings → NETWORK custom-RPC field). Import the getters from there, not constants.
 
 // DMV push-notification server (FCM relay). Empty = push registration disabled.
 export const NOTIFY_URL = process.env.EXPO_PUBLIC_NOTIFY_URL || '';
@@ -17,12 +12,6 @@ export const NOTIFY_URL = process.env.EXPO_PUBLIC_NOTIFY_URL || '';
 export const KEEPER_BOUNTY_LAMPORTS = 5_000_000;
 export const NOTIFY_SECRET = process.env.EXPO_PUBLIC_NOTIFY_SECRET || '';
 
-// Derive Helius REST endpoints from RPC_URL — zero-config for mainnet migration
-const IS_DEVNET = RPC_URL.includes('devnet') || RPC_URL.includes('api.devnet');
-const HELIUS_NET_PREFIX = IS_DEVNET ? 'api-devnet' : 'api-mainnet';
-export const HELIUS_API_BASE = `https://${HELIUS_NET_PREFIX}.helius.xyz/v0`;
-export const HELIUS_ENHANCED_API = `https://${HELIUS_NET_PREFIX}.helius-rpc.com/v0`;
-export const HELIUS_PARSE_TX_API = `https://${HELIUS_NET_PREFIX}.helius-rpc.com/v0/transactions`;
 export const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
 export const JUPITER_SWAP_API = 'https://quote-api.jup.ag/v6/swap';
 

@@ -9,10 +9,9 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRoute } from '@react-navigation/native';
-import { COLORS, FONTS, RPC_URL } from '../utils/constants';
+import { COLORS, FONTS } from '../utils/constants';
+import { isDevnet } from '../utils/rpcConfig';
 import { HistoryStep } from '../services/ExecutionHistoryService';
-
-const IS_DEVNET = RPC_URL.includes('devnet');
 
 const TYPE_ICONS: Record<string, string> = {
   begin_execution: 'play-circle-outline',
@@ -27,7 +26,7 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 function openExplorer(signature: string) {
-  const url = IS_DEVNET
+  const url = isDevnet()
     ? `https://explorer.solana.com/tx/${signature}?cluster=devnet`
     : `https://explorer.solana.com/tx/${signature}`;
   Linking.openURL(url);

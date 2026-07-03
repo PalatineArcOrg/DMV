@@ -4,7 +4,7 @@ import { TokenBalance } from '../types';
 import { useWallet } from './useWallet';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePortfolioStore } from '../store/usePortfolioStore';
-import { HELIUS_API_KEY, RPC_URL } from '../utils/constants';
+import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { saveDailyPrice, getPreviousPrice } from '../db/priceHistoryRepo';
 
 const BALANCE_REFRESH_MS = 30_000;    // Token balances: every 30s
@@ -20,7 +20,7 @@ export function usePortfolio() {
   const isRefreshingDefi = useRef(false);
 
   const scanner = useMemo(
-    () => new PortfolioScanner(RPC_URL, HELIUS_API_KEY),
+    () => new PortfolioScanner(getRpcUrl(), getHeliusApiKey()),
     [],
   );
 

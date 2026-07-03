@@ -19,7 +19,8 @@ import {
 } from '@solana/spl-token';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
-import { PROGRAM_ID, RPC_URL, HELIUS_API_KEY, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
+import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
+import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
 import type { PriorityFeeEstimateResult } from '../types/api';
 import type { AssetAssignment } from '../types/vault';
@@ -33,7 +34,7 @@ export class VaultTransactionService {
   private connection: Connection;
 
   constructor() {
-    this.connection = new Connection(RPC_URL, 'confirmed');
+    this.connection = new Connection(getRpcUrl(), 'confirmed');
   }
 
   getConnection(): Connection {
@@ -136,10 +137,10 @@ export class VaultTransactionService {
   // ─── Priority fee ───
 
   private async estimatePriorityFee(accountKeys: PublicKey[]): Promise<number> {
-    if (!HELIUS_API_KEY) return 1000;
+    if (!getHeliusApiKey()) return 1000;
     try {
       const result = await rpcWithRetry<PriorityFeeEstimateResult>(
-        RPC_URL,
+        getRpcUrl(),
         'getPriorityFeeEstimate',
         [{
           accountKeys: accountKeys.map((k) => k.toString()),

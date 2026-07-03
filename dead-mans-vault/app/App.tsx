@@ -21,6 +21,7 @@ import { useDemoStore } from './src/store/useDemoStore';
 import { useHeartbeatStore } from './src/store/useHeartbeatStore';
 import { useAuthStore } from './src/store/useAuthStore';
 import { getSetting } from './src/db/settingsRepo';
+import { loadRpcOverride } from './src/utils/rpcConfig';
 import { COLORS, FONTS } from './src/utils/constants';
 
 const queryClient = new QueryClient();
@@ -41,6 +42,9 @@ export default function App() {
 
   useEffect(() => {
     initDatabase()
+      // Load any custom-RPC override BEFORE the first Connection is created
+      // (ConnectionProvider mounts only after dbReady, below).
+      .then(() => loadRpcOverride(getSetting))
       .then(() => NotificationService.initialize())
       .then(async () => {
         await useDemoStore.getState().loadFromDb();

@@ -1,6 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 import bs58 from 'bs58';
-import { HELIUS_ENHANCED_API, HELIUS_API_KEY, PROGRAM_ID } from '../utils/constants';
+import { PROGRAM_ID } from '../utils/constants';
+import { heliusEnhancedApi, getHeliusApiKey } from '../utils/rpcConfig';
 import { fetchWithRetry } from '../utils/fetchWithRetry';
 
 // Anchor instruction discriminators (first 8 bytes of sha256("global:<name>"), hex)
@@ -124,7 +125,7 @@ interface HeliusTx {
  * Groups transactions by execution session (each RecordExecution marks end of session).
  */
 export async function getExecutionHistory(wallet: PublicKey): Promise<ExecutionSummary[]> {
-  if (!HELIUS_API_KEY) return [];
+  if (!getHeliusApiKey()) return [];
 
   // Query the vault PDA — it's an account in ALL vault transactions
   // (init, heartbeat, distributions, record, close)
@@ -139,7 +140,7 @@ export async function getExecutionHistory(wallet: PublicKey): Promise<ExecutionS
   const MAX_PAGES = 5;
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    let url = `${HELIUS_ENHANCED_API}/addresses/${walletStr}/transactions/?api-key=${HELIUS_API_KEY}&limit=50&commitment=confirmed`;
+    let url = `${heliusEnhancedApi()}/addresses/${walletStr}/transactions/?api-key=${getHeliusApiKey()}&limit=50&commitment=confirmed`;
     if (beforeSig) {
       url += `&before=${beforeSig}`;
     }

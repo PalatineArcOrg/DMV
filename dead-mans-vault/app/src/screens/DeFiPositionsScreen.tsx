@@ -15,7 +15,8 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 import { PortfolioScanner } from '../services/PortfolioScanner';
 import { DeFiPosition, DeFiPositionAction, ClosureStrategy } from '../types/defi';
 import { saveDefiPositions } from '../db/defiPositionRepo';
-import { RPC_URL, HELIUS_API_KEY, COLORS, SPACING, FONTS } from '../utils/constants';
+import { COLORS, SPACING, FONTS } from '../utils/constants';
+import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { StepIndicator } from '../components/StepIndicator';
 
 const ACTIONS: DeFiPositionAction[] = ['close', 'transfer', 'ignore'];
@@ -95,7 +96,7 @@ export function DeFiPositionsScreen() {
     }
 
     // Only scan fresh if store is empty (first app launch / no prior refresh)
-    const scanner = new PortfolioScanner(RPC_URL, HELIUS_API_KEY);
+    const scanner = new PortfolioScanner(getRpcUrl(), getHeliusApiKey());
     scanner
       .detectDeFiPositions(publicKey)
       .then((detected) => {

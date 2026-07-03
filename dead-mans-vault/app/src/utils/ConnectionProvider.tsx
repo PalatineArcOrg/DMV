@@ -6,7 +6,7 @@ import React, {
   createContext,
   useContext,
 } from 'react';
-import { RPC_URL } from './constants';
+import { getRpcUrl } from './rpcConfig';
 
 export interface ConnectionProviderProps {
   children: ReactNode;
@@ -26,7 +26,7 @@ export const ConnectionProvider: FC<ConnectionProviderProps> = ({
   config = { commitment: 'confirmed' },
 }) => {
   const connection = useMemo(
-    () => new Connection(RPC_URL, config),
+    () => new Connection(getRpcUrl(), config),
     [config],
   );
 

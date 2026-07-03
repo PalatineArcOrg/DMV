@@ -13,9 +13,7 @@
 import { Connection, Keypair } from '@solana/web3.js';
 import { DeFiPosition, ClosureResult } from '../types/defi';
 import { executeSwap } from './jupiterSwap';
-import { RPC_URL } from '../utils/constants';
-
-const IS_DEVNET = RPC_URL.includes('devnet');
+import { isDevnet } from '../utils/rpcConfig';
 
 export class DeFiClosureService {
   private connection: Connection;
@@ -67,7 +65,7 @@ export class DeFiClosureService {
     }
 
     // Devnet simulation — Jupiter doesn't operate on devnet
-    if (IS_DEVNET) {
+    if (isDevnet()) {
       return this.simulateClosure(position);
     }
 
