@@ -5,6 +5,14 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.12.1] — 2026-07-03
+
+### Fixed
+- **NFT metadata decoded as byte codes on-device.** The Metaplex parser used
+  `subarray().toString('utf8')`; in RN's buffer polyfill `subarray()` returns a plain
+  Uint8Array whose `toString` ignores the encoding, so names rendered as "68,77,86…"
+  (byte codes) and the uri/image broke too. Fixed to `Buffer.toString('utf8', start, end)`.
+
 ## [1.12.0] — 2026-07-03
 
 ### Added
