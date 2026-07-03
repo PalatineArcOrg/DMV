@@ -5,6 +5,15 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.11.2] — 2026-07-03
+
+### Fixed
+- **NFTs categorized even when the portfolio scan falls back from DAS.** The Helius DAS
+  path tags NFTs, but the `getParsedTokenAccountsByOwner` fallback (used on DAS error/
+  rate-limit) did not, so NFTs landed in the Tokens list with the NFTs tab empty. The
+  fallback now tags NFTs by signature (0 decimals, 1 unit) — the same heuristic the
+  bequest picker uses. Names/images still come from DAS when available.
+
 ## [1.11.1] — 2026-07-03
 
 ### Added
