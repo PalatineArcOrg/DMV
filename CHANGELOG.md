@@ -5,6 +5,16 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.10.3] — 2026-07-03
+
+### Fixed
+- **Bequests stay visible after setup.** The Bequests screen went blank after saving and
+  on return, though the bequests were saved on-chain. The previous load ran once on mount,
+  but React Navigation keeps the screen mounted, so it never re-loaded; `onSave` also
+  cleared the list. It now reloads the on-chain plan on every focus (without clobbering
+  unsaved edits) and after saving. The Vault overview's bequests row shows "Configured"
+  when a plan exists.
+
 ## [1.10.2] — 2026-07-02
 
 ### Fixed
