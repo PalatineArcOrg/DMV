@@ -8,6 +8,8 @@ export interface TokenBalance {
   usdValue: number;
   change24h?: number | null;
   logoUri?: string | null;
+  isNft?: boolean;
+  image?: string;
 }
 
 export type DeFiProtocol =

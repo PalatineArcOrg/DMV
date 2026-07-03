@@ -16,6 +16,9 @@ import { readVaultState } from './solana.js';
 const app = express();
 app.use(express.json({ limit: '16kb' }));
 
+// Serve NFT metadata JSON (devnet test collectibles) at /nft/<id>.json.
+app.use('/nft', express.static('/root/DMV/notify-server/nft-metadata'));
+
 // Strip any api-key from an RPC URL before exposing it (/health is public via Caddy).
 function maskRpc(url) {
   try {

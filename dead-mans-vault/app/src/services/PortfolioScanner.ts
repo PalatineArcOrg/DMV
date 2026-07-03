@@ -112,11 +112,34 @@ export class PortfolioScanner {
 
       const items = result?.items || [];
       for (const item of items) {
-        // Only process fungible tokens (skip NFTs, compressed NFTs)
-        if (item.interface !== 'FungibleToken' && item.interface !== 'FungibleAsset') continue;
-
         const mintStr = item.id;
         if (!mintStr) continue;
+
+        const isNft =
+          item.interface === 'V1_NFT' ||
+          item.interface === 'V2_NFT' ||
+          item.interface === 'ProgrammableNFT';
+        const isFungible =
+          item.interface === 'FungibleToken' || item.interface === 'FungibleAsset';
+        if (!isNft && !isFungible) continue;
+
+        if (isNft) {
+          // NFTs are supply-1 collectibles — the wallet appearing as owner means it
+          // holds exactly 1. They carry no price (usdValue 0) but can be bequeathed.
+          balances.push({
+            mint: new PublicKey(mintStr),
+            symbol:
+              item.content?.metadata?.name ||
+              item.content?.metadata?.symbol ||
+              mintStr.slice(0, 6),
+            amount: 1,
+            decimals: 0,
+            usdValue: 0,
+            isNft: true,
+            image: item.content?.links?.image,
+          });
+          continue;
+        }
 
         const tokenInfo = item.token_info;
         const balance = tokenInfo?.balance;
@@ -134,6 +157,7 @@ export class PortfolioScanner {
           amount,
           decimals,
           usdValue: 0,
+          isNft: false,
         });
       }
 
@@ -200,7 +224,7 @@ export class PortfolioScanner {
   private async enrichWithPythPrices(balances: TokenBalance[]): Promise<number> {
     const now = Date.now();
     const symbols = balances
-      .filter((b) => b.amount > 0)
+      .filter((b) => b.amount > 0 && !b.isNft)
       .map((b) => b.symbol.toUpperCase());
 
     if (symbols.length === 0) return 0;
@@ -209,6 +233,7 @@ export class PortfolioScanner {
     let enriched = 0;
     const uncachedSymbols: string[] = [];
     for (const balance of balances) {
+      if (balance.isNft) continue; // NFTs have no fungible price feed
       const sym = balance.symbol.toUpperCase();
       const cached = priceCache.get(sym);
       if (cached && now - cached.ts < PRICE_CACHE_TTL_MS) {
@@ -273,7 +298,7 @@ export class PortfolioScanner {
     const WRAPPED_SOL = 'So11111111111111111111111111111111111111112';
 
     const mints = balances
-      .filter((b) => b.amount > 0 && b.usdValue === 0)
+      .filter((b) => b.amount > 0 && b.usdValue === 0 && !b.isNft)
       .map((b) => (b.mint.equals(PublicKey.default) ? WRAPPED_SOL : b.mint.toString()));
 
     if (mints.length === 0) return;

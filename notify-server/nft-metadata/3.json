@@ -1,0 +1,7 @@
+{
+  "name": "DMV Test Relic #3",
+  "symbol": "DMVNFT",
+  "description": "A test collectible for Dead Man's Vault inheritance testing on devnet. Deposit it into a vault and leave it to a beneficiary as a specific bequest.",
+  "image": "https://placehold.co/500x500/0F1521/00FFA3/png?text=DMV+Relic+%233",
+  "attributes": [{ "trait_type": "Series", "value": "Genesis" }, { "trait_type": "Number", "value": "3" }]
+}

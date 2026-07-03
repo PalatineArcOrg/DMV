@@ -67,6 +67,11 @@ export function DepositModal({
     ? splTokens.find((t) => t.mint.toString() === selectedAsset)
     : null;
 
+  // An NFT is a supply-1 collectible — deposited as exactly 1, no amount to type.
+  const isNftMint = (mintStr: string) =>
+    tokenBalances.some((t) => t.mint.toString() === mintStr && t.isNft);
+  const isNftAsset = !isWithdraw && selectedAsset !== 'SOL' && isNftMint(selectedAsset);
+
   const feeReserve = 0.01 * LAMPORTS_PER_SOL;
   const maxAmount = selectedAsset === 'SOL'
     ? isWithdraw
@@ -75,8 +80,8 @@ export function DepositModal({
     : (selectedToken?.amount ?? 0);
 
   const symbol = selectedAsset === 'SOL' ? 'SOL' : (selectedToken?.symbol ?? '???');
-  const parsedAmount = parseFloat(amount) || 0;
-  const isValid = parsedAmount > 0 && parsedAmount <= maxAmount;
+  const parsedAmount = isNftAsset ? 1 : (parseFloat(amount) || 0);
+  const isValid = isNftAsset ? true : (parsedAmount > 0 && parsedAmount <= maxAmount);
 
   const handleMax = () => {
     setAmount(maxAmount > 0 ? (selectedAsset === 'SOL' ? maxAmount.toFixed(4) : String(maxAmount)) : '0');
@@ -108,8 +113,8 @@ export function DepositModal({
         if (selectedAsset === 'SOL') {
           await onConfirmSol(Math.floor(parsedAmount * LAMPORTS_PER_SOL));
         } else if (selectedToken) {
-          const rawAmount = Math.floor(parsedAmount * 10 ** selectedToken.decimals);
-          await onConfirmToken(selectedToken.mint, rawAmount, selectedToken.decimals);
+          const rawAmount = isNftAsset ? 1 : Math.floor(parsedAmount * 10 ** selectedToken.decimals);
+          await onConfirmToken(selectedToken.mint, rawAmount, isNftAsset ? 0 : selectedToken.decimals);
         }
       }
       setAmount('');
@@ -190,29 +195,36 @@ export function DepositModal({
                   onPress={() => handleSelect(mintStr)}
                 >
                   <Text style={[styles.assetChipText, isSelected && styles.assetChipTextSelected]}>
-                    {t.symbol}
+                    {t.symbol}{isNftMint(mintStr) ? ' · NFT' : ''}
                   </Text>
                 </TouchableOpacity>
               );
             })}
           </ScrollView>
 
-          {/* Amount Input */}
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.input}
-              value={amount}
-              onChangeText={setAmount}
-              placeholder="0.0"
-              placeholderTextColor="rgba(255,255,255,0.2)"
-              keyboardType="decimal-pad"
-              autoFocus
-              editable={!isSubmitting}
-            />
-            <TouchableOpacity style={styles.maxBtn} onPress={handleMax} disabled={isSubmitting}>
-              <Text style={styles.maxBtnText}>MAX</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Amount Input — NFTs deposit as a single whole collectible */}
+          {isNftAsset ? (
+            <View style={styles.nftRow}>
+              <MaterialCommunityIcons name="image-outline" size={16} color={COLORS.accent} />
+              <Text style={styles.nftRowText}>1 NFT — the whole collectible is deposited</Text>
+            </View>
+          ) : (
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.input}
+                value={amount}
+                onChangeText={setAmount}
+                placeholder="0.0"
+                placeholderTextColor="rgba(255,255,255,0.2)"
+                keyboardType="decimal-pad"
+                autoFocus
+                editable={!isSubmitting}
+              />
+              <TouchableOpacity style={styles.maxBtn} onPress={handleMax} disabled={isSubmitting}>
+                <Text style={styles.maxBtnText}>MAX</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>
@@ -313,6 +325,19 @@ const styles = StyleSheet.create({
   assetChipText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.5)', fontFamily: FONTS.primarySemiBold },
   assetChipTextSelected: { color: COLORS.accent },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
+  nftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,255,163,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,163,0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  nftRowText: { flex: 1, fontSize: 12, color: 'rgba(255,255,255,0.75)', fontFamily: FONTS.primary },
   input: {
     flex: 1,
     backgroundColor: 'rgba(255,255,255,0.05)',

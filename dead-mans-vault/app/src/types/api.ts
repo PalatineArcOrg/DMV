@@ -13,6 +13,9 @@ export interface DASAssetItem {
       name?: string;
       symbol?: string;
     };
+    links?: {
+      image?: string;
+    };
   };
   token_info?: {
     balance?: number;

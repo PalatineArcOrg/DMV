@@ -220,13 +220,17 @@ export function AssetsScreen() {
                 <TokenIcon symbol={token.symbol} logoUri={token.logoUri} />
                 <View style={styles.tokenInfo}>
                   <View style={styles.tokenNameRow}>
-                    <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                    {isSetupComplete && (
+                    <Text style={styles.tokenSymbol} numberOfLines={1}>{token.symbol}</Text>
+                    {token.isNft ? (
+                      <View style={styles.nftBadge}><Text style={styles.nftBadgeText}>NFT</Text></View>
+                    ) : isSetupComplete ? (
                       <MaterialCommunityIcons name="shield-check" size={12} color={COLORS.accent} style={{ marginLeft: 4 }} />
-                    )}
+                    ) : null}
                   </View>
                   <Text style={styles.tokenAmount}>
-                    {formatTokenAmount(token.amount, token.decimals > 4 ? 4 : token.decimals)} {token.symbol}
+                    {token.isNft
+                      ? '1 · non-fungible'
+                      : `${formatTokenAmount(token.amount, token.decimals > 4 ? 4 : token.decimals)} ${token.symbol}`}
                   </Text>
                 </View>
                 <View style={styles.tokenRight}>
@@ -367,8 +371,18 @@ const styles = StyleSheet.create({
   tokenIconText: { fontSize: 10, fontWeight: '700', fontFamily: FONTS.primaryBold },
   tokenInfo: { flex: 1, minWidth: 0 },
   tokenNameRow: { flexDirection: 'row', alignItems: 'center' },
-  tokenSymbol: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', fontFamily: FONTS.primarySemiBold },
+  tokenSymbol: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', fontFamily: FONTS.primarySemiBold, flexShrink: 1 },
   tokenAmount: { color: 'rgba(255,255,255,0.35)', fontSize: 11, fontFamily: FONTS.primary, marginTop: 1 },
+  nftBadge: {
+    marginLeft: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 5,
+    backgroundColor: 'rgba(0,255,163,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,163,0.3)',
+  },
+  nftBadgeText: { color: COLORS.accent, fontSize: 9, fontWeight: '700', fontFamily: FONTS.primaryBold },
   tokenRight: { alignItems: 'flex-end' },
   tokenUsd: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', fontFamily: FONTS.primarySemiBold },
   tokenChange: { fontSize: 11, marginTop: 1, fontFamily: FONTS.primary },
