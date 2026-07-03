@@ -46,6 +46,7 @@ It never closes the core PDAs — that final cleanup is owner-signed by design (
 | `GET`  | `/health` | — | Status: `fcmConfigured`, `executorReady`, `cranker` (pubkey), `registrations`, `rpc` (api-key masked), `programId` |
 | `GET`  | `/inheritances?wallet=<pubkey>` | — | Read-only. Returns the vaults where `wallet` is a beneficiary, each with `{ vault, owner, shareBps, status, deadline, secondsToDeadline }` (status = active \| warning \| claimable \| executed). Powers the app's Inheritances screen; `parseVaultConfig` in `src/solana.js` reads the beneficiary list |
 | `GET`  | `/nft/<id>.json` | — | Static NFT metadata for devnet test collectibles (served from the `nft-metadata/` directory) |
+| `GET`  | `/nft/<id>.png` | — | Static NFT test image, self-hosted alongside the metadata JSON (same `nft-metadata/` static route) |
 | `POST` | `/register` | `x-dmv-secret` | Register/update a vault: `{ owner, vault, deviceToken, stage1, stage2, stage3 }` |
 | `POST` | `/deregister` | `x-dmv-secret` | Remove by `{ vault }` or `{ owner }` |
 | `POST` | `/poll-now` | `x-dmv-secret` | Run one poll tick immediately (testing) |

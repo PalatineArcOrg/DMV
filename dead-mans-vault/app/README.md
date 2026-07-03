@@ -29,7 +29,8 @@ Dead Man's Vault makes execution **permissionless**: your device configures the 
 - **Permissionless distribution** — After grace, payouts are computed on-chain and submittable by anyone; the caller cannot change who gets what
 - **Fires even if your phone never comes back** — a bundled keyless watcher distributes autonomously when the app is closed
 - **Pro-rata *and* specific bequests** — split the estate by percentage, and/or assign exact SOL amounts, exact tokens, and whole NFTs to specific heirs
-- **NFT support end-to-end** — NFTs show up in the portfolio (Helius DAS), deposit into the vault as whole units, and can be left to specific heirs; the Assets tab has a dedicated NFTs category
+- **NFT support end-to-end** — NFTs show up in the portfolio, deposit into the vault as whole units, and can be left to specific heirs; the Assets tab has a dedicated NFTs category. Names and images resolve **with or without Helius DAS**: an RPC-only fallback reads each NFT's on-chain Metaplex Metadata account directly (and its image URI), caching the result (compressed NFTs stay DAS-only)
+- **Custom RPC endpoint** — Set your own RPC URL in Settings → Network (Test / Save / Reset), e.g. to dodge public-RPC rate limits during scans and cranks. The default endpoint stays private; a "network busy" banner appears on rate-limit and links to the setting
 - **Beneficiary claim** — Heirs can trigger a matured vault from their own wallet via the in-app **Inheritances** screen (auto-discovery + manual import by owner address); the heir pays fees and the crank is MWA-signed
 - **On-chain keeper bounty** — A vault can reserve a small reward (default 0.005 SOL) paid by the program to whoever cranks `finalize_execution`, making permissionless cranking profitable; it's carved out of the SOL snapshot so it never reduces beneficiary payouts
 - **Reversible until execution** — Any heartbeat during stages 1–3 resets everything back to normal; once grace elapses the vault freezes and Stage 4 is irreversible
@@ -282,7 +283,7 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **App version** | 1.11.1 (versionCode 80) |
+| **App version** | 1.12.2 (versionCode 85) |
 | **Tests** | 23/23 passing |
 
 ---

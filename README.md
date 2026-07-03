@@ -20,7 +20,7 @@ Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initi
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.11.1)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.12.2)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility
@@ -57,7 +57,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 - **Specific bequests + pro-rata** -- Assign exact SOL or SPL token amounts, or whole NFTs, to specific beneficiaries (carved out first); the remainder splits pro-rata by share. A beneficiary can receive both.
 - **Beneficiary claim** -- Heirs can trigger a matured vault's distribution from their own wallet. The in-app **Inheritances** screen auto-discovers every vault where the connected wallet is a beneficiary (plus manual import by owner address) and runs the same permissionless crank, MWA-signed, with the heir paying fees. No owner or server action required.
 - **On-chain keeper bounty** -- Each vault can reserve a small reward (default 0.005 SOL) paid by the program to whoever cranks `finalize_execution`, making permissionless cranking profitable. It is carved out of the SOL snapshot at execution start, so it never reduces beneficiary payouts.
-- **NFT support end-to-end** -- NFTs are scanned into the portfolio (Helius DAS), deposited into the vault as whole units, and bequeathed to specific heirs via `execute_specific_asset`.
+- **NFT support end-to-end** -- NFTs are scanned into the portfolio, deposited into the vault as whole units, and bequeathed to specific heirs via `execute_specific_asset`. Names and images resolve **with or without Helius DAS** — an RPC-only fallback reads each NFT's on-chain Metaplex Metadata account directly (compressed NFTs remain DAS-only) and caches the result. The Assets tab has a dedicated Tokens · NFTs · DeFi split, and the Dashboard shows inline NFT and DeFi sections.
 - **4-stage escalation system** -- Graduated warnings (Reminder -> Alert -> Warning -> Execution) with configurable durations
 - **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key (the agent signs heartbeats only)
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
@@ -68,6 +68,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 
 ### Portfolio & DeFi
 - **Live portfolio tracking** -- Token balances via Helius DAS API, USD prices via dual oracle (Pyth Hermes + Jupiter fallback), 24h price changes
+- **Custom RPC endpoint** -- The app ships with a default RPC but lets you set your own (Settings → Network, with Test / Save / Reset). Useful for avoiding public-RPC rate limits during portfolio scans and cranks; a "network busy" banner surfaces on rate-limit and links straight to the setting.
 - **DeFi position detection** -- Scans 10 protocols across 3 detection layers (token mint matching, program account scanning, Helius Enhanced TX history)
 - **Supported protocols** -- Marinade, Jito, Sanctum (9 LST variants), Kamino, Jupiter, Raydium, Orca, Meteora, MarginFi, native stake
 
@@ -127,7 +128,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 | Enhanced Transactions | Discovers DeFi protocol interactions via transaction history (cursor-based pagination, up to 150 txs) |
 | `getPriorityFeeEstimate` | Dynamic priority fee estimation for reliable transaction landing |
 
-All Helius endpoints auto-derive devnet/mainnet prefix from the configured RPC URL — zero-config network switching.
+All Helius endpoints auto-derive their devnet/mainnet prefix from the active RPC URL (resolved through `rpcConfig`, which also derives the Helius API key from the RPC URL when no standalone key is set) — zero-config network switching, and the RPC URL is user-overridable at runtime via Settings → Network.
 
 ### Pyth Hermes
 
@@ -234,8 +235,9 @@ Authentication screen guards app access with biometric/PIN when enabled.
 | **VaultTransactionService** | Builds and sends all on-chain transactions (setup, owner ops, and the permissionless crank) with priority fees and raw byte parsing fallback |
 | **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker); signs heartbeats only |
 | **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX); local heartbeat-confirmed / foreground display. Escalation alerts come from the keyless watcher via FCM (the local timeline was removed in v1.7.3) |
-| **PortfolioScanner** | Token balances via Helius DAS, dual-oracle pricing (Pyth + Jupiter), DeFi detection |
+| **PortfolioScanner** | Token + NFT balances via Helius DAS, with an RPC-only fallback that reads NFT names/images from on-chain Metaplex Metadata (`metaplexMetadata` + `nftMetaRepo` cache); dual-oracle pricing (Pyth + Jupiter), DeFi detection |
 | **MigrationService** | Detects device migration and triggers on-chain agent rotation |
+| **rpcConfig** (util) | Single source of truth for the RPC URL + Helius endpoints/key; supports a runtime user override (Settings → Network) loaded once at bootstrap |
 
 ### DeFi Detection (3 layers)
 
@@ -296,7 +298,7 @@ dead-mans-vault/
         +-- db/                      # SQLite database layer (6 tables + repos)
         +-- defi/                    # DeFi protocol detectors + registry
         +-- types/                   # TypeScript type definitions + API interfaces
-        +-- utils/                   # Constants, formatting, validation, IDL, fetchWithRetry
+        +-- utils/                   # Constants, rpcConfig (RPC/Helius source of truth), formatting, validation, IDL, fetchWithRetry
 ```
 
 A sibling **keyless watcher service** (`notify-server/`) — Node.js + Express + SQLite — polls each registered vault's heartbeat, pushes FCM escalation alerts, and runs the same permissionless crank to autonomously distribute after grace. It holds no authority over funds; it pays only transaction fees from its own keypair.
@@ -345,7 +347,7 @@ APK output: `android/app/build/outputs/apk/release/app-release.apk`
 
 ## Network
 
-Currently deployed to **Solana Devnet**. All endpoints auto-derive network prefix from the configured RPC URL for future mainnet migration.
+Currently deployed to **Solana Devnet**. All endpoints auto-derive their network prefix from the active RPC URL (via `rpcConfig`) for future mainnet migration, and the RPC URL can be overridden at runtime in Settings → Network.
 
 ---
 
