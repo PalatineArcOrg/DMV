@@ -20,7 +20,7 @@ Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initi
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.8.0)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.11.1)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility
@@ -36,9 +36,9 @@ Owner configures vault --> Sets beneficiaries + heartbeat interval
                            |
 Heartbeat monitoring   --> Owner confirms liveness periodically
                            | (missed heartbeat)
-Stage 1: Reminder      --> Notifications sent to owner
+Stage 1: Reminder      --> Push notification to owner (heartbeat due)
                            | (no response)
-Stage 2: Alert         --> Emergency contacts notified
+Stage 2: Alert         --> Push notification to owner (heartbeat overdue)
                            | (no response)
 Stage 3: Warning       --> Final countdown, execution preview
                            | (no response — grace period elapses)
@@ -55,6 +55,9 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 ### Core
 - **Permissionless autonomous execution** -- After grace, the program computes every payout from on-chain state; the app, a beneficiary, or a keyless watcher can submit it. No trusted trigger, no server holding keys, no app required for the switch to fire.
 - **Specific bequests + pro-rata** -- Assign exact SOL or SPL token amounts, or whole NFTs, to specific beneficiaries (carved out first); the remainder splits pro-rata by share. A beneficiary can receive both.
+- **Beneficiary claim** -- Heirs can trigger a matured vault's distribution from their own wallet. The in-app **Inheritances** screen auto-discovers every vault where the connected wallet is a beneficiary (plus manual import by owner address) and runs the same permissionless crank, MWA-signed, with the heir paying fees. No owner or server action required.
+- **On-chain keeper bounty** -- Each vault can reserve a small reward (default 0.005 SOL) paid by the program to whoever cranks `finalize_execution`, making permissionless cranking profitable. It is carved out of the SOL snapshot at execution start, so it never reduces beneficiary payouts.
+- **NFT support end-to-end** -- NFTs are scanned into the portfolio (Helius DAS), deposited into the vault as whole units, and bequeathed to specific heirs via `execute_specific_asset`.
 - **4-stage escalation system** -- Graduated warnings (Reminder -> Alert -> Warning -> Execution) with configurable durations
 - **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key (the agent signs heartbeats only)
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
@@ -157,7 +160,7 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 
 | Instruction | Signer | Description |
 |-------------|--------|-------------|
-| `initialize_vault` | Owner | Create vault with beneficiaries (`{wallet, share_bps}`), intervals, agent key, mutability flag. Collects a 0.01 SOL creation fee to `FEE_WALLET` via CPI (`fee_recipient` pinned by `address` constraint) |
+| `initialize_vault` | Owner | Create vault with beneficiaries (`{wallet, share_bps}`), intervals, agent key, mutability flag, and optional `keeper_bounty`. Collects a 0.01 SOL creation fee to `FEE_WALLET` via CPI (`fee_recipient` pinned by `address` constraint) |
 | `update_vault` | Owner | Modify plan (beneficiaries, intervals). Blocked on immutable vaults / once a plan exists |
 | `set_asset_plan` / `update_asset_plan` | Owner | Define specific bequests (SOL + SPL + NFT) assigned to beneficiaries |
 | `record_heartbeat` | Agent | Record liveness confirmation on-chain (heartbeats only) |
@@ -171,7 +174,7 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 
 | Instruction | Description |
 |-------------|-------------|
-| `begin_execution` | Snapshot the SOL residual (carving out any specific-SOL bequests); takes an optional `asset_plan` account (pass the PDA when a plan exists, else `null`). Its existence proves grace for all downstream ix |
+| `begin_execution` | Snapshot the SOL residual (carving out any specific-SOL bequests **and the keeper bounty**); takes an optional `asset_plan` account (pass the PDA when a plan exists, else `null`). Its existence proves grace for all downstream ix |
 | `begin_token_dist` | Snapshot a mint's residual (balance − specific bequests) from the canonical, anti-spoof vault ATA |
 | `execute_specific_asset` | Pay one specific bequest (SPL/NFT) to its assigned beneficiary, in order |
 | `execute_specific_sol` | Pay one specific-SOL bequest (zero-pubkey sentinel mint) to its assigned beneficiary by direct lamport debit |
@@ -186,7 +189,7 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 | Account | Seeds | Purpose |
 |---------|-------|---------|
-| `VaultConfig` | `["vault", owner]` | Core config, beneficiary whitelist (`{wallet, share_bps}`), mutability flag |
+| `VaultConfig` | `["vault", owner]` | Core config, beneficiary whitelist (`{wallet, share_bps}`), mutability flag, `keeper_bounty` (from padding — non-breaking) |
 | `HeartbeatRecord` | `["heartbeat", vault]` | Heartbeat timestamps and counters |
 | `ExecutionLog` | `["execution", vault]` | SOL snapshot + paid-mask; existence marks execution begun |
 | `AssetPlan` | `["asset_plan", vault]` | Owner-defined specific bequests (≤64 assignments, u64 paid-mask) |
@@ -202,7 +205,7 @@ The permissionless design was hardened by a multi-agent security review — incl
 
 ### Tests
 
-22/22 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof), idempotency/resume, the post-grace freeze, and all setup/owner paths.
+23/23 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof), idempotency/resume, the post-grace freeze, and all setup/owner paths.
 
 ---
 
@@ -212,8 +215,8 @@ The permissionless design was hardened by a multi-agent security review — incl
 
 | Tab | Screens | Purpose |
 |-----|---------|---------|
-| **Status** | Dashboard, Execution Log | Heartbeat button, portfolio overview, vault status, escalation banner |
-| **Assets** | Assets Overview | Token list with live prices, DeFi positions grouped by protocol with closure strategies |
+| **Status** | Dashboard, Execution Log, Inheritances | Heartbeat button, portfolio overview (tokens + inline NFTs), vault status, escalation banner. **Inheritances** lists vaults the connected wallet can claim as a beneficiary and cranks the distribution (heir-paid) |
+| **Assets** | Assets Overview | Tokens · NFTs · DeFi tabs — token list with live prices, NFT gallery, DeFi positions grouped by protocol with closure strategies |
 | **Vault** | SetupWizard, Welcome, Beneficiaries, Heartbeat Config, DeFi Positions, Estate Review | 4-step vault creation wizard with step indicator |
 | **Settings** | Settings | Wallet info, vault contract details, edit/update vault, revoke, demo mode, app lock |
 
@@ -227,6 +230,7 @@ Authentication screen guards app access with biometric/PIN when enabled.
 | **HeartbeatService** | Records confirmations to SQLite, tracks overdue status, monitors on-chain wallet activity |
 | **EscalationService** | Autonomous state machine evaluating every 60s (10s in demo), transitions through 4 stages |
 | **ExecutionService** | The permissionless crank — a mask-driven "do the next undone thing" loop (begin → bequests → pro-rata SOL → finalize → token residual → close), idempotent and resumable from on-chain state |
+| **ClaimService** | Heir-facing wrapper over the same crank: `runClaim` is an MWA-signed, resumable loop (heir pays fees) that discovers claimable vaults and distributes them |
 | **VaultTransactionService** | Builds and sends all on-chain transactions (setup, owner ops, and the permissionless crank) with priority fees and raw byte parsing fallback |
 | **KeyManager** | Agent keypair lifecycle via expo-secure-store (TEE on Seeker); signs heartbeats only |
 | **NotificationService** | 3 Android channels (heartbeat/HIGH, escalation/MAX, execution/MAX); local heartbeat-confirmed / foreground display. Escalation alerts come from the keyless watcher via FCM (the local timeline was removed in v1.7.3) |
@@ -279,7 +283,7 @@ dead-mans-vault/
 |   +-- state/                       # Account definitions (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist)
 |   +-- errors.rs                    # 39 error codes
 |   +-- constants.rs                 # On-chain constants (FEE_WALLET, VAULT_CREATION_FEE_LAMPORTS) + mask helpers
-+-- tests/                           # Anchor program tests (22/22 passing)
++-- tests/                           # Anchor program tests (23/23 passing)
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
         +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.

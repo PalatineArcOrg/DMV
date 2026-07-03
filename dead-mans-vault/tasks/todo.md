@@ -73,10 +73,13 @@ Spec: `BUILD-SPEC-permissionless-execution.md` (§18 overrides §3–§13). Impl
 
 ## Fast-follows (backlog)
 - [x] Specific-**SOL** bequests — DONE (shipped v1.8.0: `execute_specific_sol` + `begin_execution` carve-out via zero-pubkey sentinel mint; 22/22 tests; devnet e2e verified)
-- [ ] Beneficiary-facing **"Claim"** button in the app (anyone can crank; expose it in-UI for heirs)
+- [x] **Serverless triggers — Phase 1 (Beneficiary Claim)** — DONE (shipped v1.9.0; spec `BUILD-SPEC-serverless-triggers.md`): `GET /inheritances?wallet=` + `InheritancesScreen` (auto-discovery + manual import) + `ClaimService.runClaim` (heir-paid MWA crank, resumable) + `buildClaimTransactions`/`buildCloseTokenDistTransactions`. No program change (execution already permissionless)
+- [x] **Serverless triggers — Phase 2 (On-chain keeper bounty)** — DONE (shipped v1.10.0): `VaultConfig.keeper_bounty` (from padding, non-breaking) + `initialize_vault` param (`KEEPER_BOUNTY_LAMPORTS`=0.005 SOL) + `begin_execution` carve-out + `finalize_execution` pays the finalize cranker; 23/23 tests + devnet e2e. Known: keeper fronts the ExecutionLog rent (~0.00185 SOL) → net ≈0.003 SOL
+- [x] **NFT support end-to-end** — DONE (v1.11.0–v1.11.1): `PortfolioScanner` includes DAS NFTs (`isNft`/`image` on `TokenBalance`), `DepositModal` deposits 1, Bequests picker + `execute_specific_asset` distribute NFTs, `AssetsScreen` Tokens·NFTs·DeFi tabs + Dashboard inline NFTs section, notify-server `/nft/<id>.json` metadata
+- [x] Cranker **fee reimbursement** — addressed by the Phase 2 keeper bounty (finalize cranker earns the reward; proportional multi-cranker split is a further fast-follow)
+- [ ] **Serverless triggers — Phase 3 (Mutual keeping)** — living owners' heartbeats crank expired vaults for the bounty; opt-in, rides on Phase 2 (no program change). Spec `BUILD-SPEC-serverless-triggers.md` §4
 - [ ] Token-2022 **owner-withdraw** (`withdraw_from_vault` is legacy-Token only)
-- [ ] Cranker **fee reimbursement** (server pays fees/rent; no on-chain repay path yet)
-- [ ] `set_asset_plan` **>18 assignments** chunking/append ix (single tx caps ~18; storage cap 64)
+- [ ] `set_asset_plan`/`append_asset_plan` **>18 assignments** chunking/append ix (single tx caps ~18; storage cap 64)
 - [ ] Token-2022 transfer-fee mints can stick `close_token_dist` (non-zero residual after fee) — documented limitation
 - [ ] Harmless dev-console error from Cloudflare's injected bot-detection script on `dmv.palatinearc.com` (overlay suppressed; benign)
 

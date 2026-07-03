@@ -26,15 +26,16 @@ A mask-driven "do the next undone thing" loop, idempotent and safe to re-run eve
 
 ```
 begin_execution                     # snapshot the SOL residual (existence proves grace)
+ensureAta(vault, mint)  per mint    # idempotently create the vault's token ATA FIRST
 begin_token_dist(mint)  per mint    # snapshot each token residual (canonical, anti-spoof ATA)
 execute_specific_asset(j)           # pay specific SPL/NFT bequests, in order
 execute_sol_shares([...])           # SOL pro-rata, batched <=8
-finalize_execution                  # once SOL + bequest masks are full
+finalize_execution                  # once SOL + bequest masks are full; pays the keeper bounty to the cranker
 execute_token_shares(mint, [...])   # token residual pro-rata, batched <=8
 close_token_dist(mint)  per mint    # sweep dust -> largest-share beneficiary, close ATA + dist
 ```
 
-It never closes the core PDAs — that final cleanup is owner-signed by design (so a buggy crank can't orphan a never-distributed mint's tokens). Beneficiary ATAs are created idempotently by the cranker as needed.
+It never closes the core PDAs — that final cleanup is owner-signed by design (so a buggy crank can't orphan a never-distributed mint's tokens). Beneficiary ATAs are created idempotently by the cranker as needed. The executor also creates the **vault's** token ATA idempotently *before* `begin_token_dist` (`ensureAta`) — without it, a bequest for a mint the vault doesn't actually hold throws `AccountNotInitialized` at snapshot time and freezes the owner out post-grace; with it, an unheld-mint bequest snapshots/pays 0 and finalizes cleanly. If the vault set a `keeper_bounty`, whoever lands `finalize_execution` collects it (a reward carved out of the SOL snapshot at begin, so it never reduces beneficiary payouts).
 
 ---
 
@@ -43,6 +44,8 @@ It never closes the core PDAs — that final cleanup is owner-signed by design (
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | `GET`  | `/health` | — | Status: `fcmConfigured`, `executorReady`, `cranker` (pubkey), `registrations`, `rpc` (api-key masked), `programId` |
+| `GET`  | `/inheritances?wallet=<pubkey>` | — | Read-only. Returns the vaults where `wallet` is a beneficiary, each with `{ vault, owner, shareBps, status, deadline, secondsToDeadline }` (status = active \| warning \| claimable \| executed). Powers the app's Inheritances screen; `parseVaultConfig` in `src/solana.js` reads the beneficiary list |
+| `GET`  | `/nft/<id>.json` | — | Static NFT metadata for devnet test collectibles (served from the `nft-metadata/` directory) |
 | `POST` | `/register` | `x-dmv-secret` | Register/update a vault: `{ owner, vault, deviceToken, stage1, stage2, stage3 }` |
 | `POST` | `/deregister` | `x-dmv-secret` | Remove by `{ vault }` or `{ owner }` |
 | `POST` | `/poll-now` | `x-dmv-secret` | Run one poll tick immediately (testing) |

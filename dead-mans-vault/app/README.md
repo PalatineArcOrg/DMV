@@ -29,6 +29,9 @@ Dead Man's Vault makes execution **permissionless**: your device configures the 
 - **Permissionless distribution** — After grace, payouts are computed on-chain and submittable by anyone; the caller cannot change who gets what
 - **Fires even if your phone never comes back** — a bundled keyless watcher distributes autonomously when the app is closed
 - **Pro-rata *and* specific bequests** — split the estate by percentage, and/or assign exact SOL amounts, exact tokens, and whole NFTs to specific heirs
+- **NFT support end-to-end** — NFTs show up in the portfolio (Helius DAS), deposit into the vault as whole units, and can be left to specific heirs; the Assets tab has a dedicated NFTs category
+- **Beneficiary claim** — Heirs can trigger a matured vault from their own wallet via the in-app **Inheritances** screen (auto-discovery + manual import by owner address); the heir pays fees and the crank is MWA-signed
+- **On-chain keeper bounty** — A vault can reserve a small reward (default 0.005 SOL) paid by the program to whoever cranks `finalize_execution`, making permissionless cranking profitable; it's carved out of the SOL snapshot so it never reduces beneficiary payouts
 - **Reversible until execution** — Any heartbeat during stages 1–3 resets everything back to normal; once grace elapses the vault freezes and Stage 4 is irreversible
 - **One-time 0.01 SOL creation fee** — collected on-chain by `initialize_vault` (a `fee_recipient` account pinned by address + a CPI transfer), so it can't be bypassed
 
@@ -262,7 +265,7 @@ cd android && ./gradlew assembleRelease
 # Build the Anchor program
 anchor build
 
-# Run program tests (22/22 passing; execution tests use real ~40s grace waits)
+# Run program tests (23/23 passing; execution tests use real ~40s grace waits)
 anchor test
 
 # Deploy to devnet
@@ -279,8 +282,8 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **App version** | 1.8.0 (versionCode 70) |
-| **Tests** | 22/22 passing |
+| **App version** | 1.11.1 (versionCode 80) |
+| **Tests** | 23/23 passing |
 
 ---
 
@@ -291,9 +294,9 @@ anchor deploy --provider.cluster devnet
 | Program instructions | 19 |
 | Program accounts (PDAs) | 5 (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist) |
 | Program error codes | 39 |
-| Program tests | 22/22 passing |
-| App screens | 13 |
-| App services | 9 |
+| Program tests | 23/23 passing |
+| App screens | 14 |
+| App services | 10 |
 | Zustand stores | 6 |
 | SQLite tables | 6 |
 | Keyless watcher | Node + Express + SQLite |
