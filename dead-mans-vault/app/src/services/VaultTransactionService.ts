@@ -690,7 +690,13 @@ export class VaultTransactionService {
       })
       .instruction();
 
-    return this.sendWithPayer([ix], payer, [vaultPda, executionPda, tokenDistPda, mint, payer.publicKey], 120_000);
+    // A bequest can name a mint the vault doesn't hold (no ATA). Create the empty
+    // vault ATA first (idempotent no-op if present) so begin_token_dist snapshots
+    // it as 0 instead of failing AccountNotInitialized and stalling execution.
+    const createVaultAta = createAssociatedTokenAccountIdempotentInstruction(
+      payer.publicKey, vaultAta, vaultPda, mint, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+    return this.sendWithPayer([createVaultAta, ix], payer, [vaultPda, executionPda, tokenDistPda, mint, payer.publicKey], 150_000);
   }
 
   async crankExecuteSpecificAsset(
@@ -990,11 +996,16 @@ export class VaultTransactionService {
       const tokenProgram = await this.getTokenProgramForMint(mint);
       const vaultAta = this.ataFor(mint, vaultPda, true, tokenProgram);
       const [tokenDistPda] = this.getTokenDistPDA(vaultPda, mint);
+      // Create the (empty) vault ATA first (idempotent) so a bequest for a mint the
+      // vault doesn't hold snapshots as 0 instead of stalling execution.
+      const createVaultAta = createAssociatedTokenAccountIdempotentInstruction(
+        heir, vaultAta, vaultPda, mint, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID,
+      );
       const ix = await program.methods
         .beginTokenDist()
         .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda, mint, vaultAta, assetPlan: hasAssetPlan ? assetPlanPda : null, tokenDist: tokenDistPda, systemProgram: SystemProgram.programId })
         .instruction();
-      out.push({ label: `Snapshot ${mint.toString().slice(0, 4)}… balance`, tx: await wrap([ix], [vaultPda, executionPda, tokenDistPda, mint, heir], 120_000) });
+      out.push({ label: `Snapshot ${mint.toString().slice(0, 4)}… balance`, tx: await wrap([createVaultAta, ix], [vaultPda, executionPda, tokenDistPda, mint, heir], 150_000) });
     }
 
     if (assetPlan) {

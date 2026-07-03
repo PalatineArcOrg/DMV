@@ -184,6 +184,11 @@ export async function runExecutor(vaultStr) {
     const td = await program.account.tokenDist.fetchNullable(tdPda);
     if (td) continue;
     const vaultAta = getAssociatedTokenAddressSync(mint, vault, true, programId);
+    // A bequest can name a mint the vault doesn't actually hold (no ATA). Create
+    // the (empty) vault ATA first so begin_token_dist can snapshot it as 0 and the
+    // specific bequest pays 0 — instead of throwing AccountNotInitialized and
+    // stalling the whole distribution (which would freeze the owner out post-grace).
+    await ensureAta(ctx, vaultAta, mint, vault, programId);
     await program.methods
       .beginTokenDist()
       .accountsPartial({

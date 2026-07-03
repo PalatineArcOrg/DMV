@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
-import { COLORS, FONTS } from '../utils/constants';
+import { COLORS, FONTS, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
 import { useWallet } from '../hooks/useWallet';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePortfolioStore } from '../store/usePortfolioStore';
@@ -32,6 +32,14 @@ interface DraftAssignment {
   holding: number;
 }
 
+// An asset actually held by the vault (what a bequest can carve out).
+interface VaultAsset {
+  mint: PublicKey;
+  symbol: string;
+  decimals: number;
+  amount: number; // ui amount held by the vault (distributable SOL, or token balance)
+}
+
 export function BequestsScreen() {
   const { publicKey, signTransaction } = useWallet();
   const vaultConfig = useVaultStore((s) => s.vaultConfig);
@@ -40,6 +48,7 @@ export function BequestsScreen() {
 
   const [drafts, setDrafts] = useState<DraftAssignment[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [vaultAssets, setVaultAssets] = useState<VaultAsset[]>([]);
 
   // On-chain beneficiary order is authoritative for assignment indices.
   const beneficiaries = useMemo(() => {
@@ -56,19 +65,44 @@ export function BequestsScreen() {
     });
   }, [vaultConfig, localBeneficiaries]);
 
-  // Bequeathable assets: SOL first (specific-SOL bequest via the zero-pubkey
-  // sentinel mint), then held tokens/NFTs.
-  const assets = useMemo(() => {
-    const solBal = balances.find((b) => b.symbol === 'SOL');
-    const sol: any = {
-      mint: PublicKey.default, // sentinel — the program reads this as native SOL
-      symbol: 'SOL',
-      decimals: 9,
-      amount: solBal?.amount ?? 0,
-    };
-    const tokens = balances.filter((b) => b.symbol !== 'SOL');
-    return [sol, ...tokens];
-  }, [balances]);
+  // Bequeathable assets come from the VAULT (what actually gets distributed), NOT
+  // the owner's wallet — a bequest for an asset the vault doesn't hold would pay 0
+  // and (previously) stall execution. `balances` (wallet portfolio) is used only to
+  // resolve friendly token symbols.
+  const loadVaultAssets = useCallback(async (): Promise<VaultAsset[]> => {
+    if (!publicKey) return [];
+    const solOnly: VaultAsset[] = [{ mint: PublicKey.default, symbol: 'SOL', decimals: 9, amount: 0 }];
+    try {
+      const txService = new VaultTransactionService();
+      const conn = txService.getConnection();
+      const [vaultPda] = txService.getVaultPDA(publicKey);
+      const info = await conn.getAccountInfo(vaultPda);
+      const rent = info ? await conn.getMinimumBalanceForRentExemption(info.data.length) : 0;
+      // Distributable SOL = vault balance − rent − reserved keeper bounty.
+      const solAmount = info ? Math.max(0, (info.lamports - rent - KEEPER_BOUNTY_LAMPORTS) / 1e9) : 0;
+      const tokens = await txService.getVaultTokenBalances(vaultPda);
+      const tokenAssets: VaultAsset[] = tokens.map((t) => {
+        const known = balances.find((b: any) => b.mint?.toBase58?.() === t.mint.toBase58());
+        return {
+          mint: t.mint,
+          symbol: known?.symbol ?? `${t.mint.toBase58().slice(0, 4)}…`,
+          decimals: t.decimals,
+          amount: t.uiAmount,
+        };
+      });
+      const result: VaultAsset[] = [{ mint: PublicKey.default, symbol: 'SOL', decimals: 9, amount: solAmount }, ...tokenAssets];
+      setVaultAssets(result);
+      return result;
+    } catch {
+      setVaultAssets(solOnly);
+      return solOnly;
+    }
+  }, [publicKey, balances]);
+
+  const assets = useMemo(
+    () => (vaultAssets.length > 0 ? vaultAssets : [{ mint: PublicKey.default, symbol: 'SOL', decimals: 9, amount: 0 } as VaultAsset]),
+    [vaultAssets],
+  );
 
   const hasAssetPlan = !!vaultConfig?.hasAssetPlan;
   const isActiveVault = !!vaultConfig && vaultConfig.active && !vaultConfig.executed;
@@ -76,7 +110,7 @@ export function BequestsScreen() {
   // Load the existing on-chain AssetPlan into the draft list so already-saved
   // bequests are shown (and editable). Reads live from chain (`fetchAssetPlan`)
   // rather than relying on the possibly-stale store flag.
-  const loadPlan = useCallback(async () => {
+  const loadPlan = useCallback(async (va: VaultAsset[]) => {
     if (!publicKey) return;
     try {
       const txService = new VaultTransactionService();
@@ -92,36 +126,39 @@ export function BequestsScreen() {
             isNft: false,
             uiAmount: (raw.toNumber() / Math.pow(10, 9)).toString(),
             beneficiaryIndex: a.beneficiaryIndex,
-            holding: balances.find((b) => b.symbol === 'SOL')?.amount ?? 0,
+            holding: va.find((x) => x.mint.equals(PublicKey.default))?.amount ?? 0,
           };
         }
-        const bal = balances.find((b) => b.mint.toBase58() === a.mint.toBase58());
-        const decimals = bal?.decimals ?? 0;
+        const held = va.find((x) => x.mint.equals(a.mint));
+        const decimals = held?.decimals ?? 0;
         return {
           mint: a.mint.toBase58(),
-          symbol: bal?.symbol ?? `${a.mint.toBase58().slice(0, 4)}…`,
+          symbol: held?.symbol ?? `${a.mint.toBase58().slice(0, 4)}…`,
           decimals,
           isNft: a.isNft,
           uiAmount: a.isNft ? '1' : (raw.toNumber() / Math.pow(10, decimals)).toString(),
           beneficiaryIndex: a.beneficiaryIndex,
-          holding: bal?.amount ?? 0,
+          holding: held?.amount ?? 0,
         };
       });
       setDrafts(existing);
     } catch {
       // leave drafts as-is on failure — the user can still add bequests
     }
-  }, [publicKey, balances]);
+  }, [publicKey]);
 
   // React Navigation keeps this screen mounted, so a one-time mount effect never
-  // re-runs on return. Reload from chain on every focus — but only when the draft
-  // list is empty, so in-progress (unsaved) edits are never clobbered.
+  // re-runs on return. On every focus, refresh the vault's assets, then reload the
+  // saved plan — but only when the draft list is empty, so unsaved edits aren't lost.
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
   useFocusEffect(
     useCallback(() => {
-      if (draftsRef.current.length === 0) loadPlan();
-    }, [loadPlan]),
+      (async () => {
+        const va = await loadVaultAssets();
+        if (draftsRef.current.length === 0) await loadPlan(va);
+      })();
+    }, [loadVaultAssets, loadPlan]),
   );
 
   const addDraft = () => {
@@ -255,7 +292,7 @@ export function BequestsScreen() {
       Alert.alert('Bequests saved', 'Your specific bequests are now recorded on-chain.');
       // Re-load the canonical saved plan so the list keeps showing the bequests
       // (instead of going blank) right after saving.
-      await loadPlan();
+      await loadPlan(await loadVaultAssets());
     } catch (e: any) {
       Alert.alert('Could not save bequests', e?.message ?? 'Transaction failed.');
     } finally {
