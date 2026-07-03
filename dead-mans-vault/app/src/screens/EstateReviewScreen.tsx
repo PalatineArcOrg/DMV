@@ -73,11 +73,11 @@ export function EstateReviewScreen() {
         shareBps: b.shareBps,
       }));
 
-      // Pre-flight balance check — need enough for vault init rent (~0.015) + agent funding (~0.01) + creation fee (0.01)
+      // Pre-flight balance check — vault rent (~0.008) + agent funding (0.01) + creation fee (0.01) + keeper reward (0.005) ≈ 0.033, plus buffer
       const ownerBalance = await connection.getBalance(publicKey);
-      const MIN_BALANCE = 0.045 * LAMPORTS_PER_SOL;
+      const MIN_BALANCE = 0.04 * LAMPORTS_PER_SOL;
       if (ownerBalance < MIN_BALANCE) {
-        Alert.alert('Insufficient Balance', `You need at least 0.045 SOL to activate the vault (0.015 rent + 0.01 agent funding + 0.01 creation fee + 0.005 keeper reward).\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+        Alert.alert('Insufficient Balance', `You need at least 0.04 SOL to activate the vault (~0.008 rent + 0.01 agent funding + 0.01 creation fee + 0.005 keeper reward ≈ 0.033, plus a small buffer).\n\nCurrent balance: ${(ownerBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
         setIsRegistering(false);
         return;
       }
@@ -305,11 +305,11 @@ export function EstateReviewScreen() {
         <View style={styles.detailsBody}>
           <DetailRow label="Network" value="Devnet" />
           <DetailRow label="Program" value={truncateAddress(PROGRAM_ID, 4)} mono />
-          <DetailRow label="Vault Rent" value="~0.015 SOL" />
+          <DetailRow label="Vault Rent" value="~0.008 SOL" />
           <DetailRow label="Agent Funding" value="~0.01 SOL" />
           <DetailRow label="Creation Fee" value="0.01 SOL" />
           <DetailRow label="Keeper Reward" value="0.005 SOL" />
-          <DetailRow label="Total Est. Cost" value="~0.04 SOL" />
+          <DetailRow label="Total Est. Cost" value="~0.033 SOL" />
           <DetailRow label="Distribution" value="Per-beneficiary on-chain" />
         </View>
       </View>
