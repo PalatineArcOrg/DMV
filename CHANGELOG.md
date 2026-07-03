@@ -5,6 +5,16 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.11.3] — 2026-07-03
+
+### Fixed
+- **NFT names/images load; Helius features re-enabled.** `EXPO_PUBLIC_HELIUS_API_KEY` was
+  empty in the release bundle (verified: the key appeared only once, inside `RPC_URL`), so
+  `PortfolioScanner` skipped the DAS metadata path entirely — NFTs showed mint addresses,
+  no images, and Helius tx-history + priority fees were silently off. The key is now derived
+  from the api-key in the Helius `RPC_URL` when the standalone var is empty. DAS runs → NFT
+  names + artwork, tx history, and priority fees all work.
+
 ## [1.11.2] — 2026-07-03
 
 ### Fixed
