@@ -5,6 +5,16 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.11.0] — 2026-07-03
+
+### Added
+- **NFT support, end to end.** NFTs (Metaplex `V1_NFT`/`ProgrammableNFT`) now appear in the
+  Assets tab with an NFT tag, can be **deposited** into a vault (quantity fixed at 1), and
+  assigned to a beneficiary as a **specific bequest** — then carved out and distributed on
+  execution via `execute_specific_asset`. Previously the wallet scanner skipped NFTs, so they
+  couldn't be funded into a vault at all. Portfolio scanner includes NFTs from DAS
+  (`amount: 1, decimals: 0, isNft: true`); DepositModal deposits exactly 1.
+
 ## [1.10.6] — 2026-07-03
 
 ### Added
