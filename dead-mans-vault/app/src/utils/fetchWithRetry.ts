@@ -3,6 +3,8 @@
  * Used for all external API calls: Helius, Pyth, Jupiter.
  */
 
+import { useRpcStatusStore } from '../store/useRpcStatusStore';
+
 const DEFAULT_MAX_RETRIES = 3;
 
 export async function fetchWithRetry(
@@ -13,6 +15,9 @@ export async function fetchWithRetry(
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const response = await fetch(url, options);
     if (response.status !== 429) return response;
+
+    // Rate-limited — surface a "network busy" hint to the user (see RpcStatusBanner).
+    useRpcStatusStore.getState().reportRateLimited();
 
     // Exponential backoff: 200ms, 400ms, 800ms  + random jitter 0-100ms
     const delay = 200 * Math.pow(2, attempt) + Math.random() * 100;
@@ -54,7 +59,12 @@ export async function rpcWithRetry<T = unknown>(
 
   const data = await response.json();
   if (data.error) {
-    throw new Error(`RPC ${method} error: ${data.error.message || JSON.stringify(data.error)}`);
+    const msg = data.error.message || JSON.stringify(data.error);
+    // Some providers return a rate-limit as a JSON-RPC error (HTTP 200) rather than 429.
+    if (data.error.code === 429 || /rate.?limit|too many request/i.test(msg)) {
+      useRpcStatusStore.getState().reportRateLimited();
+    }
+    throw new Error(`RPC ${method} error: ${msg}`);
   }
 
   return data.result as T;

@@ -22,6 +22,7 @@ import { useEscalationStore } from '../store/useEscalationStore';
 import { DeFiPosition } from '../types/defi';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { HeartbeatButton } from '../components/HeartbeatButton';
+import { RpcStatusBanner } from '../components/RpcStatusBanner';
 import { EscalationBanner } from '../components/EscalationBanner';
 import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
@@ -370,6 +371,7 @@ export function DashboardScreen() {
         <RefreshControl refreshing={isLoading} onRefresh={onRefresh} tintColor={COLORS.accent} />
       }
     >
+      <RpcStatusBanner />
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -518,7 +520,7 @@ export function DashboardScreen() {
       ) && (
         <TouchableOpacity
           style={styles.uncoveredAssetsCard}
-          onPress={() => navigation.getParent()?.navigate('Assets')}
+          onPress={() => navigation.getParent()?.navigate('Assets', { screen: 'AssetsOverview', params: { tab: 'defi' } })}
         >
           <MaterialCommunityIcons name="alert-circle-outline" size={16} color={COLORS.warning} />
           <View style={{ flex: 1 }}>
@@ -621,7 +623,7 @@ export function DashboardScreen() {
               <Text style={styles.defiInlineLabel}>NFTS</Text>
               <TouchableOpacity
                 style={styles.defiViewAll}
-                onPress={() => navigation.getParent()?.navigate('Assets')}
+                onPress={() => navigation.getParent()?.navigate('Assets', { screen: 'AssetsOverview', params: { tab: 'nfts' } })}
               >
                 <Text style={styles.defiViewAllText}>View All</Text>
                 <MaterialCommunityIcons name="chevron-right" size={14} color={COLORS.accent} />
@@ -646,7 +648,7 @@ export function DashboardScreen() {
               <Text style={styles.defiInlineLabel}>DEFI POSITIONS</Text>
               <TouchableOpacity
                 style={styles.defiViewAll}
-                onPress={() => navigation.getParent()?.navigate('Assets')}
+                onPress={() => navigation.getParent()?.navigate('Assets', { screen: 'AssetsOverview', params: { tab: 'defi' } })}
               >
                 <Text style={styles.defiViewAllText}>View All</Text>
                 <MaterialCommunityIcons name="chevron-right" size={14} color={COLORS.accent} />

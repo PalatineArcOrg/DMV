@@ -11,10 +11,11 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
+import { RpcStatusBanner } from '../components/RpcStatusBanner';
 import { useVaultStore } from '../store/useVaultStore';
 import { DeFiPosition, DeFiPositionAction } from '../types/defi';
 import { COLORS, SPACING, FONTS, TOKEN_COLORS } from '../utils/constants';
@@ -65,6 +66,13 @@ export function AssetsScreen() {
   const nfts = useMemo(() => balances.filter((b) => b.isNft), [balances]);
 
   const [activeTab, setActiveTab] = useState<Tab>('tokens');
+
+  // Honor a `tab` param passed by the Dashboard "View All" links (NFTs / DeFi).
+  const route = useRoute<any>();
+  useEffect(() => {
+    const t = route.params?.tab;
+    if (t === 'tokens' || t === 'nfts' || t === 'defi') setActiveTab(t);
+  }, [route.params?.tab]);
   const [positions, setPositions] = useState<DeFiPosition[]>([]);
   const [vaultSolBalance, setVaultSolBalance] = useState(0);
   const [vaultTokenCount, setVaultTokenCount] = useState(0);
@@ -145,6 +153,7 @@ export function AssetsScreen() {
         <RefreshControl refreshing={portfolioLoading} onRefresh={onRefresh} tintColor={COLORS.accent} />
       }
     >
+      <RpcStatusBanner />
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Your Assets</Text>

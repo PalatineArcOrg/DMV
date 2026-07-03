@@ -356,7 +356,9 @@ export function SettingsScreen() {
               <Text style={styles.netBadgeText}>{isCustomRpc() ? 'Custom' : 'Default'}</Text>
             </View>
           </View>
-          <Text style={styles.netEndpoint} numberOfLines={1}>{maskRpc(getRpcUrl())}</Text>
+          <Text style={styles.netEndpoint} numberOfLines={1}>
+            {isCustomRpc() ? maskRpc(getRpcUrl()) : 'Default DMV RPC API'}
+          </Text>
           <TextInput
             style={styles.netInput}
             value={rpcInput}
