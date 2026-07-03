@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -101,6 +101,8 @@ export function DashboardScreen() {
   const storeDefiPositions = useVaultStore((s) => s.defiPositions);
   const storeBeneficiaryCount = useVaultStore((s) => s.beneficiaries.length);
   const defiPositions = portfolioDefi.length > 0 ? portfolioDefi : storeDefiPositions;
+  const fungibleTokens = useMemo(() => balances.filter((b) => !b.isNft), [balances]);
+  const walletNfts = useMemo(() => balances.filter((b) => b.isNft), [balances]);
 
   const [vaultBalance, setVaultBalance] = useState(0);
   const [vaultTokenBalances, setVaultTokenBalances] = useState<{ mint: string; uiAmount: number; symbol: string; decimals: number }[]>([]);
@@ -577,19 +579,19 @@ export function DashboardScreen() {
 
         {/* Token List */}
         {error && <Text style={styles.errorText}>{error}</Text>}
-        {isLoading && balances.length === 0 ? (
+        {isLoading && fungibleTokens.length === 0 ? (
           <>
             <SkeletonTokenRow />
             <SkeletonTokenRow />
             <SkeletonTokenRow />
           </>
-        ) : balances.length === 0 ? (
+        ) : fungibleTokens.length === 0 ? (
           <Text style={styles.emptyText}>No tokens found</Text>
         ) : (
-          balances.map((token, i) => (
+          fungibleTokens.map((token, i) => (
             <View
               key={i}
-              style={[styles.tokenRow, i < balances.length - 1 && styles.tokenRowBorder]}
+              style={[styles.tokenRow, i < fungibleTokens.length - 1 && styles.tokenRowBorder]}
             >
               <TokenIcon symbol={token.symbol} logoUri={token.logoUri} />
               <View style={styles.tokenLeft}>
@@ -610,6 +612,31 @@ export function DashboardScreen() {
               </View>
             </View>
           ))
+        )}
+
+        {/* NFTs — inline in portfolio card */}
+        {walletNfts.length > 0 && (
+          <>
+            <View style={styles.defiDivider}>
+              <Text style={styles.defiInlineLabel}>NFTS</Text>
+              <TouchableOpacity
+                style={styles.defiViewAll}
+                onPress={() => navigation.getParent()?.navigate('Assets')}
+              >
+                <Text style={styles.defiViewAllText}>View All</Text>
+                <MaterialCommunityIcons name="chevron-right" size={14} color={COLORS.accent} />
+              </TouchableOpacity>
+            </View>
+            {walletNfts.slice(0, 3).map((nft, i) => (
+              <View key={`nft-${i}`} style={[styles.tokenRow, i < Math.min(walletNfts.length, 3) - 1 && styles.tokenRowBorder]}>
+                <TokenIcon symbol={nft.symbol} logoUri={nft.image} />
+                <View style={styles.tokenLeft}>
+                  <Text style={styles.tokenSymbol} numberOfLines={1}>{nft.symbol}</Text>
+                  <Text style={styles.tokenAmount}>1 · non-fungible</Text>
+                </View>
+              </View>
+            ))}
+          </>
         )}
 
         {/* DeFi Positions — inline in portfolio card */}

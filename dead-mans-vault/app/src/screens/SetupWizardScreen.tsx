@@ -396,7 +396,7 @@ export function SetupWizardScreen() {
                 onPress={() => Linking.openURL(`https://explorer.solana.com/address/${vaultPda.toBase58()}?cluster=devnet`)}
               />
             )}
-            <DetailRow label="Execution" value="Agent Key (TEE)" />
+            <DetailRow label="Execution" value="Permissionless" />
           </View>
         </View>
 

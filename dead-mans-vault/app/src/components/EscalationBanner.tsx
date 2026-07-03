@@ -33,7 +33,7 @@ export function EscalationBanner({ stage, secondsRemaining }: EscalationBannerPr
 
   const textMap: Record<number, string> = {
     1: 'Heartbeat overdue. Confirm to reset.',
-    2: 'Emergency contacts notified. Confirm to prevent execution.',
+    2: 'Escalation active. Confirm to prevent execution.',
     3: 'FINAL WARNING. Estate plan executes soon.',
   };
 

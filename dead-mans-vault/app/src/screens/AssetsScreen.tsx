@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,7 +20,7 @@ import { DeFiPosition, DeFiPositionAction } from '../types/defi';
 import { COLORS, SPACING, FONTS, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount } from '../utils/formatting';
 
-type Tab = 'tokens' | 'defi';
+type Tab = 'tokens' | 'nfts' | 'defi';
 
 const PROTOCOL_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   marinade: 'water',
@@ -59,6 +59,10 @@ export function AssetsScreen() {
   const { balances, defiPositions: portfolioDefiPositions, totalUsdValue, isLoading: portfolioLoading, refresh } = usePortfolio();
   const isSetupComplete = useVaultStore((s) => s.isSetupComplete);
   const vaultConfig = useVaultStore((s) => s.vaultConfig);
+
+  // Split the wallet portfolio into fungible tokens and NFTs so each gets its own tab.
+  const fungibleTokens = useMemo(() => balances.filter((b) => !b.isNft), [balances]);
+  const nfts = useMemo(() => balances.filter((b) => b.isNft), [balances]);
 
   const [activeTab, setActiveTab] = useState<Tab>('tokens');
   const [positions, setPositions] = useState<DeFiPosition[]>([]);
@@ -187,7 +191,15 @@ export function AssetsScreen() {
           onPress={() => setActiveTab('tokens')}
         >
           <Text style={[styles.segmentText, activeTab === 'tokens' && styles.segmentTextActive]}>
-            Tokens ({balances.length})
+            Tokens ({fungibleTokens.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.segmentTab, activeTab === 'nfts' && styles.segmentTabActive]}
+          onPress={() => setActiveTab('nfts')}
+        >
+          <Text style={[styles.segmentText, activeTab === 'nfts' && styles.segmentTextActive]}>
+            NFTs ({nfts.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -203,20 +215,20 @@ export function AssetsScreen() {
       {/* Tokens View */}
       {activeTab === 'tokens' && (
         <View style={styles.card}>
-          {portfolioLoading && balances.length === 0 ? (
+          {portfolioLoading && fungibleTokens.length === 0 ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={COLORS.accent} />
               <Text style={styles.loadingText}>Loading tokens...</Text>
             </View>
-          ) : balances.length === 0 ? (
+          ) : fungibleTokens.length === 0 ? (
             <View style={styles.emptyCard}>
               <MaterialCommunityIcons name="currency-usd" size={36} color={COLORS.textMuted} />
               <Text style={styles.emptyTitle}>No Tokens</Text>
               <Text style={styles.emptyDesc}>No tokens found in this wallet.</Text>
             </View>
           ) : (
-            balances.map((token, i) => (
-              <View key={i} style={[styles.tokenRow, i < balances.length - 1 && styles.tokenRowBorder]}>
+            fungibleTokens.map((token, i) => (
+              <View key={i} style={[styles.tokenRow, i < fungibleTokens.length - 1 && styles.tokenRowBorder]}>
                 <TokenIcon symbol={token.symbol} logoUri={token.logoUri} />
                 <View style={styles.tokenInfo}>
                   <View style={styles.tokenNameRow}>
@@ -242,6 +254,39 @@ export function AssetsScreen() {
                       {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
                     </Text>
                   )}
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      )}
+
+      {/* NFTs View */}
+      {activeTab === 'nfts' && (
+        <View style={styles.card}>
+          {portfolioLoading && nfts.length === 0 ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={COLORS.accent} />
+              <Text style={styles.loadingText}>Loading NFTs...</Text>
+            </View>
+          ) : nfts.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <MaterialCommunityIcons name="image-multiple-outline" size={36} color={COLORS.textMuted} />
+              <Text style={styles.emptyTitle}>No NFTs</Text>
+              <Text style={styles.emptyDesc}>No NFTs found in this wallet.</Text>
+            </View>
+          ) : (
+            nfts.map((nft, i) => (
+              <View key={i} style={[styles.tokenRow, i < nfts.length - 1 && styles.tokenRowBorder]}>
+                <TokenIcon symbol={nft.symbol} logoUri={nft.image} />
+                <View style={styles.tokenInfo}>
+                  <View style={styles.tokenNameRow}>
+                    <Text style={styles.tokenSymbol} numberOfLines={1}>{nft.symbol}</Text>
+                    <View style={styles.nftBadge}><Text style={styles.nftBadgeText}>NFT</Text></View>
+                  </View>
+                  <Text style={styles.tokenAmount} numberOfLines={1}>
+                    {nft.mint.toBase58().slice(0, 4)}…{nft.mint.toBase58().slice(-4)}
+                  </Text>
                 </View>
               </View>
             ))
