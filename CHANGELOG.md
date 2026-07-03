@@ -5,6 +5,22 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.12.2] — 2026-07-03
+
+### Changed
+- **Default RPC shown as "Default DMV RPC API"** in Settings → Network (built-in endpoint no
+  longer exposed; a user's own custom URL is still shown).
+
+### Added
+- **Rate-limit banner.** `useRpcStatusStore` is written from the fetch layer on any HTTP 429
+  / JSON-RPC 429; a banner on Dashboard + Assets surfaces "Network busy — data may be delayed"
+  and links to Settings. Auto-hides ~12s after traffic settles.
+
+### Fixed
+- **Dashboard "View All" tab targeting.** NFTs/DeFi "View All" navigated to Assets without a
+  tab param (wrong/last tab); they now pass the target tab via the nested AssetsOverview route
+  and AssetsScreen honors `route.params.tab`.
+
 ## [1.12.1] — 2026-07-03
 
 ### Fixed
