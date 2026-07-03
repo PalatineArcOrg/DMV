@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "skills": {
+    "install-wallet-ui-react-native": {
+      "source": "wallet-ui/wallet-ui",
+      "sourceType": "github",
+      "computedHash": "68037269a74985e7be8d103f929dfdb150507deeaaa1b49e6e601396a70461ec"
+    },
+    "solana-anchor-claude-skill": {
+      "source": "quiknode-labs/solana-anchor-claude-skill",
+      "sourceType": "github",
+      "computedHash": "4cd7d6017eb50ab6153a61114644ce6ab675135621018f0ef3af5d4c030e9c3e"
+    },
+    "solana-dev": {
+      "source": "solana-foundation/solana-dev-skill",
+      "sourceType": "github",
+      "computedHash": "1b0e78101e17989da8836d428c0f1356c55374b4c803276f7868098adf51f2bd"
+    },
+    "solana-kit": {
+      "source": "sendaifun/skills",
+      "sourceType": "github",
+      "computedHash": "1c1a4b47d5a3a6717cd67dbe07db8ea5299e4510f262d672eec7782f21f5deaf"
+    },
+    "vercel-react-native-skills": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "2e9088a7333666d8c2833b8ff58bd51b955501c42b4c7244f72b4cbf22dafcc4"
+    }
+  }
+}
