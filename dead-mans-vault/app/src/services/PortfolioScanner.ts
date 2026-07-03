@@ -66,12 +66,18 @@ export class PortfolioScanner {
           if (Number(amount.amount) <= 0) continue;
           const mintStr = parsed.mint as string;
           const known = KNOWN_TOKEN_SYMBOLS[mintStr];
+          // This fallback has no DAS metadata, so identify NFTs by their signature —
+          // 0 decimals, exactly 1 unit (the same heuristic the vault/bequest picker
+          // uses). Without this, NFTs land in the fungible token list (and the NFTs
+          // tab/section reads empty) whenever the DAS path is unavailable.
+          const isNft = amount.decimals === 0 && Number(amount.amount) === 1;
           balances.push({
             mint: new PublicKey(mintStr),
             symbol: known?.symbol || mintStr.slice(0, 6),
             amount: Number(amount.uiAmountString),
             decimals: amount.decimals,
             usdValue: 0,
+            isNft,
           });
         }
       } catch {
