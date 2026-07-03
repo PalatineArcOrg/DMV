@@ -5,6 +5,19 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.11.1] — 2026-07-03
+
+### Added
+- **NFTs as a portfolio category.** The Assets tab has a dedicated **NFTs** tab
+  (Tokens · NFTs · DeFi), and the Dashboard portfolio card shows an inline NFTs section.
+
+### Fixed
+- **Removed inaccurate messaging.** Corrected escalation copy that falsely claimed
+  "emergency contacts notified" / "beneficiaries have been notified" (DMV notifies the
+  *owner*, not third parties — there are no emergency contacts), a misleading "< 24 hours"
+  timing label, and a stale "Execution: Agent Key (TEE)" detail → "Permissionless" (v2
+  execution is permissionless; the agent signs heartbeats only).
+
 ## [1.11.0] — 2026-07-03
 
 ### Added
