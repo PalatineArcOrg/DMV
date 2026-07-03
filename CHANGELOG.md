@@ -5,6 +5,26 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.10.5] — 2026-07-03
+
+### Fixed
+- **Bequests use the vault's assets, not the wallet.** The Bequests screen listed the
+  owner's wallet portfolio, so a bequest could name an asset the vault doesn't hold — which
+  distributes nothing and could stall execution. It now lists only the vault's holdings
+  (distributable SOL + `getVaultTokenBalances`); wallet balances are used only for symbols.
+- **A stalled distribution can't brick the vault.** All three cranks (app, notify-server,
+  heir claim) now create the vault's token ATA idempotently before `begin_token_dist`, so a
+  bequest for an unheld mint snapshots/pays 0 and finalizes instead of throwing
+  `AccountNotInitialized` and freezing the owner out post-grace.
+
+## [1.10.4] — 2026-07-02
+
+### Fixed
+- **Accurate vault-activation cost estimate (~0.033 SOL).** The review screen padded rent to
+  ~0.015 and showed ~0.04 total; actual rent is ~0.008, so the real cost is ~0.033 (rent +
+  0.01 fee + 0.01 agent + 0.005 keeper) — which is what the wallet correctly charges.
+  Corrected the breakdown, total, and preflight. No transaction change.
+
 ## [1.10.3] — 2026-07-03
 
 ### Fixed
