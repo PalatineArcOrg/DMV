@@ -2,7 +2,12 @@ import { Platform } from 'react-native';
 
 export const PROGRAM_ID = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
 export const RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
-export const HELIUS_API_KEY = process.env.EXPO_PUBLIC_HELIUS_API_KEY || '';
+// The standalone EXPO_PUBLIC_HELIUS_API_KEY doesn't reliably inline into the release
+// bundle, which silently disabled DAS (NFT names/images), Helius tx-history, and priority
+// fees. Fall back to the api-key embedded in the Helius RPC_URL so all three work from the
+// single RPC URL that does embed.
+const RPC_API_KEY_MATCH = RPC_URL.match(/[?&]api-key=([^&]+)/);
+export const HELIUS_API_KEY = process.env.EXPO_PUBLIC_HELIUS_API_KEY || (RPC_API_KEY_MATCH ? RPC_API_KEY_MATCH[1] : '');
 
 // DMV push-notification server (FCM relay). Empty = push registration disabled.
 export const NOTIFY_URL = process.env.EXPO_PUBLIC_NOTIFY_URL || '';
