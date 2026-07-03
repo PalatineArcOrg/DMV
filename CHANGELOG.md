@@ -5,6 +5,13 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.10.6] — 2026-07-03
+
+### Added
+- **MAX button on bequests.** Next to the Amount field, a MAX button fills the vault's full
+  held amount of the selected asset — bequeath an entire (fractional) token balance in one
+  tap. Disabled when the vault holds none.
+
 ## [1.10.5] — 2026-07-03
 
 ### Fixed
