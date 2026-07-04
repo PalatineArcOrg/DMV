@@ -27,7 +27,7 @@
     "bs58": "^6.0.0",
     "buffer": "^6.0.3",
     "date-fns": "^4.1.0",
-    "expo": "^52.0.43",
+    "expo": "^57.0.2",
     "expo-clipboard": "~7.0.1",
     "expo-crypto": "~14.0.2",
     "expo-dev-client": "~5.0.19",
