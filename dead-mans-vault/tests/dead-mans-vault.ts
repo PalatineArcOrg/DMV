@@ -274,6 +274,67 @@ describe("dead-mans-vault — permissionless execution", () => {
       }
     });
 
+    it("owner withdraws a legacy SPL token pre-grace", async () => {
+      const owner = Keypair.generate();
+      await fund(owner.publicKey, 3);
+      const p = await initVault({ owner, agent: agent.publicKey, beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }] });
+      const mint = await makeMint(owner, 6);
+      await fundVaultToken(owner, mint, p.vault, 1_000_000); // vault holds 1.0
+      const ownerAta = await makeAta(owner, mint, owner.publicKey);
+      const vaultAta = getAssociatedTokenAddressSync(mint, p.vault, true, TOKEN_PROGRAM_ID);
+      await program.methods
+        .withdrawFromVault(new BN(400_000))
+        .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, mint, sourceTokenAccount: vaultAta, destinationTokenAccount: ownerAta, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([owner])
+        .rpc();
+      expect(Number((await getAccount(conn, ownerAta)).amount)).to.equal(400_000);
+    });
+
+    it("owner withdraws a Token-2022 token pre-grace", async () => {
+      const owner = Keypair.generate();
+      await fund(owner.publicKey, 3);
+      const p = await initVault({ owner, agent: agent.publicKey, beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }] });
+      const mint = await makeMint(owner, 0, TOKEN_2022_PROGRAM_ID);
+      await fundVaultToken(owner, mint, p.vault, 500, TOKEN_2022_PROGRAM_ID);
+      const ownerAta = await makeAta(owner, mint, owner.publicKey, TOKEN_2022_PROGRAM_ID);
+      const vaultAta = getAssociatedTokenAddressSync(mint, p.vault, true, TOKEN_2022_PROGRAM_ID);
+      await program.methods
+        .withdrawFromVault(new BN(200))
+        .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, mint, sourceTokenAccount: vaultAta, destinationTokenAccount: ownerAta, tokenProgram: TOKEN_2022_PROGRAM_ID })
+        .signers([owner])
+        .rpc();
+      expect(Number((await getAccount(conn, ownerAta, undefined, TOKEN_2022_PROGRAM_ID)).amount)).to.equal(200);
+    });
+
+    it("withdraw rejects wrong token program and wrong mint", async () => {
+      const owner = Keypair.generate();
+      await fund(owner.publicKey, 3);
+      const p = await initVault({ owner, agent: agent.publicKey, beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }] });
+      const mint = await makeMint(owner, 0, TOKEN_2022_PROGRAM_ID);
+      await fundVaultToken(owner, mint, p.vault, 500, TOKEN_2022_PROGRAM_ID);
+      const ownerAta = await makeAta(owner, mint, owner.publicKey, TOKEN_2022_PROGRAM_ID);
+      const vaultAta = getAssociatedTokenAddressSync(mint, p.vault, true, TOKEN_2022_PROGRAM_ID);
+      // (a) wrong token program (legacy for a Token-2022 mint) → TokenAccountMismatch
+      try {
+        await program.methods
+          .withdrawFromVault(new BN(1))
+          .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, mint, sourceTokenAccount: vaultAta, destinationTokenAccount: ownerAta, tokenProgram: TOKEN_PROGRAM_ID })
+          .signers([owner])
+          .rpc();
+        expect.fail("wrong token program");
+      } catch (e) { expectErr(e, "TokenAccountMismatch"); }
+      // (b) wrong mint account (differs from the ATAs' mint) → MintMismatch
+      const otherMint = await makeMint(owner, 0, TOKEN_2022_PROGRAM_ID);
+      try {
+        await program.methods
+          .withdrawFromVault(new BN(1))
+          .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, mint: otherMint, sourceTokenAccount: vaultAta, destinationTokenAccount: ownerAta, tokenProgram: TOKEN_2022_PROGRAM_ID })
+          .signers([owner])
+          .rpc();
+        expect.fail("wrong mint");
+      } catch (e) { expectErr(e, "MintMismatch"); }
+    });
+
     it("rejects shares not summing to 10000", async () => {
       const o = Keypair.generate();
       await fund(o.publicKey, 2);
@@ -707,7 +768,9 @@ describe("dead-mans-vault — permissionless execution", () => {
           beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
         });
         await depositSol(owner, p.vault, 1 * LAMPORTS_PER_SOL);
-        S.frozen = { owner, b: [b1], ...p };
+        const frozenMint = await makeMint(owner, 0);
+        await fundVaultToken(owner, frozenMint, p.vault, 100);
+        S.frozen = { owner, b: [b1], frozenMint, ...p };
       }
 
       // --- scenario: Token-2022 residual ---
@@ -1168,6 +1231,17 @@ describe("dead-mans-vault — permissionless execution", () => {
           .signers([s.owner])
           .rpc();
         expect.fail("withdraw VaultFrozen");
+      } catch (e) { expectErr(e, "VaultFrozen"); }
+      // withdraw_from_vault (token) — also frozen post-deadline
+      try {
+        const vaultAta = getAssociatedTokenAddressSync(s.frozenMint, s.vault, true);
+        const ownerAta = await makeAta(s.owner, s.frozenMint, s.owner.publicKey);
+        await program.methods
+          .withdrawFromVault(new BN(1))
+          .accountsPartial({ owner: s.owner.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, mint: s.frozenMint, sourceTokenAccount: vaultAta, destinationTokenAccount: ownerAta, tokenProgram: TOKEN_PROGRAM_ID })
+          .signers([s.owner])
+          .rpc();
+        expect.fail("withdraw token VaultFrozen");
       } catch (e) { expectErr(e, "VaultFrozen"); }
       // revoke
       try {

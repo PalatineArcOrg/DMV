@@ -1805,47 +1805,29 @@ export type DeadMansVault = {
           }
         },
         {
+          "name": "mint",
+          "docs": [
+            "The mint being withdrawn (provides decimals for transfer_checked; its owner",
+            "program must be the token program used)."
+          ]
+        },
+        {
           "name": "sourceTokenAccount",
           "docs": [
-            "Vault PDA's token account to withdraw FROM — must be owned by the vault PDA"
+            "Vault PDA's token account to withdraw FROM — must be owned by the vault PDA",
+            "and hold this mint. The vault PDA (vault_config) is the transfer authority."
           ],
           "writable": true
         },
         {
           "name": "destinationTokenAccount",
           "docs": [
-            "Owner's token account to withdraw TO — must match the same mint"
+            "Owner's token account to withdraw TO — must match the same mint."
           ],
           "writable": true
         },
         {
-          "name": "vaultAuthority",
-          "docs": [
-            "Vault PDA as signing authority for the token transfer.",
-            "constraint. No data deserialization needed — only PDA signature."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "owner"
-              }
-            ]
-          }
-        },
-        {
-          "name": "tokenProgram",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          "name": "tokenProgram"
         }
       ],
       "args": [
@@ -2201,6 +2183,16 @@ export type DeadMansVault = {
       "code": 6038,
       "name": "invalidSolBequest",
       "msg": "A SOL bequest must have is_nft = false and a non-zero amount"
+    },
+    {
+      "code": 6039,
+      "name": "keeperBountyTooLarge",
+      "msg": "Keeper bounty exceeds the maximum allowed"
+    },
+    {
+      "code": 6040,
+      "name": "nothingToDistribute",
+      "msg": "Mint has no vault balance and no bequest — nothing to distribute"
     }
   ],
   "types": [

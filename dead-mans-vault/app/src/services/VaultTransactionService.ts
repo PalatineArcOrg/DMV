@@ -496,8 +496,9 @@ export class VaultTransactionService {
   async buildWithdrawTokenTx(owner: PublicKey, mint: PublicKey, amount: number): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
-    const ownerAta = await getAssociatedTokenAddress(mint, owner);
-    const vaultAta = await getAssociatedTokenAddress(mint, vaultPda, true);
+    const tokenProgram = await this.getTokenProgramForMint(mint);
+    const ownerAta = this.ataFor(mint, owner, false, tokenProgram);
+    const vaultAta = this.ataFor(mint, vaultPda, true, tokenProgram);
     const program = this.programAs(owner);
 
     const tx = await program.methods
@@ -506,10 +507,10 @@ export class VaultTransactionService {
         owner,
         vaultConfig: vaultPda,
         heartbeatRecord: heartbeatPda,
+        mint,
         sourceTokenAccount: vaultAta,
         destinationTokenAccount: ownerAta,
-        vaultAuthority: vaultPda,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram,
       })
       .transaction();
 
@@ -1371,14 +1372,15 @@ export class VaultTransactionService {
 
     const vaultTokens = await this.getVaultTokenBalances(vaultPda);
     for (const token of vaultTokens) {
-      const ownerAta = await getAssociatedTokenAddress(token.mint, owner);
-      const vaultAta = await getAssociatedTokenAddress(token.mint, vaultPda, true);
+      const tokenProgram = await this.getTokenProgramForMint(token.mint);
+      const ownerAta = this.ataFor(token.mint, owner, false, tokenProgram);
+      const vaultAta = this.ataFor(token.mint, vaultPda, true, tokenProgram);
 
       try {
-        await getAccount(this.connection, ownerAta);
+        await getAccount(this.connection, ownerAta, 'confirmed', tokenProgram);
       } catch {
         instructions.push(
-          createAssociatedTokenAccountIdempotentInstruction(owner, ownerAta, owner, token.mint),
+          createAssociatedTokenAccountIdempotentInstruction(owner, ownerAta, owner, token.mint, tokenProgram),
         );
       }
 
@@ -1388,10 +1390,10 @@ export class VaultTransactionService {
           owner,
           vaultConfig: vaultPda,
           heartbeatRecord: heartbeatPda,
+          mint: token.mint,
           sourceTokenAccount: vaultAta,
           destinationTokenAccount: ownerAta,
-          vaultAuthority: vaultPda,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram,
         })
         .instruction();
       instructions.push(ix);
