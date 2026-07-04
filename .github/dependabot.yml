@@ -13,6 +13,18 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Expo SDK-managed — update these via an SDK bump (`expo install`), not
+      # individual PRs, or they misalign with the pinned SDK (RN 0.76.x for SDK 52).
+      # NB: dependabot classifies react-native 0.76 -> 0.86 as "minor", so an
+      # explicit name ignore is required, not just the semver-major rule above.
+      - dependency-name: "react-native"
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "@react-native-async-storage/async-storage"
+      - dependency-name: "react-native-safe-area-context"
+      - dependency-name: "react-native-screens"
+      - dependency-name: "react-native-svg"
     groups:
       app-minor-patch:
         update-types: ["minor", "patch"]
@@ -66,6 +78,9 @@ updates:
     schedule:
       interval: "weekly"
     labels: ["dependencies", "ci"]
+    ignore:
+      # Pinned deliberately to the project toolchain (Rust 1.93.x) — don't bump.
+      - dependency-name: "dtolnay/rust-toolchain"
     groups:
       github-actions:
         patterns: ["*"]
