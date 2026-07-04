@@ -58,6 +58,13 @@ export function stageMessage(stage, ctx = {}) {
         body: 'The grace period elapsed. Your assets are being distributed to your beneficiaries on-chain — automatically, nothing to do.',
         channel: 'execution',
       };
+    // Sent once the distribution has fully finalized on-chain (follows stage 4).
+    case 'complete':
+      return {
+        title: 'Estate plan complete',
+        body: 'All assets have been distributed to your beneficiaries on-chain. The vault is settled — nothing more to do.',
+        channel: 'execution',
+      };
     default:
       return null;
   }

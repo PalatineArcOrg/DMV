@@ -62,8 +62,16 @@ async function processRegistration(reg, now) {
     deleteRegistration(reg.vault);
     return { vault: reg.vault, action: 'deregistered_missing' };
   }
-  // Inactive / executed -> nothing more to escalate; drop it.
+  // Inactive / executed -> nothing more to escalate; drop it. If it EXECUTED and
+  // we'd already escalated to stage 4 (owner saw "executing"), send one final
+  // "complete" push first — otherwise autonomous distribution ends in silence
+  // after the "executing" alert (the app can't send it; the app never ran).
   if (!state.config.active || state.config.executed) {
+    if (state.config.executed && reg.last_stage === 4) {
+      const doneMsg = stageMessage('complete');
+      if (doneMsg) await sendPush(reg.device_token, doneMsg);
+      console.log(`[push] sent complete -> ${reg.vault.slice(0, 8)} (owner ${reg.owner.slice(0, 8)})`);
+    }
     deleteRegistration(reg.vault);
     return { vault: reg.vault, action: 'deregistered_inactive' };
   }
