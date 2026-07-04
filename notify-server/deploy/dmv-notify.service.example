@@ -1,0 +1,42 @@
+# systemd unit for the DMV notify-server. Copy to
+# /etc/systemd/system/dmv-notify.service, adjust paths/user, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now dmv-notify
+#
+# Runs as a dedicated NON-ROOT user. Secrets are loaded from an EnvironmentFile
+# with 600 perms owned by that user (see deploy/README.md).
+
+[Unit]
+Description=Dead Man's Vault notify server (chain-watching FCM relay + keyless crank)
+After=network-online.target
+Wants=network-online.target
+# Don't let a crash loop wedge the service into a permanent failed state — the
+# in-process crash guards keep it up; this makes systemd keep retrying.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=dmv
+Group=dmv
+WorkingDirectory=/opt/dmv/notify-server
+
+# production => fail-closed: the server refuses to boot without REGISTER_SECRET.
+Environment=NODE_ENV=production
+# Secrets (REGISTER_SECRET, Helius RPC_URL, FCM/cranker paths). Mode 600, owned by dmv.
+EnvironmentFile=/opt/dmv/notify-server/.env
+
+# Use an absolute node path (systemd has a minimal PATH). Adjust to your install.
+ExecStart=/usr/bin/node src/server.js
+Restart=on-failure
+RestartSec=5
+
+# --- Hardening ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+# Only the SQLite data dir needs to be writable; everything else stays read-only.
+ReadWritePaths=/opt/dmv/notify-server/data
+
+[Install]
+WantedBy=multi-user.target

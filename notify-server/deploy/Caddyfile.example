@@ -1,0 +1,26 @@
+# DMV notify-server reverse proxy (Caddy, automatic TLS).
+#
+# The Node process binds 127.0.0.1:8787 ONLY (loopback) — Caddy is the sole
+# public entry point and terminates TLS. Replace notify.example.com with your
+# domain and add the block to /etc/caddy/Caddyfile, then: sudo systemctl reload caddy
+#
+# Endpoint auth (enforced by the app, not Caddy):
+#   - GET  /health, /inheritances, /nft/*  -> public reads (rate-limited in-app)
+#   - POST /register, /deregister          -> owner-wallet signature + shared secret
+#   - POST /poll-now, /execute-now         -> shared secret (testing)
+#   - POST /debug/push                     -> NOT mounted in production
+
+notify.example.com {
+    reverse_proxy 127.0.0.1:8787
+
+    encode gzip
+
+    # Access log metadata only. Caddy does not log request bodies, so device
+    # tokens / signatures (POST bodies) are never written to disk here.
+    log {
+        output file /var/log/caddy/dmv-notify.access.log {
+            roll_size 10MiB
+            roll_keep 5
+        }
+    }
+}
