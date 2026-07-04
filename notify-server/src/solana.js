@@ -13,6 +13,11 @@ const VAULT_CONFIG_DISCRIMINATOR = createHash('sha256')
   .digest()
   .subarray(0, 8);
 
+const HEARTBEAT_DISCRIMINATOR = createHash('sha256')
+  .update('account:HeartbeatRecord')
+  .digest()
+  .subarray(0, 8);
+
 // On-chain VaultConfig beneficiary cap. Bounds the parse loop so a crafted
 // account with a huge benCount can't drive an out-of-bounds read / CPU DoS.
 const MAX_BENEFICIARIES = 20;
@@ -34,6 +39,10 @@ export function vaultConfigPda(owner) {
 
 function hasVaultDiscriminator(data) {
   return data.length >= 8 && data.subarray(0, 8).equals(VAULT_CONFIG_DISCRIMINATOR);
+}
+
+function hasHeartbeatDiscriminator(data) {
+  return data.length >= 8 && data.subarray(0, 8).equals(HEARTBEAT_DISCRIMINATOR);
 }
 
 /**
@@ -68,13 +77,32 @@ export function parseVaultConfig(data) {
 /**
  * Parse HeartbeatRecord. Layout (after 8-byte discriminator):
  *   vault(32) last_heartbeat(i64 le) last_method(u8) total_heartbeats(u64 le) bump(u8)
+ * Returns the stored `vault` (so the caller can verify it) + `lastHeartbeat`.
  */
 export function parseHeartbeat(data) {
   let o = 8;
   if (data.length < o + 32 + 8) throw new Error('heartbeat buffer too short');
-  o += 32; // vault
+  const vault = new PublicKey(data.subarray(o, o + 32)); o += 32;
   const lastHeartbeat = Number(data.readBigInt64LE(o)); o += 8;
-  return { lastHeartbeat };
+  return { vault: vault.toBase58(), lastHeartbeat };
+}
+
+/**
+ * Safely extract `lastHeartbeat` from a fetched heartbeat account, or null if it
+ * isn't a trustworthy DMV HeartbeatRecord for `expectedVault`. Verifies (in order)
+ * program-owner, the Anchor discriminator, buffer length, and the stored `vault`
+ * field — so the server never trusts arbitrary account bytes. Never throws.
+ */
+export function readHeartbeatFromAccount(account, expectedVault) {
+  if (!account || !account.owner || !account.owner.equals(PROGRAM_ID)) return null;
+  if (!hasHeartbeatDiscriminator(account.data)) return null;
+  let hb;
+  try {
+    hb = parseHeartbeat(account.data);
+  } catch {
+    return null;
+  }
+  return hb.vault === expectedVault ? hb.lastHeartbeat : null;
 }
 
 /**
@@ -98,14 +126,8 @@ export async function readVaultState(vault) {
     }
   }
 
-  let lastHeartbeat = null;
-  if (hbAcc && hbAcc.owner.equals(PROGRAM_ID)) {
-    try {
-      lastHeartbeat = parseHeartbeat(hbAcc.data).lastHeartbeat;
-    } catch {
-      lastHeartbeat = null;
-    }
-  }
+  // Verify owner + discriminator + stored vault before trusting the timestamp.
+  const lastHeartbeat = readHeartbeatFromAccount(hbAcc, vaultPk.toBase58());
 
   return { exists: !!cfg, config: cfg, lastHeartbeat };
 }
