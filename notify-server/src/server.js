@@ -5,6 +5,7 @@ import { config, isDev, assertSecureConfig } from './config.js';
 import {
   upsertRegistration,
   deleteRegistration,
+  deleteRegistrationsByOwner,
   countRegistrations,
   allRegistrations,
   claimNonce,
@@ -191,21 +192,52 @@ app.get('/inheritances', rateLimit, async (req, res) => {
   res.json({ wallet, inheritances: out, ...(truncated ? { truncated: true, scanned: scan.length } : {}) });
 });
 
+// NOTE: unsigned registration is the ACTIVE path — integrity comes from the
+// on-chain OWNERSHIP PROOF below (verifyVaultForOwner). It must stay matched with
+// the app, which sends unsigned. The owner-SIGNED validators (validateRegister/
+// validateDeregister in registerAuth.js) are kept DORMANT for mainnet: switching
+// to them requires the app to sign on register too — deploy the two together,
+// with a transition window that accepts both. See PushRegistrationService in the
+// app for the activation checklist.
 app.post('/register', requireSecret, async (req, res) => {
-  const r = await validateRegister(req.body, authDeps);
-  if (!r.ok) return res.status(r.status).json({ error: r.error });
-  upsertRegistration(r.registration);
-  // Never log the raw device token or signature.
-  console.log(`[register] vault ${r.registration.vault.slice(0, 8)} owner ${r.registration.owner.slice(0, 8)} stages ${r.registration.stage1}/${r.registration.stage2}/${r.registration.stage3}`);
+  const { owner, vault, deviceToken, stage1, stage2, stage3 } = req.body || {};
+  if (!isPubkey(owner) || !isPubkey(vault)) {
+    return res.status(400).json({ error: 'invalid owner/vault pubkey' });
+  }
+  if (typeof deviceToken !== 'string' || deviceToken.length < 10) {
+    return res.status(400).json({ error: 'invalid deviceToken' });
+  }
+  const s1 = Number(stage1), s2 = Number(stage2), s3 = Number(stage3);
+  if (![s1, s2, s3].every((n) => Number.isFinite(n) && n > 0)) {
+    return res.status(400).json({ error: 'invalid stage durations' });
+  }
+
+  // Ownership proof: `vault` must be the canonical PDA for `owner` and a real
+  // on-chain DMV VaultConfig whose stored owner matches. Blocks garbage/mismatched
+  // registrations and fake-vault injection into /inheritances. (Residual gap: does
+  // not prove the CALLER holds the owner key — that's what the dormant signed path
+  // adds for mainnet.)
+  let verdict;
+  try {
+    verdict = await verifyVaultForOwner(owner, vault);
+  } catch {
+    return res.status(502).json({ error: 'vault verification unavailable' });
+  }
+  if (!verdict.ok) {
+    return res.status(403).json({ error: `vault verification failed: ${verdict.reason}` });
+  }
+
+  upsertRegistration({ owner, vault, deviceToken, stage1: s1, stage2: s2, stage3: s3 });
+  console.log(`[register] vault ${vault.slice(0, 8)} owner ${owner.slice(0, 8)} token ${deviceToken.slice(0, 12)}… stages ${s1}/${s2}/${s3}`);
   res.json({ ok: true });
 });
 
-app.post('/deregister', requireSecret, async (req, res) => {
-  // Owner-signed, deregister-by-vault only. The unsigned deregister-by-owner path
-  // was removed — it let a shared-secret holder silence another owner's vault.
-  const r = await validateDeregister(req.body, authDeps);
-  if (!r.ok) return res.status(r.status).json({ error: r.error });
-  const removed = deleteRegistration(r.vault);
+app.post('/deregister', requireSecret, (req, res) => {
+  const { vault, owner } = req.body || {};
+  let removed = 0;
+  if (vault && isPubkey(vault)) removed += deleteRegistration(vault);
+  else if (owner && isPubkey(owner)) removed += deleteRegistrationsByOwner(owner);
+  else return res.status(400).json({ error: 'vault or owner required' });
   res.json({ ok: true, removed });
 });
 

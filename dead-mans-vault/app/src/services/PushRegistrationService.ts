@@ -13,12 +13,35 @@ const REG_FINGERPRINT_KEY = 'notify_reg_fingerprint';
 
 /**
  * Registers this device with the DMV notify server so escalation pushes reach
- * the owner even when the app is killed. Registration is now **owner-signed**:
- * the server rejects any request that isn't signed by the vault's owner wallet,
- * so a leaked app secret can no longer rebind or silence another owner's vault.
+ * the owner even when the app is fully closed/killed (which local scheduled
+ * notifications cannot do reliably on Android). The server watches the vault's
+ * on-chain heartbeat and sends FCM pushes on escalation — the app only has to
+ * register its FCM token + stage durations once; it does NOT ping on every
+ * heartbeat (the server reads heartbeats from chain).
  *
- * All methods fail soft: if the notify server / push / wallet signing isn't
- * available they no-op (they do NOT silently register unsigned).
+ * All methods fail soft: if the notify server / FCM isn't configured they no-op
+ * so the rest of the app is unaffected.
+ *
+ * ── Registration auth ──────────────────────────────────────────────────────
+ * The ACTIVE path is `register`/`deregister` — a plain unsigned POST. Integrity
+ * is provided server-side by the deployed on-chain OWNERSHIP PROOF (`/register`
+ * verifies the vault is the canonical PDA for `owner` and reads the real
+ * on-chain VaultConfig), so a fake/foreign vault can't be registered.
+ *
+ * `registerSigned`/`deregisterSigned` are the DORMANT owner-signed variants (an
+ * MWA signMessage over a canonical `notifyAuth` message). They exist so mainnet
+ * can add "prove you hold the owner key" on top of the ownership proof — but
+ * they MUST ship together with the signature-VERIFYING server (see
+ * notify-server `registerAuth.js`, currently committed-but-not-deployed).
+ * To light them up for mainnet:
+ *   1. Deploy the notify-server with signature verification enabled (accept
+ *      both signed + unsigned during a transition window, then signed-only).
+ *   2. Swap the `useHeartbeat` call from `register(...)` to
+ *      `registerSigned(..., signMessage)`, signing at a deliberate wallet
+ *      moment (ideally within the vault-activation MWA session — NOT an auto
+ *      background popup, which is what made the first attempt unreliable).
+ *   3. Device-test the full round-trip (sign → server verify → push on close).
+ * Until all three are done, keep the unsigned path active.
  */
 export class PushRegistrationService {
   private static headers() {
@@ -38,29 +61,67 @@ export class PushRegistrationService {
     }
   }
 
+  /**
+   * Register (unsigned — ACTIVE). Silent background POST; returns true if the
+   * server accepted. Matches the deployed server (on-chain ownership proof, no
+   * signature required). No wallet interaction, so it registers reliably.
+   */
+  static async register(
+    owner: string,
+    vault: string,
+    stages: { stage1: number; stage2: number; stage3: number },
+  ): Promise<boolean> {
+    if (!NOTIFY_URL) return false;
+    try {
+      const deviceToken = await PushRegistrationService.getDeviceToken();
+      if (!deviceToken) return false;
+      const res = await fetch(`${NOTIFY_URL}/register`, {
+        method: 'POST',
+        headers: PushRegistrationService.headers(),
+        body: JSON.stringify({ owner, vault, deviceToken, ...stages }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Deregister (unsigned — ACTIVE). Rarely needed: closing the vault on-chain
+   *  makes the server auto-drop the registration. */
+  static async deregister(vault: string): Promise<void> {
+    if (!NOTIFY_URL) return;
+    try {
+      await fetch(`${NOTIFY_URL}/deregister`, {
+        method: 'POST',
+        headers: PushRegistrationService.headers(),
+        body: JSON.stringify({ vault }),
+      });
+    } catch {
+      // Non-fatal — server also auto-drops once the vault is revoked/closed.
+    }
+  }
+
   private static sha256Hex(text: string): Promise<string> {
     return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, text);
   }
 
   /**
-   * Register (owner-signed). Returns true if the server accepted (or if we were
-   * already registered for this exact owner/vault/token/stages — the fingerprint
-   * skip avoids prompting the wallet on every app open). Requires `signMessage`;
-   * with none provided we do NOT register (the server would reject it anyway).
+   * Register (owner-signed — DORMANT; mainnet only, ships with the verifying
+   * server). See the class-level note for the activation checklist. Skips
+   * re-prompting the wallet when nothing changed since the last register.
    */
-  static async register(
+  static async registerSigned(
     owner: string,
     vault: string,
     stages: { stage1: number; stage2: number; stage3: number },
     signMessage?: SignMessage,
   ): Promise<boolean> {
     if (!NOTIFY_URL) return false;
-    if (!signMessage) return false; // never register without an owner signature
+    if (!signMessage) return false; // never register signed without an owner signature
     try {
       const deviceToken = await PushRegistrationService.getDeviceToken();
       if (!deviceToken) return false;
 
-      // Skip (and don't prompt the wallet) if nothing changed since last register.
       const fingerprint = await PushRegistrationService.sha256Hex(
         `${owner}|${vault}|${deviceToken}|${stages.stage1}|${stages.stage2}|${stages.stage3}`,
       );
@@ -96,13 +157,8 @@ export class PushRegistrationService {
     }
   }
 
-  /**
-   * Deregister (owner-signed) a vault's push registration. Requires `signMessage`.
-   * NB: the revoke flow does NOT call this — closing the vault on-chain makes the
-   * server auto-drop the registration — so this is for an explicit "stop
-   * notifications while keeping the vault" action.
-   */
-  static async deregister(owner: string, vault: string, signMessage?: SignMessage): Promise<void> {
+  /** Deregister (owner-signed — DORMANT; mainnet only). */
+  static async deregisterSigned(owner: string, vault: string, signMessage?: SignMessage): Promise<void> {
     if (!NOTIFY_URL || !signMessage) return;
     try {
       const timestamp = Math.floor(Date.now() / 1000);
