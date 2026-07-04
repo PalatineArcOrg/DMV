@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native
 import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StepIndicator } from '../components/StepIndicator';
+import { BrandMark } from '../components/BrandMark';
 import { COLORS, FONTS } from '../utils/constants';
 
 const FEATURES = [
@@ -91,7 +92,7 @@ export function WelcomeScreen() {
             <Animated.View style={[styles.ring, styles.ring1, { transform: [{ scale: ring1Scale }], opacity: ring1Opacity }]} />
             <Animated.View style={[styles.ring, styles.ring0, { transform: [{ scale: ring0Scale }], opacity: ring0Opacity }]} />
             <Animated.View style={[styles.heroButton, { transform: [{ scale: glowScale }] }]}>
-              <MaterialCommunityIcons name="shield" size={40} color={COLORS.accent} />
+              <BrandMark size={44} />
             </Animated.View>
           </View>
           <Text style={styles.title}>Dead Man's Vault</Text>

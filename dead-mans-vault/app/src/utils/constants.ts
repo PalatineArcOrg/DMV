@@ -102,7 +102,7 @@ export const STAGE_CONFIG: Record<number, {
     sublabel: 'All systems normal',
     buttonLabel: 'Heartbeat Confirmed',
     buttonActive: true,
-    icon: 'shield-check',
+    icon: 'pulse',
     urgency: 0,
   },
   1: {

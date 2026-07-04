@@ -21,6 +21,7 @@ interface HeartbeatButtonProps {
 }
 
 const ICON_MAP: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
+  'pulse': 'pulse',
   'shield-check': 'shield-check',
   'clock-outline': 'clock-outline',
   'alert': 'alert',
@@ -227,7 +228,7 @@ export function HeartbeatButton({
 
   const isDisabledState = disabled || stage === 4;
   const displayLabel = label ?? cfg.buttonLabel;
-  const iconName = ICON_MAP[cfg.icon] || 'shield-check';
+  const iconName = ICON_MAP[cfg.icon] || 'pulse';
   const iconSize = stage >= 3 ? 28 : 24;
   const spinRotation = spinAnim.interpolate({
     inputRange: [0, 1],

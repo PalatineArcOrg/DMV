@@ -462,7 +462,7 @@ export function SettingsScreen() {
         <Text style={styles.sectionLabel}>VAULT CONTRACT</Text>
         <View style={styles.card}>
           <TouchableOpacity onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID}?cluster=devnet`)}>
-            <SettingRow icon="shield-check" iconColor={COLORS.accent} label="Vault Program" value={truncateAddress(PROGRAM_ID, 4)} link />
+            <SettingRow icon="check-decagram" iconColor={COLORS.accent} label="Vault Program" value={truncateAddress(PROGRAM_ID, 4)} link />
           </TouchableOpacity>
           {vaultConfig && vaultPda && (
             <>
@@ -509,7 +509,7 @@ export function SettingsScreen() {
             <SettingRow icon="information-outline" iconColor="rgba(255,255,255,0.3)" label="Version" value={`v${appJson.expo.version}`} />
           </TouchableOpacity>
           <View style={styles.rowDivider} />
-          <SettingRow icon="shield" iconColor="rgba(255,255,255,0.3)" label="Built for" value="Solana Seeker" />
+          <SettingRow icon="cellphone" iconColor="rgba(255,255,255,0.3)" label="Built for" value="Solana Seeker" />
         </View>
       </View>
 
@@ -549,7 +549,7 @@ export function SettingsScreen() {
                   {isRevoking ? (
                     <ActivityIndicator size="small" color="#EF4444" />
                   ) : (
-                    <MaterialCommunityIcons name="shield-off" size={15} color="#EF4444" />
+                    <MaterialCommunityIcons name="alert-octagon" size={15} color="#EF4444" />
                   )}
                 </View>
                 <View style={{ flex: 1 }}>

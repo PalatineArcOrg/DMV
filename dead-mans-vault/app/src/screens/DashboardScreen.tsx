@@ -24,6 +24,7 @@ import { StatusIndicator } from '../components/StatusIndicator';
 import { HeartbeatButton } from '../components/HeartbeatButton';
 import { RpcStatusBanner } from '../components/RpcStatusBanner';
 import { EscalationBanner } from '../components/EscalationBanner';
+import { BrandMark } from '../components/BrandMark';
 import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
 import { EscalationStage } from '../types';
@@ -351,7 +352,7 @@ export function DashboardScreen() {
     return (
       <View style={styles.centerContainer}>
         <View style={styles.connectLogoContainer}>
-          <MaterialCommunityIcons name="shield-lock" size={40} color={COLORS.accent} />
+          <BrandMark size={44} />
         </View>
         <Text style={styles.heroTitle}>Dead Man's Vault</Text>
         <Text style={styles.heroSubtitle}>Connect your wallet to get started</Text>
@@ -376,7 +377,7 @@ export function DashboardScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.headerLogo}>
-            <MaterialCommunityIcons name="shield" size={16} color={COLORS.solanaPurple} />
+            <BrandMark size={18} />
           </View>
           <View>
             <Text style={styles.headerTitle}>Dead Man's Vault</Text>

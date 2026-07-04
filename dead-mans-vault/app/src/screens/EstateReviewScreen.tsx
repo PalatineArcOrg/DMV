@@ -330,7 +330,7 @@ export function EstateReviewScreen() {
               <Text style={[styles.mutabilityTitle, isMutable && { color: COLORS.accent }]}>Mutable</Text>
               <Text style={styles.mutabilityDesc}>Can be revoked or updated after activation</Text>
             </View>
-            <MaterialCommunityIcons name="shield-edit" size={18} color={isMutable ? COLORS.accent : 'rgba(255,255,255,0.2)'} />
+            <MaterialCommunityIcons name="lock-open-variant-outline" size={18} color={isMutable ? COLORS.accent : 'rgba(255,255,255,0.2)'} />
           </TouchableOpacity>
           <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
           <TouchableOpacity
@@ -397,7 +397,7 @@ export function EstateReviewScreen() {
             </View>
           ) : (
             <>
-              <MaterialCommunityIcons name="shield-check" size={18} color={COLORS.bg} />
+              <MaterialCommunityIcons name="check-circle" size={18} color={COLORS.bg} />
               <Text style={styles.activateBtnText}>Activate Vault</Text>
             </>
           )}

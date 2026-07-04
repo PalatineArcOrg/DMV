@@ -46,7 +46,7 @@ export function StatusIndicator({ stage, isActive }: StatusIndicatorProps) {
           ]}
         >
           <MaterialCommunityIcons
-            name={(cfg.icon as any) || 'shield-check'}
+            name={(cfg.icon as any) || 'pulse'}
             size={13}
             color={color}
           />

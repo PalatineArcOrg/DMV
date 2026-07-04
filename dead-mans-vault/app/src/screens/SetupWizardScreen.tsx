@@ -463,7 +463,7 @@ export function SetupWizardScreen() {
             {isRevoking ? (
               <ActivityIndicator size="small" color={COLORS.critical} />
             ) : (
-              <MaterialCommunityIcons name="shield-off" size={16} color={COLORS.critical} />
+              <MaterialCommunityIcons name="alert-octagon" size={16} color={COLORS.critical} />
             )}
             <Text style={[styles.execLogBtnText, { color: COLORS.critical }]}>Revoke Vault</Text>
             <MaterialCommunityIcons name="chevron-right" size={14} color="rgba(255,255,255,0.2)" />

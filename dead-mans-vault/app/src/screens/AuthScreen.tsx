@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/useAuthStore';
+import { BrandMark } from '../components/BrandMark';
 import { COLORS, FONTS } from '../utils/constants';
 
 export function AuthScreen() {
@@ -42,7 +43,7 @@ export function AuthScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.iconCircle}>
-        <MaterialCommunityIcons name="shield-lock" size={40} color={COLORS.accent} />
+        <BrandMark size={44} />
       </View>
       <Text style={styles.title}>Dead Man's Vault</Text>
       <Text style={styles.subtitle}>Authenticate to continue</Text>

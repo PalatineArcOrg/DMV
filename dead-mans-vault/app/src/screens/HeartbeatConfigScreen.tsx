@@ -56,7 +56,7 @@ const PRODUCTION_PRESETS = [
     seconds: HEARTBEAT_INTERVALS.monthly,
     graceLabel: `${ACTUAL_GRACE_DAYS}d`,
     intervalLabel: `${HEARTBEAT_INTERVALS.monthly / 86400}d`,
-    icon: 'shield' as const,
+    icon: 'calendar-month' as const,
     color: '#9945FF',
     recommended: false,
   },

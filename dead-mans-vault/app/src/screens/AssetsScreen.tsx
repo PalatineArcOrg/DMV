@@ -190,12 +190,12 @@ export function AssetsScreen() {
       {/* Vault Protection Status */}
       {isSetupComplete ? (
         <View style={styles.protectionBadge}>
-          <MaterialCommunityIcons name="shield-check" size={14} color={COLORS.accent} />
+          <MaterialCommunityIcons name="check-decagram" size={14} color={COLORS.accent} />
           <Text style={styles.protectionText}>Vault Protected</Text>
         </View>
       ) : (
         <View style={styles.unprotectedBadge}>
-          <MaterialCommunityIcons name="shield-off" size={14} color={COLORS.warning} />
+          <MaterialCommunityIcons name="alert-circle-outline" size={14} color={COLORS.warning} />
           <Text style={styles.unprotectedText}>Not Protected</Text>
         </View>
       )}
@@ -293,7 +293,7 @@ export function AssetsScreen() {
                     {token.isNft ? (
                       <View style={styles.nftBadge}><Text style={styles.nftBadgeText}>NFT</Text></View>
                     ) : isSetupComplete ? (
-                      <MaterialCommunityIcons name="shield-check" size={12} color={COLORS.accent} style={{ marginLeft: 4 }} />
+                      <MaterialCommunityIcons name="check-decagram" size={12} color={COLORS.accent} style={{ marginLeft: 4 }} />
                     ) : null}
                   </View>
                   <Text style={styles.tokenAmount}>
@@ -391,7 +391,7 @@ export function AssetsScreen() {
                         <Text style={styles.positionType}>{pos.type.replace('_', ' ')}</Text>
                         {isSetupComplete && (
                           <View style={styles.vaultBadge}>
-                            <MaterialCommunityIcons name="shield-check" size={10} color={COLORS.accent} />
+                            <MaterialCommunityIcons name="check-decagram" size={10} color={COLORS.accent} />
                             <Text style={styles.vaultBadgeText}>Covered</Text>
                           </View>
                         )}
