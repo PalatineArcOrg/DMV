@@ -60,7 +60,8 @@ export function useVaultProgram() {
       }
       try {
         const rawAccount = await connection.getAccountInfo(pda);
-        return VaultTransactionService.parseVaultConfigRaw(rawAccount);
+        if (!rawAccount || rawAccount.data.length < 92) return null;
+        return VaultTransactionService.parseVaultConfigRaw(rawAccount.data);
       } catch {
         return null;
       }
