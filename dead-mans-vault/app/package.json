@@ -10,7 +10,7 @@
     "build": "npx eas build --profile preview --platform android",
     "build:local": "npx eas build --profile preview --platform android --local",
     "build:dev": "npx eas build --profile development --platform android",
-    "test": "echo \"No tests specified\" && exit 0"
+    "test": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

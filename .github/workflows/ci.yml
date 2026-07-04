@@ -38,10 +38,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24' # needed for `node --test` TypeScript type-stripping
       - run: yarn install --frozen-lockfile
       - name: Type-check
         run: npx tsc --noEmit
+      - name: Unit tests (raw account parsers, etc.)
+        run: yarn test
       - name: Dependency audit (high/critical)
         run: yarn npm audit --severity high || yarn audit --level high || true
 

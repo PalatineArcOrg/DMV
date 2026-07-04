@@ -20,6 +20,14 @@ import {
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
 import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS, FEE_WALLET } from '../utils/constants';
+import {
+  parseVaultConfig as parseVaultConfigImpl,
+  parseExecutionLog as parseExecutionLogImpl,
+  parseAssetPlan as parseAssetPlanImpl,
+  parseTokenDist as parseTokenDistImpl,
+  parseDeadline as parseDeadlineImpl,
+  type AccountInfoLike,
+} from '../utils/rawAccountParsers';
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
 import type { PriorityFeeEstimateResult } from '../types/api';
@@ -1201,74 +1209,28 @@ export class VaultTransactionService {
     }
     try {
       const rawAccount = await this.connection.getAccountInfo(pda);
-      if (!rawAccount || rawAccount.data.length < 92) return null;
-      return VaultTransactionService.parseVaultConfigRaw(rawAccount.data);
+      return VaultTransactionService.parseVaultConfigRaw(rawAccount);
     } catch {
       return null;
     }
   }
 
   /**
-   * VaultConfig raw layout:
-   * 8 disc | 32 owner | 32 agent | 8 interval | 8 grace | 4 vec_len |
-   * N*(32 wallet + 2 shareBps) | 1 executed | 1 active | 8 created | 8 updated |
-   * 1 bump | 1 is_mutable | 1 has_asset_plan | 2 open_token_dists
+   * Hardened raw VaultConfig parse (program-owner + discriminator + bounds
+   * checked) — delegates to utils/rawAccountParsers so a malicious/broken RPC
+   * can't inject fake vault state. Accepts the full account info (needs `owner`).
    */
-  static parseVaultConfigRaw(data: Buffer): any {
-    let offset = 8;
-    const owner = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-    const agentPubkey = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-    const heartbeatInterval = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
-    const gracePeriod = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
-
-    const beneficiaryCount = data.readUInt32LE(offset); offset += 4;
-    const beneficiaries: { wallet: PublicKey; shareBps: number; hasSpecificAssets: boolean }[] = [];
-    for (let i = 0; i < beneficiaryCount && i < 20; i++) {
-      const wallet = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-      const shareBps = data.readUInt16LE(offset); offset += 2;
-      beneficiaries.push({ wallet, shareBps, hasSpecificAssets: false });
-    }
-
-    const executed = data[offset] !== 0; offset += 1;
-    const active = data[offset] !== 0; offset += 1;
-    const createdAt = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
-    const updatedAt = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
-    const bump = data[offset]; offset += 1;
-    const isMutable = data[offset] !== 0; offset += 1;
-    const hasAssetPlan = data[offset] !== 0; offset += 1;
-    const openTokenDists = data.readUInt16LE(offset); offset += 2;
-
-    return {
-      owner, agentPubkey, heartbeatInterval, gracePeriod,
-      beneficiaries, executed, active, createdAt, updatedAt,
-      bump, isMutable, hasAssetPlan, openTokenDists,
-    };
+  static parseVaultConfigRaw(info: AccountInfoLike | null): any {
+    return parseVaultConfigImpl(info, programId);
   }
 
-  /**
-   * ExecutionLog raw layout:
-   * 8 disc | 32 vault | 8 sol_snapshot | 4 sol_paid_mask | 8 started_at |
-   * 1 completed | 4 transfer_count | 8 total_sol | 1 bump
-   */
   async fetchExecutionLog(owner: PublicKey): Promise<{ solSnapshot: BN; solPaidMask: number; completed: boolean } | null> {
     const [vaultPda] = this.getVaultPDA(owner);
     const [executionPda] = this.getExecutionPDA(vaultPda);
     const info = await this.connection.getAccountInfo(executionPda);
-    if (!info || info.data.length < 66) return null;
-    const data = info.data;
-    let offset = 8 + 32;
-    const solSnapshot = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
-    const solPaidMask = data.readUInt32LE(offset); offset += 4;
-    offset += 8; // started_at
-    const completed = data[offset] !== 0;
-    return { solSnapshot, solPaidMask, completed };
+    return parseExecutionLogImpl(info, programId);
   }
 
-  /**
-   * AssetPlan raw layout:
-   * 8 disc | 32 vault | 4 vec_len | N*(32 mint + 8 amount + 1 benefIdx + 1 isNft) |
-   * 8 paid_mask | 1 bump
-   */
   async fetchAssetPlan(owner: PublicKey): Promise<{
     assignments: { mint: PublicKey; amount: BN; beneficiaryIndex: number; isNft: boolean }[];
     paidMask: bigint;
@@ -1276,36 +1238,14 @@ export class VaultTransactionService {
     const [vaultPda] = this.getVaultPDA(owner);
     const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
     const info = await this.connection.getAccountInfo(assetPlanPda);
-    if (!info || info.data.length < 44) return null;
-    const data = info.data;
-    let offset = 8 + 32;
-    const len = data.readUInt32LE(offset); offset += 4;
-    const assignments: { mint: PublicKey; amount: BN; beneficiaryIndex: number; isNft: boolean }[] = [];
-    for (let i = 0; i < len && i < 64; i++) {
-      const mint = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
-      const amount = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
-      const beneficiaryIndex = data[offset]; offset += 1;
-      const isNft = data[offset] !== 0; offset += 1;
-      assignments.push({ mint, amount, beneficiaryIndex, isNft });
-    }
-    const paidMask = data.readBigUInt64LE(offset);
-    return { assignments, paidMask };
+    return parseAssetPlanImpl(info, programId);
   }
 
-  /**
-   * TokenDist raw layout:
-   * 8 disc | 32 vault | 32 mint | 8 snapshot | 4 paid_mask | 1 bump
-   */
   async fetchTokenDist(owner: PublicKey, mint: PublicKey): Promise<{ snapshot: BN; paidMask: number } | null> {
     const [vaultPda] = this.getVaultPDA(owner);
     const [tokenDistPda] = this.getTokenDistPDA(vaultPda, mint);
     const info = await this.connection.getAccountInfo(tokenDistPda);
-    if (!info || info.data.length < 85) return null;
-    const data = info.data;
-    let offset = 8 + 32 + 32;
-    const snapshot = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
-    const paidMask = data.readUInt32LE(offset);
-    return { snapshot, paidMask };
+    return parseTokenDistImpl(info, programId);
   }
 
   async getOnChainDeadline(owner: PublicKey): Promise<number | null> {
@@ -1316,11 +1256,7 @@ export class VaultTransactionService {
         this.connection.getAccountInfo(vaultPda),
         this.connection.getAccountInfo(heartbeatPda),
       ]);
-      if (!vaultInfo || !hbInfo) return null;
-      const interval = Number(new BN(vaultInfo.data.subarray(72, 80), 'le'));
-      const grace = Number(new BN(vaultInfo.data.subarray(80, 88), 'le'));
-      const lastHeartbeat = Number(new BN(hbInfo.data.subarray(40, 48), 'le'));
-      return lastHeartbeat + interval + grace;
+      return parseDeadlineImpl(vaultInfo, hbInfo, programId);
     } catch {
       return null;
     }
