@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
@@ -95,6 +96,23 @@ pub fn handler(ctx: Context<ExecuteSpecificAsset>, assignment_index: u8) -> Resu
         VaultError::TokenAccountMismatch
     );
 
+    // 7b. Pin the vault ATA to its canonical associated-token address, derived
+    // from the mint's TRUE owner program — the same anti-spoof guard already used
+    // by begin_token_dist / execute_token_shares / close_token_dist. Without it a
+    // permissionless caller could pass a different (e.g. attacker-created, empty)
+    // vault-owned token account for this mint: the transfer would move
+    // min(amount, 0) = 0, the paid bit would still be set, and the intended heir
+    // would be denied their bequest — the asset then leaks to the largest-share
+    // beneficiary as dust on close. begin_token_dist snapshots from THIS canonical
+    // ATA, so the specific-payout source must be the same account.
+    let token_program_id = *ctx.accounts.mint.to_account_info().owner;
+    let expected_ata =
+        get_associated_token_address_with_program_id(&vault.key(), &mint_key, &token_program_id);
+    require!(
+        ctx.accounts.vault_ata.key() == expected_ata,
+        VaultError::InvalidVaultAta
+    );
+
     // 9. in-order: every lower-index assignment for THIS mint already paid
     let lower = lower_index_same_mint_mask(plan, a.mint, j);
     require!(plan.paid_mask & lower == lower, VaultError::SpecificOutOfOrder);
@@ -105,8 +123,14 @@ pub fn handler(ctx: Context<ExecuteSpecificAsset>, assignment_index: u8) -> Resu
     // 11. defensive: beneficiary is not the vault PDA itself
     require!(benef_wallet != vault.key(), VaultError::BeneficiaryMismatch);
 
-    // Pay min(amount, available); always set the bit so finalize stays reachable.
+    // Compute the payout, then record it BEFORE the transfer (checks-effects-
+    // interactions): a Token-2022 transfer hook runs arbitrary code during the
+    // CPI, so setting the paid bit first removes any same-index reentrancy path.
+    // On CPI failure the whole tx reverts, rolling the bit back atomically. Always
+    // set the bit so finalize stays reachable even for an underfunded assignment.
     let amt = a.amount.min(ctx.accounts.vault_ata.amount);
+    ctx.accounts.asset_plan.paid_mask |= 1u64 << j;
+
     if amt > 0 {
         let owner_key = vault.owner;
         let bump = vault.bump;
@@ -125,8 +149,6 @@ pub fn handler(ctx: Context<ExecuteSpecificAsset>, assignment_index: u8) -> Resu
         );
         transfer_checked(cpi, amt, decimals)?;
     }
-
-    ctx.accounts.asset_plan.paid_mask |= 1u64 << j;
 
     Ok(())
 }

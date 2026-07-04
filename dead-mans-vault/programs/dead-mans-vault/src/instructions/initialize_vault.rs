@@ -85,6 +85,13 @@ pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> 
         VaultError::AgentCannotBeOwner
     );
 
+    // Bound the keeper bounty. It is carved out of the SOL snapshot before
+    // beneficiary payouts, so an unbounded value could zero out the estate.
+    require!(
+        params.keeper_bounty <= MAX_KEEPER_BOUNTY_LAMPORTS,
+        VaultError::KeeperBountyTooLarge
+    );
+
     let clock = Clock::get()?;
 
     // Initialize vault config

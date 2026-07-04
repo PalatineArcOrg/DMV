@@ -4,6 +4,7 @@ import { DeadMansVault } from "../target/types/dead_mans_vault";
 import { expect } from "chai";
 import {
   createMint,
+  createAccount,
   mintTo,
   getAccount,
   getAssociatedTokenAddressSync,
@@ -1059,6 +1060,25 @@ describe("dead-mans-vault — permissionless execution", () => {
           .signers([cranker])
           .rpc();
         expect.fail("InvalidVaultAta");
+      } catch (e) {
+        expectErr(e, "InvalidVaultAta");
+      }
+
+      // (e) CRITICAL regression: execute_specific_asset must pin the vault ATA to
+      //     its canonical address too. Spoof a non-canonical but vault-owned token
+      //     account (right mint) for specific #0 with the CORRECT beneficiary ATA.
+      //     Pre-fix this paid min(amount, 0)=0 and set the bit, silently denying
+      //     the heir their bequest; now it must reject with InvalidVaultAta.
+      const spoofVaultAcct = Keypair.generate();
+      await createAccount(conn, cranker, s.tokenMint, s.vault, spoofVaultAcct); // vault-owned, NOT the ATA
+      const b0TokenAta = await makeAta(cranker, s.tokenMint, s.b[0].publicKey);
+      try {
+        await program.methods
+          .executeSpecificAsset(0)
+          .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, assetPlan: s.assetPlan, mint: s.tokenMint, tokenDist, vaultAta: spoofVaultAcct.publicKey, beneficiaryAta: b0TokenAta, tokenProgram: TOKEN_PROGRAM_ID })
+          .signers([cranker])
+          .rpc();
+        expect.fail("execute_specific_asset spoofed vault_ata");
       } catch (e) {
         expectErr(e, "InvalidVaultAta");
       }

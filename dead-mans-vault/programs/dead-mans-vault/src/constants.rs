@@ -13,13 +13,28 @@ pub const FEE_WALLET: Pubkey =
 /// out. Carved out of the SOL snapshot so it never touches beneficiary payouts.
 pub const KEEPER_BOUNTY_LAMPORTS: u64 = 5_000_000;
 
-/// Minimum heartbeat interval: 10 seconds (devnet demo-friendly).
-/// MAINNET: Restore to 86_400 (1 day) before mainnet deployment.
-pub const MIN_HEARTBEAT_INTERVAL: i64 = 10;
+/// Upper bound on the keeper bounty an owner may set at init (0.1 SOL). Real crank
+/// costs are well under 0.01 SOL, so this is generous while preventing a
+/// pathological bounty from consuming the estate (the bounty is carved out of the
+/// SOL snapshot before beneficiary payouts, so an unbounded value could zero them).
+pub const MAX_KEEPER_BOUNTY_LAMPORTS: u64 = 100_000_000;
 
-/// Minimum grace period: 30 seconds (devnet demo-friendly).
-/// MAINNET: Restore to 604_800 (7 days) before mainnet deployment.
+// Minimum heartbeat interval / grace period.
+//
+// The safe production values (1 day / 7 days) are the DEFAULT so a plain
+// `anchor build` / mainnet deploy is fail-safe. The short demo floors are gated
+// behind the opt-in `devnet` Cargo feature, used only for tests and devnet builds
+// (execution tests need ~40s grace waits). Build tests/devnet with:
+//     anchor build -- --features devnet
+#[cfg(feature = "devnet")]
+pub const MIN_HEARTBEAT_INTERVAL: i64 = 10;
+#[cfg(not(feature = "devnet"))]
+pub const MIN_HEARTBEAT_INTERVAL: i64 = 86_400; // 1 day
+
+#[cfg(feature = "devnet")]
 pub const MIN_GRACE_PERIOD: i64 = 30;
+#[cfg(not(feature = "devnet"))]
+pub const MIN_GRACE_PERIOD: i64 = 604_800; // 7 days
 
 /// Maximum beneficiaries per vault. Tracked with a u32 paid-mask.
 pub const MAX_BENEFICIARIES: usize = 20;

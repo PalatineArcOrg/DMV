@@ -93,6 +93,12 @@ pub fn handler<'info>(
         }
 
         let amt = (snapshot * (benefs[i].1 as u128) / 10_000u128) as u64;
+
+        // Effect before interaction (CEI): record the payout before the transfer
+        // CPI so a Token-2022 transfer hook cannot re-enter for the same index and
+        // double-pay. On CPI failure the whole tx reverts, rolling this back.
+        ctx.accounts.token_dist.paid_mask |= 1u32 << i;
+
         if amt > 0 {
             let seeds: &[&[u8]] = &[b"vault", owner_key.as_ref(), &[bump]];
             let signer = &[seeds];
@@ -108,8 +114,6 @@ pub fn handler<'info>(
             );
             transfer_checked(cpi, amt, decimals)?;
         }
-
-        ctx.accounts.token_dist.paid_mask |= 1u32 << i;
     }
 
     Ok(())

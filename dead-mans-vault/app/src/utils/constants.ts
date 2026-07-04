@@ -10,6 +10,12 @@ export const NOTIFY_URL = process.env.EXPO_PUBLIC_NOTIFY_URL || '';
 /** Keeper bounty (0.005 SOL) reserved in the vault at creation, paid to whoever
  *  cranks finalize_execution. Carved out on-chain so it never reduces payouts. */
 export const KEEPER_BOUNTY_LAMPORTS = 5_000_000;
+
+/** Upper bound on the keeper bounty (0.1 SOL). MUST match the on-chain
+ *  `MAX_KEEPER_BOUNTY_LAMPORTS` guard (VaultError::KeeperBountyTooLarge). A bounty
+ *  above this is rejected by the program; validate client-side first for a clear
+ *  error instead of a raw on-chain failure. */
+export const MAX_KEEPER_BOUNTY_LAMPORTS = 100_000_000;
 export const NOTIFY_SECRET = process.env.EXPO_PUBLIC_NOTIFY_SECRET || '';
 
 export const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';

@@ -120,4 +120,10 @@ pub enum VaultError {
 
     #[msg("A SOL bequest must have is_nft = false and a non-zero amount")]
     InvalidSolBequest,
+
+    #[msg("Keeper bounty exceeds the maximum allowed")]
+    KeeperBountyTooLarge,
+
+    #[msg("Mint has no vault balance and no bequest — nothing to distribute")]
+    NothingToDistribute,
 }

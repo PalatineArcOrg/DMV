@@ -10,6 +10,9 @@ name = "dead_mans_vault"
 
 [features]
 default = []
+# Opt-in: enables short demo minimums for heartbeat interval / grace period.
+# Mainnet builds MUST NOT enable this (default = safe 1-day / 7-day floors).
+devnet = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []

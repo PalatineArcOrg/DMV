@@ -19,7 +19,7 @@ import {
 } from '@solana/spl-token';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
-import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
+import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
 import type { PriorityFeeEstimateResult } from '../types/api';
@@ -134,6 +134,18 @@ export class VaultTransactionService {
     return { wallet: b.wallet, shareBps: b.shareBps };
   }
 
+  /** Keeper bounty as a BN, validated against the on-chain cap. Mirrors the
+   *  program's `MAX_KEEPER_BOUNTY_LAMPORTS` guard so an over-cap value fails here
+   *  with a clear message instead of a raw `KeeperBountyTooLarge` on-chain. */
+  private static keeperBountyBN(lamports: number = KEEPER_BOUNTY_LAMPORTS): BN {
+    if (lamports < 0 || lamports > MAX_KEEPER_BOUNTY_LAMPORTS) {
+      throw new Error(
+        `Keeper bounty ${lamports} lamports exceeds the maximum of ${MAX_KEEPER_BOUNTY_LAMPORTS} (0.1 SOL).`,
+      );
+    }
+    return new BN(lamports);
+  }
+
   // ─── Priority fee ───
 
   private async estimatePriorityFee(accountKeys: PublicKey[]): Promise<number> {
@@ -219,7 +231,7 @@ export class VaultTransactionService {
         gracePeriod: new BN(gracePeriod),
         beneficiaries: beneficiaries.map(VaultTransactionService.toOnChainBenef),
         isMutable,
-        keeperBounty: new BN(KEEPER_BOUNTY_LAMPORTS),
+        keeperBounty: VaultTransactionService.keeperBountyBN(),
       })
       .accountsPartial({
         owner,
@@ -342,7 +354,7 @@ export class VaultTransactionService {
         gracePeriod: new BN(gracePeriod),
         beneficiaries: beneficiaries.map(VaultTransactionService.toOnChainBenef),
         isMutable,
-        keeperBounty: new BN(KEEPER_BOUNTY_LAMPORTS),
+        keeperBounty: VaultTransactionService.keeperBountyBN(),
       })
       .accountsPartial({
         owner,
@@ -402,7 +414,7 @@ export class VaultTransactionService {
         gracePeriod: new BN(gracePeriod),
         beneficiaries: beneficiaries.map(VaultTransactionService.toOnChainBenef),
         isMutable,
-        keeperBounty: new BN(KEEPER_BOUNTY_LAMPORTS),
+        keeperBounty: VaultTransactionService.keeperBountyBN(),
       })
       .accountsPartial({
         owner,

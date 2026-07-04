@@ -90,21 +90,29 @@ pub fn handler(ctx: Context<BeginTokenDist>) -> Result<()> {
         }
     };
 
-    // Sum of specific bequests for this mint is carved out of the residual.
-    let spec_sum: u64 = if ctx.accounts.vault_config.has_asset_plan {
+    // Sum of specific bequests for this mint (carved out of the residual) plus
+    // whether the mint appears in the plan at all.
+    let mut spec_sum: u64 = 0;
+    let mut mint_in_plan = false;
+    if ctx.accounts.vault_config.has_asset_plan {
         let plan = ctx
             .accounts
             .asset_plan
             .as_ref()
             .ok_or(error!(VaultError::AssetPlanRequired))?;
         require!(plan.vault == vault_key, VaultError::AssetPlanRequired);
-        plan.assignments
-            .iter()
-            .filter(|a| a.mint == mint_key)
-            .fold(0u64, |acc, a| acc.saturating_add(a.amount))
-    } else {
-        0
-    };
+        for a in plan.assignments.iter().filter(|a| a.mint == mint_key) {
+            mint_in_plan = true;
+            spec_sum = spec_sum.saturating_add(a.amount);
+        }
+    }
+
+    // Anti-grief: refuse to open a distribution for a mint the vault neither holds
+    // nor bequeaths. Such a TokenDist snapshots 0 yet still increments
+    // open_token_dists, which close_executed_vault_by_owner requires to be 0 —
+    // letting anyone spam junk mints to block the owner's rent reclaim. Held mints
+    // (bal > 0) and bequeathed-but-unheld mints (in the plan) stay valid.
+    require!(bal > 0 || mint_in_plan, VaultError::NothingToDistribute);
 
     let dist = &mut ctx.accounts.token_dist;
     dist.vault = vault_key;
