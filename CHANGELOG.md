@@ -5,12 +5,49 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
-## [Unreleased] — Security hardening (pre-mainnet)
+## [1.13.5] — 2026-07-04 — Keeper economics + permissionless cleanup
+
+Removes the last stranded value from a fired vault and makes third-party keepers
+economically self-sustaining. Program redeployed to devnet + IDL upgraded.
+
+### On-chain program — new `close_executed_vault` (permissionless)
+- After execution has finalized, all TokenDists are closed, and a **24-hour
+  owner-exclusive window** has elapsed (`EXECUTED_CLOSE_DELAY`, 60 s under the `devnet`
+  feature; error `CloseDelayNotElapsed`), **anyone** may close the core PDAs
+  (VaultConfig + HeartbeatRecord + ExecutionLog + AssetPlan) and claim their rents
+  (~0.01–0.03 SOL) as a cleanup reward. Previously that rent stranded forever when the
+  owner was dead — the owner-signed close could never run. SOL dust above rent still goes
+  to the largest-share beneficiary; a living owner can still close (and keep the rents)
+  any time via `close_executed_vault_by_owner`. Additive instruction — no layout change,
+  existing vaults unaffected. 29/29 tests (blocked-in-window, rents-to-cranker,
+  owner-priority).
+
+### Keeper bot — `keeper-bot/` (new, standalone)
+- A self-contained keeper anyone can run: discriminator-scans the program for expired
+  vaults (skipping undecodable legacy accounts), runs the full permissionless crank, and
+  collects the keeper bounty + cleanup rents. `RPC_URL` + `KEYPAIR_PATH` and go; `--once`
+  for cron. Devnet-verified: one tick cranked 5 expired vaults and closed 4 executed
+  ones — the keeper more than doubled its stake from bounties + rents.
+
+### App
+- **Agent funding halved: 0.01 → 0.005 SOL** (~1,000 heartbeats of fees — still years of
+  margin). Halves what is unrecoverable with a lost phone after a real death (the agent
+  key exists only on that device) and drops activation cost to ≈ 0.028 SOL. The
+  close/revoke flows already sweep the agent's leftover SOL back to a living owner.
+
+## [1.13.0–1.13.4] — 2026-07-04 — Security hardening (pre-mainnet) + fixes
 
 A pre-mainnet security review across the on-chain program, the notify-server, and the
-app's agent-key storage. **The notify-server changes are deployed;** the program changes
-require a **redeploy + IDL upgrade**, and the app changes require a **new APK build**.
-Devnet Program ID unchanged.
+app's agent-key storage (shipped as v1.13.0), followed by same-day fixes: v1.13.1
+reverted a parser-module regression that broke vault reads on-device ("created but can't
+see it"); v1.13.2 re-added the account-parse hardening inline (bundle-verified);
+v1.13.3 reverted notification registration to the silent unsigned flow (the auto
+background wallet-signing popup was unreliable and its verifying server was never
+deployed — the signed variants remain dormant for a coordinated mainnet release) and
+fixed a crank bug where paying the last bequest and finalizing in the same pass compared
+a stale in-memory mask (vault stuck one step from done); v1.13.4 added NFT names +
+thumbnails to the vault views and Bequests picker, and an "Estate plan complete" push
+after autonomous execution. Devnet Program ID unchanged.
 
 ### On-chain program (Anchor) — redeploy + IDL upgrade required
 - **CRITICAL — specific bequests could be misdirected.** `execute_specific_asset` didn't
