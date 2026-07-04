@@ -3633,10 +3633,10 @@ expo-keep-awake@~14.0.3:
   resolved "https://registry.yarnpkg.com/expo-keep-awake/-/expo-keep-awake-14.0.3.tgz#74c91b68effdb6969bc1e8371621aad90386cfbf"
   integrity sha512-6Jh94G6NvTZfuLnm2vwIpKe3GdOiVBuISl7FI8GqN0/9UOg9E0WXXp5cDcfAG8bn80RfgLJS8P7EPUGTZyOvhg==
 
-expo-local-authentication@~15.0.2:
-  version "15.0.2"
-  resolved "https://registry.yarnpkg.com/expo-local-authentication/-/expo-local-authentication-15.0.2.tgz#c45460046d9d040370a2a9e18df399abb3df4913"
-  integrity sha512-v7TOfovuivGWffA8B0FudEas+njMKTrjhaPpJYLASiTLTP3zUYqtumNgZ9pkaDB6Cagq0+DeNH39AI8tdEBUkQ==
+expo-local-authentication@~57.0.0:
+  version "57.0.0"
+  resolved "https://registry.yarnpkg.com/expo-local-authentication/-/expo-local-authentication-57.0.0.tgz#2852d4049c63527e8fabfabb21c8b561904414b9"
+  integrity sha512-/ZzS7OD5OaAEhSF/+zPWZqzT8xWy1rMICfDqP5ojJ6Flh4wgAOedG37p8UZlTQYJRR5u1NQ9AoAePV8H/ky14g==
   dependencies:
     invariant "^2.2.4"
 
