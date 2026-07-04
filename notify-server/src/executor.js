@@ -29,6 +29,12 @@ const idl = JSON.parse(
 
 const PROGRAM_ID = new PublicKey(config.programId);
 const BATCH = 8; // max payout indices per tx (CU + tx-size budget)
+// Cap on non-plan token mints the server auto-distributes per vault. Bounds the
+// cranker's rent spend if a vault is dusted with many junk mints (an attacker can
+// send 1 unit of N mints; each TokenDist + beneficiary ATA is rent the cranker
+// fronts). Owner-defined plan mints are always distributed; only surplus held
+// mints beyond this cap are deferred to the (uncapped, user-paid) app/heir crank.
+const MAX_AUTO_MINTS = 16;
 
 let cached = null;
 
@@ -90,27 +96,72 @@ function largestShareIndex(beneficiaries) {
   return best;
 }
 
-/** All mints the vault holds (across both token programs) ∪ assignment mints. */
+/**
+ * Mints to distribute for a vault: held mints with a NON-ZERO balance ∪ plan
+ * mints. Two important behaviours:
+ *  - Zero-balance vault token accounts are skipped. On-chain begin_token_dist now
+ *    rejects a mint the vault neither holds nor bequeaths (NothingToDistribute),
+ *    so cranking such a mint would abort the whole run — and it was wasteful
+ *    anyway. Plan mints are always kept (begin_token_dist allows a bequeathed but
+ *    unheld mint, snapshotting 0).
+ *  - Non-plan held mints beyond MAX_AUTO_MINTS (highest balance first) are
+ *    deferred, bounding the cranker's rent spend against a dust-mint drain.
+ */
 async function collectMints(connection, vault, plan) {
-  const found = new Map(); // mintBase58 -> PublicKey programId
+  const info = new Map(); // mintBase58 -> { programId, amount: bigint, inPlan: bool }
+
   for (const pid of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
     const res = await connection.getParsedTokenAccountsByOwner(vault, { programId: pid });
     for (const { account } of res.value) {
-      found.set(account.data.parsed.info.mint, pid);
+      const p = account.data.parsed.info;
+      const amount = BigInt(p.tokenAmount?.amount ?? '0');
+      if (amount <= 0n) continue; // skip empty accounts (see NothingToDistribute above)
+      const key = p.mint;
+      const prev = info.get(key);
+      info.set(key, {
+        programId: pid,
+        amount: (prev?.amount ?? 0n) + amount, // a mint may have several accounts
+        inPlan: prev?.inPlan ?? false,
+      });
     }
   }
+
   if (plan) {
     for (const a of plan.assignments) {
-      // Specific-SOL bequests use the zero-pubkey sentinel — they have no token dist.
-      if (a.mint.equals(PublicKey.default)) continue;
+      if (a.mint.equals(PublicKey.default)) continue; // specific-SOL sentinel — no token dist
       const key = a.mint.toBase58();
-      if (!found.has(key)) {
-        const info = await connection.getAccountInfo(a.mint);
-        if (info) found.set(key, info.owner);
+      const prev = info.get(key);
+      if (prev) {
+        prev.inPlan = true;
+        continue;
       }
+      const acc = await connection.getAccountInfo(a.mint);
+      if (acc) info.set(key, { programId: acc.owner, amount: 0n, inPlan: true });
     }
   }
-  return [...found.entries()].map(([m, pid]) => ({ mint: new PublicKey(m), programId: pid }));
+
+  const entries = [...info.entries()];
+  const planMints = entries.filter(([, v]) => v.inPlan);
+  const heldOnly = entries
+    .filter(([, v]) => !v.inPlan)
+    .sort((a, b) => (b[1].amount > a[1].amount ? 1 : b[1].amount < a[1].amount ? -1 : 0));
+
+  const chosen = [...planMints];
+  let deferred = 0;
+  for (const e of heldOnly) {
+    if (chosen.length >= MAX_AUTO_MINTS) {
+      deferred++;
+      continue;
+    }
+    chosen.push(e);
+  }
+  if (deferred > 0) {
+    console.log(
+      `[exec] ${vault.toBase58().slice(0, 8)}: token-mint cap ${MAX_AUTO_MINTS} hit; ` +
+        `deferred ${deferred} low-balance mint(s) to the app/heir crank`,
+    );
+  }
+  return chosen.map(([m, v]) => ({ mint: new PublicKey(m), programId: v.programId }));
 }
 
 /** Create a beneficiary ATA if missing (cranker pays the rent). */

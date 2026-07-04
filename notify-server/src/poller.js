@@ -15,7 +15,34 @@ import { sendPush, fcmReady } from './fcm.js';
 import { runExecutor, executorReady } from './executor.js';
 
 let running = false;
+let runningSince = 0;
 let timer = null;
+
+const VAULT_TIMEOUT_MS = 45_000; // per-vault budget so one hung vault can't wedge a tick
+const POLL_CONCURRENCY = 4; // process registrations in parallel (was strictly sequential)
+const MAX_TICK_MS = 5 * 60_000; // watchdog: allow a new tick if the flag is this stale
+
+/** Resolve `onTimeout()` if `promise` doesn't settle within `ms` (no cancellation
+ * of the underlying work — it's idempotent and simply retried next tick). */
+function withTimeout(promise, ms, onTimeout) {
+  let t;
+  const timeout = new Promise((resolve) => {
+    t = setTimeout(() => resolve(onTimeout()), ms);
+  });
+  return Promise.race([
+    Promise.resolve(promise).then(
+      (v) => {
+        clearTimeout(t);
+        return v;
+      },
+      (e) => {
+        clearTimeout(t);
+        throw e;
+      },
+    ),
+    timeout,
+  ]);
+}
 
 /**
  * Decide whether a push is due for one registration and, if so, send it and
@@ -104,29 +131,52 @@ export async function pollOnce() {
   const now = Math.floor(Date.now() / 1000);
 
   let sent = 0;
-  for (const reg of regs) {
-    try {
-      const r = await processRegistration(reg, now);
-      if (r.action === 'sent') {
-        sent++;
-        console.log(`[push] sent stage ${r.stage} -> ${reg.vault.slice(0, 8)} (owner ${reg.owner.slice(0, 8)})`);
-      } else if (r.action.startsWith('deregistered')) {
-        console.log(`[drop] ${r.action} -> ${reg.vault.slice(0, 8)}`);
-      } else if (r.action === 'send_failed') {
-        console.log(`[push] FAILED stage ${r.stage} -> ${reg.vault.slice(0, 8)}: ${r.error}`);
+  let idx = 0;
+
+  // Bounded-concurrency worker pool: registrations are independent, so process a
+  // few at once instead of strictly sequentially — one slow/hung vault no longer
+  // blocks every other vault's alerts and executions.
+  const worker = async () => {
+    while (idx < regs.length) {
+      const reg = regs[idx++];
+      try {
+        const r = await withTimeout(
+          processRegistration(reg, now),
+          VAULT_TIMEOUT_MS,
+          () => ({ vault: reg.vault, action: 'timeout' }),
+        );
+        if (r.action === 'sent') {
+          sent++;
+          console.log(`[push] sent stage ${r.stage} -> ${reg.vault.slice(0, 8)} (owner ${reg.owner.slice(0, 8)})`);
+        } else if (r.action === 'timeout') {
+          console.log(`[poll] TIMEOUT -> ${reg.vault.slice(0, 8)} (skipped this tick; resumes next)`);
+        } else if (r.action.startsWith('deregistered')) {
+          console.log(`[drop] ${r.action} -> ${reg.vault.slice(0, 8)}`);
+        } else if (r.action === 'send_failed') {
+          console.log(`[push] FAILED stage ${r.stage} -> ${reg.vault.slice(0, 8)}: ${r.error}`);
+        }
+      } catch {
+        // Per-vault failure is non-fatal; retry next tick.
       }
-    } catch {
-      // Per-vault failure is non-fatal; retry next tick.
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(POLL_CONCURRENCY, regs.length) }, () => worker()),
+  );
   return { checked: regs.length, sent };
 }
 
 export function startPoller() {
   if (timer) return;
   const tick = async () => {
-    if (running) return;
+    // Normally skip if a tick is already in flight. Watchdog: if the flag has
+    // been stuck far longer than any healthy tick (a wedged run), let a new tick
+    // start anyway so polling can't silently die (the per-vault crank lock keeps
+    // an overlapping run safe).
+    if (running && Date.now() - runningSince < MAX_TICK_MS) return;
     running = true;
+    runningSince = Date.now();
     try {
       if (fcmReady() || executorReady()) await pollOnce();
     } catch (e) {
