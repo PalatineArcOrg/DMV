@@ -63,7 +63,7 @@ jobs:
         working-directory: dead-mans-vault
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.93.0 # project toolchain
+      - uses: dtolnay/rust-toolchain@1.100.0 # project toolchain
 
       - name: Prod-floor guard — default build MUST enforce 1-day / 7-day minimums
         run: cargo test -p dead-mans-vault --lib
