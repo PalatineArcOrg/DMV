@@ -1,0 +1,19 @@
+{
+  "name": "dmv-keeper-bot",
+  "version": "1.0.0",
+  "description": "Standalone keeper for Dead Man's Vault: scans for expired vaults, cranks the permissionless distribution, and collects the keeper bounty + cleanup rents. Anyone can run one.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "once": "node src/index.js --once"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.95.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

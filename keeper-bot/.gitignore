@@ -1,0 +1,4 @@
+node_modules/
+keeper.json
+*.keypair.json
+.env
