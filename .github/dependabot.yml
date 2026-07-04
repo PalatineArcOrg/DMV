@@ -1,4 +1,7 @@
 version: 2
+# Skip major-version bumps (they break the pinned toolchain — Anchor 0.32.1,
+# Expo SDK 52, etc.) and group the safe minor/patch updates into one PR per
+# ecosystem to keep the noise down. Security updates always come through.
 updates:
   # Mobile app (Yarn / npm ecosystem)
   - package-ecosystem: "npm"
@@ -7,6 +10,12 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies", "app"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      app-minor-patch:
+        update-types: ["minor", "patch"]
 
   # Anchor test harness deps (ts-mocha, chai, etc.)
   - package-ecosystem: "npm"
@@ -15,6 +24,12 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies", "anchor-tests"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      anchor-tests-minor-patch:
+        update-types: ["minor", "patch"]
 
   # Notify-server
   - package-ecosystem: "npm"
@@ -23,18 +38,34 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies", "notify-server"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      notify-server-minor-patch:
+        update-types: ["minor", "patch"]
 
-  # On-chain program (Cargo workspace)
+  # On-chain program (Cargo workspace). Anchor is pinned to 0.32.1, so even a
+  # minor bump (0.32 -> 0.33) is breaking — allow patch updates only.
   - package-ecosystem: "cargo"
     directory: "/dead-mans-vault"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies", "program"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      program-patch:
+        update-types: ["patch"]
 
-  # GitHub Actions workflows
+  # GitHub Actions workflows (major bumps here are low-risk; grouped into one PR)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     labels: ["dependencies", "ci"]
+    groups:
+      github-actions:
+        patterns: ["*"]
