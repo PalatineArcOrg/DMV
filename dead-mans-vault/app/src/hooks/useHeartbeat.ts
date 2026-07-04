@@ -10,6 +10,7 @@ import { useVaultStore } from '../store/useVaultStore';
 import { useDemoStore } from '../store/useDemoStore';
 import { NotificationService } from '../notifications/NotificationService';
 import { PushRegistrationService } from '../services/PushRegistrationService';
+import { useMobileWallet } from '../utils/useMobileWallet';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS, PROGRAM_ID } from '../utils/constants';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
@@ -38,6 +39,9 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
   const heartbeatStatus = useHeartbeatStore((s) => s.status);
   const escalationState = useEscalationStore((s) => s.state);
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
+  // Owner wallet message signer — used to sign the notify-server registration so
+  // it can't be forged with the (extractable) shared secret.
+  const { signMessage } = useMobileWallet();
 
   const heartbeatServiceRef = useRef<HeartbeatService | null>(null);
   const escalationServiceRef = useRef<EscalationService | null>(null);
@@ -111,11 +115,16 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
           [Buffer.from('vault'), ownerPubkey.toBuffer()],
           new PublicKey(PROGRAM_ID),
         );
-        PushRegistrationService.register(ownerPubkey.toBase58(), vaultPda.toBase58(), {
-          stage1: escConfig.stage1Duration,
-          stage2: escConfig.stage2Duration,
-          stage3: escConfig.stage3Duration,
-        })
+        PushRegistrationService.register(
+          ownerPubkey.toBase58(),
+          vaultPda.toBase58(),
+          {
+            stage1: escConfig.stage1Duration,
+            stage2: escConfig.stage2Duration,
+            stage3: escConfig.stage3Duration,
+          },
+          signMessage,
+        )
           // FCM primary, local timeline as fallback: if the server is watching
           // this vault it delivers the escalation alerts, so cancel the local
           // pre-scheduled timeline to avoid duplicate notifications. If it isn't

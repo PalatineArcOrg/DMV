@@ -1,7 +1,6 @@
 import { PublicKey, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { VaultTransactionService } from './VaultTransactionService';
 import { KeyManager } from '../tee/KeyManager';
-import { PushRegistrationService } from './PushRegistrationService';
 import { useVaultStore } from '../store/useVaultStore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
@@ -68,12 +67,10 @@ export async function revokeVault(
     throw new NotOwnerError();
   }
 
-  // Stop server-side push escalation for this vault (best-effort; the server
-  // also auto-drops it once it sees the vault closed on-chain).
-  try {
-    const [vaultPda] = txService.getVaultPDA(publicKey);
-    PushRegistrationService.deregister(vaultPda.toBase58()).catch(() => {});
-  } catch {}
+  // Server-side push escalation is stopped automatically: once this revoke closes
+  // the vault on-chain, the notify-server's poller auto-drops the registration
+  // (deregister now requires an owner signature, so we don't do a separate signed
+  // call here — the on-chain close is the source of truth and needs no extra prompt).
 
   // Owner balance BEFORE anything — used to measure the true total returned.
   const ownerBalBefore = await connection.getBalance(publicKey, 'confirmed');

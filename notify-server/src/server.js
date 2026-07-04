@@ -5,14 +5,16 @@ import { config, isDev, assertSecureConfig } from './config.js';
 import {
   upsertRegistration,
   deleteRegistration,
-  deleteRegistrationsByOwner,
   countRegistrations,
   allRegistrations,
+  claimNonce,
+  pruneNonces,
 } from './db.js';
 import { fcmReady } from './fcm.js';
 import { startPoller, pollOnce } from './poller.js';
 import { executorReady, crankerPubkey, runExecutor } from './executor.js';
 import { readVaultState, verifyVaultForOwner } from './solana.js';
+import { validateRegister, validateDeregister, SIG_WINDOW_SEC } from './registerAuth.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -65,6 +67,13 @@ setInterval(() => {
   const now = Date.now();
   for (const [ip, b] of rateBuckets) if (now >= b.resetAt) rateBuckets.delete(ip);
   for (const [k, v] of vaultCache) if (now - v.at >= VAULT_CACHE_TTL_MS) vaultCache.delete(k);
+  // Used nonces older than 2× the signature window can be dropped — a replay that
+  // old is already rejected by the timestamp check.
+  try {
+    pruneNonces(Math.floor(now / 1000) - 2 * SIG_WINDOW_SEC);
+  } catch {
+    /* non-fatal */
+  }
 }, RATE_WINDOW_MS).unref();
 
 // Strip any api-key from an RPC URL before exposing it (/health is public via Caddy).
@@ -87,6 +96,13 @@ function isPubkey(s) {
     return false;
   }
 }
+
+// Dependencies passed to the owner-signed register/deregister validators.
+const authDeps = {
+  verifyVaultForOwner,
+  claimNonce,
+  now: () => Math.floor(Date.now() / 1000),
+};
 
 // Constant-time comparison of the shared secret to avoid a timing side-channel.
 function secretMatches(provided) {
@@ -176,49 +192,20 @@ app.get('/inheritances', rateLimit, async (req, res) => {
 });
 
 app.post('/register', requireSecret, async (req, res) => {
-  const { owner, vault, deviceToken, stage1, stage2, stage3 } = req.body || {};
-  if (!isPubkey(owner) || !isPubkey(vault)) {
-    return res.status(400).json({ error: 'invalid owner/vault pubkey' });
-  }
-  if (typeof deviceToken !== 'string' || deviceToken.length < 10) {
-    return res.status(400).json({ error: 'invalid deviceToken' });
-  }
-  const s1 = Number(stage1), s2 = Number(stage2), s3 = Number(stage3);
-  if (![s1, s2, s3].every((n) => Number.isFinite(n) && n > 0)) {
-    return res.status(400).json({ error: 'invalid stage durations' });
-  }
-
-  // Ownership proof: `vault` must be the canonical PDA for `owner` and a real
-  // on-chain DMV VaultConfig whose stored owner matches. Blocks garbage/mismatched
-  // registrations and fake-vault injection into /inheritances.
-  //
-  // Residual gap (documented, not closed here): this does not prove the CALLER
-  // controls the owner wallet, so a party holding the (extractable) shared secret
-  // could still re-point an existing owner's real vault to a different device
-  // token — hijacking or silencing that vault's escalation pushes. Closing that
-  // needs an owner-wallet signature over {vault, deviceToken, ts}; tracked as a
-  // follow-up (requires an app-side MWA signMessage on register).
-  let verdict;
-  try {
-    verdict = await verifyVaultForOwner(owner, vault);
-  } catch {
-    return res.status(502).json({ error: 'vault verification unavailable' });
-  }
-  if (!verdict.ok) {
-    return res.status(403).json({ error: `vault verification failed: ${verdict.reason}` });
-  }
-
-  upsertRegistration({ owner, vault, deviceToken, stage1: s1, stage2: s2, stage3: s3 });
-  console.log(`[register] vault ${vault.slice(0, 8)} owner ${owner.slice(0, 8)} token ${deviceToken.slice(0, 12)}… stages ${s1}/${s2}/${s3}`);
+  const r = await validateRegister(req.body, authDeps);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  upsertRegistration(r.registration);
+  // Never log the raw device token or signature.
+  console.log(`[register] vault ${r.registration.vault.slice(0, 8)} owner ${r.registration.owner.slice(0, 8)} stages ${r.registration.stage1}/${r.registration.stage2}/${r.registration.stage3}`);
   res.json({ ok: true });
 });
 
-app.post('/deregister', requireSecret, (req, res) => {
-  const { vault, owner } = req.body || {};
-  let removed = 0;
-  if (vault && isPubkey(vault)) removed += deleteRegistration(vault);
-  else if (owner && isPubkey(owner)) removed += deleteRegistrationsByOwner(owner);
-  else return res.status(400).json({ error: 'vault or owner required' });
+app.post('/deregister', requireSecret, async (req, res) => {
+  // Owner-signed, deregister-by-vault only. The unsigned deregister-by-owner path
+  // was removed — it let a shared-secret holder silence another owner's vault.
+  const r = await validateDeregister(req.body, authDeps);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  const removed = deleteRegistration(r.vault);
   res.json({ ok: true, removed });
 });
 

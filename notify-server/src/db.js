@@ -23,6 +23,18 @@ db.exec(`
   );
 `);
 
+// Replay guard for owner-signed register/deregister: each (owner, nonce) is
+// single-use. Old rows are pruned (a stale nonce is also rejected by the
+// timestamp window, so they don't need to be kept long).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS used_nonces (
+    owner    TEXT NOT NULL,
+    nonce    TEXT NOT NULL,
+    used_at  INTEGER NOT NULL,
+    PRIMARY KEY (owner, nonce)
+  );
+`);
+
 const upsertStmt = db.prepare(`
   INSERT INTO registrations (vault, owner, device_token, stage1, stage2, stage3, last_stage, last_notified_at, created_at, updated_at)
   VALUES (@vault, @owner, @device_token, @stage1, @stage2, @stage3, 0, 0, @now, @now)
@@ -64,4 +76,19 @@ export function updateNotifyState(vault, lastStage, lastNotifiedAt) {
 
 export function countRegistrations() {
   return db.prepare('SELECT COUNT(*) AS n FROM registrations').get().n;
+}
+
+// Atomically claim a nonce for an owner. Returns true if it was fresh (claimed),
+// false if it had already been used — so the caller rejects replays without a
+// separate read (no TOCTOU race).
+const claimNonceStmt = db.prepare(
+  'INSERT OR IGNORE INTO used_nonces (owner, nonce, used_at) VALUES (?, ?, ?)',
+);
+export function claimNonce(owner, nonce, usedAt) {
+  return claimNonceStmt.run(owner, nonce, usedAt).changes === 1;
+}
+
+const pruneNoncesStmt = db.prepare('DELETE FROM used_nonces WHERE used_at < ?');
+export function pruneNonces(olderThan) {
+  return pruneNoncesStmt.run(olderThan).changes;
 }
