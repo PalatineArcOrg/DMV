@@ -18,8 +18,8 @@ jobs:
       run:
         working-directory: notify-server
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
       - run: npm install
@@ -35,8 +35,8 @@ jobs:
       run:
         working-directory: dead-mans-vault/app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: '24' # needed for `node --test` TypeScript type-stripping
       - run: yarn install --frozen-lockfile
@@ -57,9 +57,9 @@ jobs:
       run:
         working-directory: dead-mans-vault
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
 
