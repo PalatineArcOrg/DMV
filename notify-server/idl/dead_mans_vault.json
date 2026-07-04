@@ -2195,6 +2195,16 @@
       "code": 6038,
       "name": "InvalidSolBequest",
       "msg": "A SOL bequest must have is_nft = false and a non-zero amount"
+    },
+    {
+      "code": 6039,
+      "name": "KeeperBountyTooLarge",
+      "msg": "Keeper bounty exceeds the maximum allowed"
+    },
+    {
+      "code": 6040,
+      "name": "NothingToDistribute",
+      "msg": "Mint has no vault balance and no bequest — nothing to distribute"
     }
   ],
   "types": [
