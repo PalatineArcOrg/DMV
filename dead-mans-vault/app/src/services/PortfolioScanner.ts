@@ -5,7 +5,7 @@ import { DeFiDetector } from '../defi/detector';
 import { KNOWN_TOKEN_SYMBOLS } from '../defi/registry';
 import { fetchWithRetry, rpcWithRetry } from '../utils/fetchWithRetry';
 import { metadataPda, parseMetadataAccount } from './metaplexMetadata';
-import { getNftMeta, setNftMeta } from '../db/nftMetaRepo';
+import { getNftMeta, setNftMeta, NftMeta } from '../db/nftMetaRepo';
 import type {
   DASGetAssetsByOwnerResult,
   PythPriceFeed,
@@ -121,45 +121,63 @@ export class PortfolioScanner {
   private async enrichNftMetadata(
     nfts: { balance: TokenBalance; mint: PublicKey }[],
   ): Promise<void> {
-    // 1. Cache hits first — NFTs are immutable so a cached entry is authoritative.
-    const uncached: { balance: TokenBalance; mint: PublicKey }[] = [];
+    const meta = await this.resolveNftMetadata(nfts.map((n) => n.mint));
     for (const n of nfts) {
-      const cached = await getNftMeta(n.mint.toBase58());
-      if (cached) {
-        n.balance.symbol = cached.name || cached.symbol || n.balance.symbol;
-        if (cached.image) n.balance.image = cached.image;
-      } else {
-        uncached.push(n);
-      }
+      const m = meta.get(n.mint.toBase58());
+      if (!m) continue;
+      n.balance.symbol = m.name || m.symbol || n.balance.symbol;
+      if (m.image) n.balance.image = m.image;
     }
-    if (uncached.length === 0) return;
+  }
+
+  /**
+   * Resolve {name, symbol, image} for a list of NFT mints — provider-agnostic
+   * (cache → on-chain Metaplex Metadata PDA → the metadata `uri` JSON for the
+   * image), cache-first and batched with a small image-fetch concurrency pool.
+   * Returns a Map keyed by base58 mint; mints that don't resolve are absent.
+   *
+   * This is the reusable core behind both the owner-wallet portfolio scan and
+   * the VAULT's held NFTs (Bequests picker + vault asset views). It needs no DAS:
+   * a vault can only hold standard (non-compressed) NFTs — deposits are SPL token
+   * transfers into the vault ATA, and cNFTs have no token account — and standard
+   * NFTs always carry a Metadata PDA.
+   */
+  async resolveNftMetadata(mints: PublicKey[]): Promise<Map<string, NftMeta>> {
+    const out = new Map<string, NftMeta>();
+    if (mints.length === 0) return out;
+
+    // 1. Cache hits first — NFTs are immutable so a cached entry is authoritative.
+    const uncached: PublicKey[] = [];
+    for (const mint of mints) {
+      const key = mint.toBase58();
+      if (out.has(key)) continue; // de-dupe repeated mints
+      const cached = await getNftMeta(key);
+      if (cached) out.set(key, cached);
+      else uncached.push(mint);
+    }
+    if (uncached.length === 0) return out;
 
     // 2. Batch-read the Metadata accounts (chunk <=100) and parse name/symbol/uri.
     const parsed = new Map<string, { name: string; symbol: string; uri: string }>();
     for (let i = 0; i < uncached.length; i += 100) {
       const chunk = uncached.slice(i, i + 100);
       const infos = await this.connection.getMultipleAccountsInfo(
-        chunk.map((n) => metadataPda(n.mint)),
+        chunk.map((m) => metadataPda(m)),
       );
       infos.forEach((info, idx) => {
         if (!info?.data) return;
         const md = parseMetadataAccount(info.data as Buffer);
-        if (md) parsed.set(chunk[idx].mint.toBase58(), md);
+        if (md) parsed.set(chunk[idx].toBase58(), md);
       });
     }
 
-    // 3. Apply names immediately; fetch images (uri JSON) with a small concurrency pool.
-    const withMeta = uncached.filter((n) => parsed.has(n.mint.toBase58()));
-    for (const n of withMeta) {
-      const md = parsed.get(n.mint.toBase58())!;
-      n.balance.symbol = md.name || md.symbol || n.balance.symbol;
-    }
+    // 3. Fetch images (uri JSON) with a small concurrency pool; cache each result.
+    const withMeta = uncached.filter((m) => parsed.has(m.toBase58()));
     let cursor = 0;
     const worker = async (): Promise<void> => {
       while (cursor < withMeta.length) {
-        const n = withMeta[cursor++];
-        const mintStr = n.mint.toBase58();
-        const md = parsed.get(mintStr)!;
+        const key = withMeta[cursor++].toBase58();
+        const md = parsed.get(key)!;
         let image: string | null = null;
         try {
           if (md.uri) {
@@ -170,9 +188,10 @@ export class PortfolioScanner {
         } catch {
           // missing/unreachable image is fine — name still resolves
         }
-        if (image) n.balance.image = image;
+        const meta: NftMeta = { name: md.name, symbol: md.symbol, image };
+        out.set(key, meta);
         try {
-          await setNftMeta(mintStr, { name: md.name, symbol: md.symbol, image });
+          await setNftMeta(key, meta);
         } catch {
           // cache write is best-effort
         }
@@ -181,6 +200,7 @@ export class PortfolioScanner {
     await Promise.all(
       Array.from({ length: Math.min(4, withMeta.length) }, () => worker()),
     );
+    return out;
   }
 
   /**

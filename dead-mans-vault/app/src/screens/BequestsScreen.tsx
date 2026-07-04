@@ -3,6 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -18,6 +19,8 @@ import { useWallet } from '../hooks/useWallet';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePortfolioStore } from '../store/usePortfolioStore';
 import { VaultTransactionService } from '../services/VaultTransactionService';
+import { PortfolioScanner } from '../services/PortfolioScanner';
+import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import type { AssetAssignment } from '../types/vault';
 
 const MAX_ASSIGNMENTS_PER_TX = 18; // single-tx cap (1232-byte limit; 64 is storage)
@@ -30,6 +33,7 @@ interface DraftAssignment {
   uiAmount: string;
   beneficiaryIndex: number;
   holding: number;
+  image?: string; // NFT thumbnail (resolved from metadata) so the picker isn't just an address
 }
 
 // An asset actually held by the vault (what a bequest can carve out).
@@ -38,6 +42,7 @@ interface VaultAsset {
   symbol: string;
   decimals: number;
   amount: number; // ui amount held by the vault (distributable SOL, or token balance)
+  image?: string; // NFT thumbnail (resolved from metadata)
 }
 
 export function BequestsScreen() {
@@ -81,13 +86,24 @@ export function BequestsScreen() {
       // Distributable SOL = vault balance − rent − reserved keeper bounty.
       const solAmount = info ? Math.max(0, (info.lamports - rent - KEEPER_BOUNTY_LAMPORTS) / 1e9) : 0;
       const tokens = await txService.getVaultTokenBalances(vaultPda);
+      // Resolve name + image for the vault's mints (cache-first, provider-agnostic)
+      // so the picker shows the actual NFT, not a bare address. Best-effort.
+      let meta = new Map<string, { name: string; symbol: string; image: string | null }>();
+      try {
+        const scanner = new PortfolioScanner(getRpcUrl(), getHeliusApiKey());
+        meta = await scanner.resolveNftMetadata(tokens.map((t) => t.mint));
+      } catch {
+        // fall back to symbol-only below
+      }
       const tokenAssets: VaultAsset[] = tokens.map((t) => {
+        const m = meta.get(t.mint.toBase58());
         const known = balances.find((b: any) => b.mint?.toBase58?.() === t.mint.toBase58());
         return {
           mint: t.mint,
-          symbol: known?.symbol ?? `${t.mint.toBase58().slice(0, 4)}…`,
+          symbol: m?.name || m?.symbol || known?.symbol || `${t.mint.toBase58().slice(0, 4)}…`,
           decimals: t.decimals,
           amount: t.uiAmount,
+          image: m?.image ?? (known as any)?.image ?? undefined,
         };
       });
       const result: VaultAsset[] = [{ mint: PublicKey.default, symbol: 'SOL', decimals: 9, amount: solAmount }, ...tokenAssets];
@@ -181,6 +197,7 @@ export function BequestsScreen() {
         uiAmount: first.decimals === 0 && first.amount === 1 ? '1' : '',
         beneficiaryIndex: beneficiaries[0].index,
         holding: first.amount,
+        image: first.image,
       },
     ]);
   };
@@ -203,6 +220,7 @@ export function BequestsScreen() {
       isNft: nft,
       uiAmount: nft ? '1' : '',
       holding: next.amount,
+      image: next.image,
     });
   };
 
@@ -328,6 +346,7 @@ export function BequestsScreen() {
               <View style={styles.row}>
                 <Text style={styles.cardLabel}>Asset</Text>
                 <TouchableOpacity style={styles.pill} onPress={() => cycleAsset(i)}>
+                  {d.image ? <Image source={{ uri: d.image }} style={styles.pillThumb} /> : null}
                   <Text style={styles.pillText}>
                     {d.symbol || `${d.mint.slice(0, 6)}…`}{d.isNft ? ' · NFT' : ''}
                   </Text>
@@ -416,6 +435,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   cardLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 13, fontFamily: FONTS.primary },
   pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'rgba(0,255,163,0.08)',
     borderWidth: 1,
     borderColor: 'rgba(0,255,163,0.25)',
@@ -424,6 +445,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   pillText: { color: COLORS.accent, fontSize: 13, fontFamily: FONTS.primaryMedium },
+  pillThumb: { width: 20, height: 20, borderRadius: 5, marginRight: 8, backgroundColor: 'rgba(255,255,255,0.06)' },
   input: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,

@@ -77,6 +77,7 @@ export function AssetsScreen() {
   const [vaultSolBalance, setVaultSolBalance] = useState(0);
   const [vaultTokenCount, setVaultTokenCount] = useState(0);
   const [vaultTokenLabels, setVaultTokenLabels] = useState<string[]>([]);
+  const [vaultNfts, setVaultNfts] = useState<{ mint: string; symbol: string; image?: string }[]>([]);
 
   // Sync DeFi positions from usePortfolio (handles both new data and wallet-switch clear)
   useEffect(() => {
@@ -105,10 +106,36 @@ export function AssetsScreen() {
         }
         const tokens = await txService.getVaultTokenBalances(vaultPda);
         setVaultTokenCount(tokens.length);
+        // Resolve name + image for the vault's mints so NFTs show as themselves,
+        // not a bare address (cache-first, provider-agnostic). Best-effort.
+        let meta = new Map<string, { name: string; symbol: string; image: string | null }>();
+        try {
+          const { PortfolioScanner } = require('../services/PortfolioScanner');
+          const { getRpcUrl, getHeliusApiKey } = require('../utils/rpcConfig');
+          const scanner = new PortfolioScanner(getRpcUrl(), getHeliusApiKey());
+          meta = await scanner.resolveNftMetadata(tokens.map((t: any) => t.mint));
+        } catch {
+          // symbol-only fallback below
+        }
         setVaultTokenLabels(tokens.map((t: any) => {
+          const m = meta.get(t.mint.toBase58());
           const match = balances.find((b) => b.mint.toString() === t.mint.toString());
-          return match?.symbol ?? t.mint.toString().slice(0, 6);
+          return m?.name || m?.symbol || match?.symbol || t.mint.toString().slice(0, 6);
         }));
+        // Vault-held NFTs (0-decimals, single unit) with resolved name + thumbnail.
+        setVaultNfts(
+          tokens
+            .filter((t: any) => t.decimals === 0 && t.uiAmount === 1)
+            .map((t: any) => {
+              const m = meta.get(t.mint.toBase58());
+              const match = balances.find((b) => b.mint.toString() === t.mint.toString());
+              return {
+                mint: t.mint.toBase58(),
+                symbol: m?.name || m?.symbol || match?.symbol || `${t.mint.toBase58().slice(0, 4)}…`,
+                image: m?.image ?? (match as any)?.image ?? undefined,
+              };
+            }),
+        );
       } catch {
         // Non-fatal
       }
@@ -191,6 +218,27 @@ export function AssetsScreen() {
           </View>
           <MaterialCommunityIcons name="chevron-right" size={16} color="rgba(255,255,255,0.3)" />
         </TouchableOpacity>
+      )}
+
+      {/* NFTs currently held by the vault (shown with name + thumbnail). */}
+      {isSetupComplete && !vaultConfig?.executed && vaultNfts.length > 0 && (
+        <View style={styles.vaultNftSection}>
+          <Text style={styles.vaultNftHeader}>NFTs in your vault</Text>
+          {vaultNfts.map((nft, i) => (
+            <View key={i} style={[styles.tokenRow, i < vaultNfts.length - 1 && styles.tokenRowBorder]}>
+              <TokenIcon symbol={nft.symbol} logoUri={nft.image} />
+              <View style={styles.tokenInfo}>
+                <View style={styles.tokenNameRow}>
+                  <Text style={styles.tokenSymbol} numberOfLines={1}>{nft.symbol}</Text>
+                  <View style={styles.nftBadge}><Text style={styles.nftBadgeText}>NFT</Text></View>
+                </View>
+                <Text style={styles.tokenAmount} numberOfLines={1}>
+                  {nft.mint.slice(0, 4)}…{nft.mint.slice(-4)}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
       )}
 
       {/* Segment Tabs */}
@@ -406,6 +454,8 @@ const styles = StyleSheet.create({
   vaultDepositsIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(0,255,163,0.1)', alignItems: 'center', justifyContent: 'center' },
   vaultDepositsTitle: { fontSize: 12, fontWeight: '600', color: COLORS.accent, fontFamily: FONTS.primarySemiBold },
   vaultDepositsValue: { fontSize: 11, color: 'rgba(255,255,255,0.5)', fontFamily: FONTS.primary, marginTop: 2 },
+  vaultNftSection: { backgroundColor: COLORS.surface, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(0,255,163,0.15)', paddingHorizontal: 14, paddingVertical: 6, marginHorizontal: 16, marginBottom: 12 },
+  vaultNftHeader: { fontSize: 11, fontWeight: '600', color: COLORS.accent, fontFamily: FONTS.primarySemiBold, marginTop: 8, marginBottom: 4, letterSpacing: 0.5 },
 
   // Segment tabs
   segmentContainer: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 12, backgroundColor: COLORS.surface, borderRadius: 12, padding: 3 },
