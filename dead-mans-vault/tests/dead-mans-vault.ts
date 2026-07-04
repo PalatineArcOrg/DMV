@@ -687,6 +687,23 @@ describe("dead-mans-vault — permissionless execution", () => {
         S.sol = { owner, b: [b1, b2, b3], ...p };
       }
 
+      // --- scenario: permissionless close (keeper claims rents after window) ---
+      {
+        const owner = Keypair.generate();
+        await fund(owner.publicKey, 5);
+        const b1 = Keypair.generate(), b2 = Keypair.generate();
+        const p = await initVault({
+          owner,
+          agent: agent.publicKey,
+          beneficiaries: [
+            { wallet: b1.publicKey, shareBps: 6000 }, // definitive largest (dust target)
+            { wallet: b2.publicKey, shareBps: 4000 },
+          ],
+        });
+        await depositSol(owner, p.vault, 1 * LAMPORTS_PER_SOL + 3);
+        S.pclose = { owner, b: [b1, b2], ...p };
+      }
+
       // --- scenario: specific SPL bequest + NFT + residual ---
       {
         const owner = Keypair.generate();
@@ -925,6 +942,30 @@ describe("dead-mans-vault — permissionless execution", () => {
       expect(b2After - b2Before).to.equal(dust);
       const ownerBalAfter = await conn.getBalance(s.owner.publicKey);
       expect(ownerBalAfter).to.be.greaterThan(ownerBalBefore); // rent returned
+    });
+
+    it("permissionless close: blocked during the owner window (CloseDelayNotElapsed)", async () => {
+      const s = S.pclose;
+      await beginExec(s);
+      await solShares(s, [0, 1], s.b.map((k: any) => k.publicKey));
+      await finalize(s, false);
+      const v = await program.account.vaultConfig.fetch(s.vault);
+      expect(v.executed).to.be.true;
+      const log = await program.account.executionLog.fetch(s.execution);
+      s.startedAt = log.startedAt.toNumber();
+
+      // Inside the 60s devnet window the keeper close must be rejected —
+      // a living owner keeps first claim on their own rent.
+      try {
+        await program.methods
+          .closeExecutedVault()
+          .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, executionLog: s.execution, assetPlan: null, largestBenef: s.b[0].publicKey })
+          .signers([cranker])
+          .rpc();
+        expect.fail("permissionless close should be blocked inside the owner window");
+      } catch (e: any) {
+        expectErr(e, "CloseDelayNotElapsed");
+      }
     });
 
     it("specific SPL bequest + NFT + pro-rata token residual (permissionless)", async () => {
@@ -1356,6 +1397,54 @@ describe("dead-mans-vault — permissionless execution", () => {
       await finalize(s, true);
       const v = await program.account.vaultConfig.fetch(s.vault);
       expect(v.executed).to.be.true;
+    });
+
+    // Runs LAST: the intervening tests consume most of the 60s devnet window
+    // opened in the "blocked during the owner window" test above.
+    it("permissionless close after the window: rents → cranker, dust → largest benef", async function () {
+      this.timeout(120000);
+      const s = S.pclose;
+
+      // Wait out the remainder of the owner-exclusive window (devnet: 60s).
+      // Poll the ON-CHAIN clock — the local validator's unix_timestamp can lag
+      // wall-clock under load, and the program checks Clock, not our watch.
+      const target = s.startedAt + 60 + 2;
+      for (;;) {
+        const slot = await conn.getSlot();
+        const chainNow = await conn.getBlockTime(slot);
+        if (chainNow !== null && chainNow >= target) break;
+        await sleep(2000);
+      }
+
+      // Dust above the VaultConfig rent goes to the largest-share beneficiary;
+      // the cranker collects exactly the three PDA rents (minus its tx fee).
+      const vaultInfo = await conn.getAccountInfo(s.vault);
+      const rentMin = await conn.getMinimumBalanceForRentExemption(vaultInfo!.data.length);
+      const dust = vaultInfo!.lamports - rentMin;
+      const rents =
+        rentMin +
+        (await conn.getBalance(s.heartbeat)) +
+        (await conn.getBalance(s.execution));
+
+      const crankerBefore = await conn.getBalance(cranker.publicKey);
+      const b0Before = await conn.getBalance(s.b[0].publicKey);
+      await program.methods
+        .closeExecutedVault()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, executionLog: s.execution, assetPlan: null, largestBenef: dust > 0 ? s.b[0].publicKey : null })
+        .signers([cranker])
+        .rpc();
+
+      expect(await conn.getAccountInfo(s.vault)).to.be.null;
+      expect(await conn.getAccountInfo(s.heartbeat)).to.be.null;
+      expect(await conn.getAccountInfo(s.execution)).to.be.null;
+      if (dust > 0) {
+        expect((await conn.getBalance(s.b[0].publicKey)) - b0Before).to.equal(dust);
+      }
+      const crankerAfter = await conn.getBalance(cranker.publicKey);
+      // cranker gain = all three rents, net of tx fees (≤ 2 signatures × 5000)
+      const gain = crankerAfter - crankerBefore;
+      expect(gain).to.be.at.least(rents - 10000);
+      expect(gain).to.be.at.most(rents);
     });
   });
 });

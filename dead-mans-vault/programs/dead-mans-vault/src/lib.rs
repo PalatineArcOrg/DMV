@@ -57,6 +57,12 @@ pub mod dead_mans_vault {
         instructions::close_executed_vault_by_owner::handler(ctx)
     }
 
+    /// Permissionless keeper cleanup of an executed vault after the
+    /// owner-exclusive window — rents → payer, dust → largest-share beneficiary.
+    pub fn close_executed_vault(ctx: Context<CloseExecutedVault>) -> Result<()> {
+        instructions::close_executed_vault::handler(ctx)
+    }
+
     pub fn withdraw_from_vault(
         ctx: Context<WithdrawFromVault>,
         amount: u64,

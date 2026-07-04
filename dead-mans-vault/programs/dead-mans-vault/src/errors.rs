@@ -126,4 +126,7 @@ pub enum VaultError {
 
     #[msg("Mint has no vault balance and no bequest — nothing to distribute")]
     NothingToDistribute,
+
+    #[msg("Owner-exclusive close window has not elapsed yet")]
+    CloseDelayNotElapsed,
 }

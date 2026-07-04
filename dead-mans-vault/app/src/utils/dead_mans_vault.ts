@@ -286,6 +286,146 @@ export type DeadMansVault = {
       "args": []
     },
     {
+      "name": "closeExecutedVault",
+      "docs": [
+        "Permissionless keeper cleanup of an executed vault after the",
+        "owner-exclusive window — rents → payer, dust → largest-share beneficiary."
+      ],
+      "discriminator": [
+        194,
+        143,
+        104,
+        253,
+        159,
+        57,
+        16,
+        130
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executionLog",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  101,
+                  99,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "assetPlan",
+          "docs": [
+            "Present iff `vault_config.has_asset_plan`. Closed manually (rent → payer)",
+            "so the PDA slot frees for a future re-init on the same wallet."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "largestBenef",
+          "docs": [
+            "Required only when SOL dust remains to be swept."
+          ],
+          "writable": true,
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "closeExecutedVaultByOwner",
       "discriminator": [
         150,
@@ -2193,6 +2333,11 @@ export type DeadMansVault = {
       "code": 6040,
       "name": "nothingToDistribute",
       "msg": "Mint has no vault balance and no bequest — nothing to distribute"
+    },
+    {
+      "code": 6041,
+      "name": "closeDelayNotElapsed",
+      "msg": "Owner-exclusive close window has not elapsed yet"
     }
   ],
   "types": [

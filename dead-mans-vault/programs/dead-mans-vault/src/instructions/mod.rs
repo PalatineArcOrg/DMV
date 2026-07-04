@@ -8,6 +8,7 @@ pub mod update_vault;
 pub mod withdraw_from_vault;
 pub mod withdraw_sol_from_vault;
 pub mod close_executed_vault_by_owner;
+pub mod close_executed_vault;
 
 // Permissionless autonomous execution + specific bequests (v2)
 pub mod set_asset_plan;
@@ -30,6 +31,7 @@ pub use update_vault::*;
 pub use withdraw_from_vault::*;
 pub use withdraw_sol_from_vault::*;
 pub use close_executed_vault_by_owner::*;
+pub use close_executed_vault::*;
 
 pub use set_asset_plan::*;
 pub use update_asset_plan::*;

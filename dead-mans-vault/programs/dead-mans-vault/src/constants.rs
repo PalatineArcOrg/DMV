@@ -36,6 +36,17 @@ pub const MIN_GRACE_PERIOD: i64 = 30;
 #[cfg(not(feature = "devnet"))]
 pub const MIN_GRACE_PERIOD: i64 = 604_800; // 7 days
 
+// Owner-exclusive window after execution begins, before the permissionless
+// `close_executed_vault` may claim the core-PDA rents. A living owner can close
+// (and reclaim rent) any time via `close_executed_vault_by_owner`; after this
+// window, anyone may close and take the otherwise-stranded rents as a keeper
+// reward (a dead owner's rent would strand forever). 24 h in production; 60 s
+// under the `devnet` feature so tests/demos aren't stuck waiting.
+#[cfg(feature = "devnet")]
+pub const EXECUTED_CLOSE_DELAY: i64 = 60;
+#[cfg(not(feature = "devnet"))]
+pub const EXECUTED_CLOSE_DELAY: i64 = 86_400; // 24 hours
+
 /// Maximum beneficiaries per vault. Tracked with a u32 paid-mask.
 pub const MAX_BENEFICIARIES: usize = 20;
 
@@ -73,11 +84,13 @@ mod tests {
         {
             assert_eq!(MIN_HEARTBEAT_INTERVAL, 10);
             assert_eq!(MIN_GRACE_PERIOD, 30);
+            assert_eq!(EXECUTED_CLOSE_DELAY, 60);
         }
         #[cfg(not(feature = "devnet"))]
         {
             assert_eq!(MIN_HEARTBEAT_INTERVAL, 86_400);
             assert_eq!(MIN_GRACE_PERIOD, 604_800);
+            assert_eq!(EXECUTED_CLOSE_DELAY, 86_400);
         }
     }
 }
