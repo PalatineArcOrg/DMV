@@ -241,7 +241,7 @@ async function runExecutorInner(ctx, vaultStr) {
     execLog = await program.account.executionLog.fetch(execPda);
   }
 
-  const plan = hasPlan ? await program.account.assetPlan.fetch(assetPlanPda(vault)) : null;
+  let plan = hasPlan ? await program.account.assetPlan.fetch(assetPlanPda(vault)) : null;
   const mints = await collectMints(connection, vault, plan);
 
   // 2. begin_token_dist per mint (freeze each residual). No token_program arg.
@@ -329,8 +329,12 @@ async function runExecutorInner(ctx, vaultStr) {
       .rpc();
   }
 
-  // 5. finalize once SOL + specific masks are full.
+  // 5. finalize once SOL + specific masks are full. Re-fetch BOTH masks fresh —
+  // if this same run just paid the last specific bequest, the in-memory `plan`
+  // still holds the pre-payment mask, which would (wrongly) skip finalize and
+  // then trip `close_token_dist` with VaultNotExecuted.
   execLog = await program.account.executionLog.fetch(execPda);
+  if (hasPlan) plan = await program.account.assetPlan.fetch(assetPlanPda(vault));
   const solFull = bigMask(execLog.solPaidMask) === fullMask(benCount);
   const planFull = !hasPlan || bigMask(plan.paidMask) === fullMask(plan.assignments.length);
   if (!execLog.completed && solFull && planFull) {
@@ -368,7 +372,12 @@ async function runExecutorInner(ctx, vaultStr) {
   }
 
   // 7. close each TokenDist once its residual mask is full (dust → largest benef).
+  //    close_token_dist requires vault.executed — if finalize didn't run this
+  //    pass (a payout still pending), skip closing so a later pass finalizes
+  //    first, instead of throwing VaultNotExecuted and aborting the whole run.
+  const finalizedCfg = await program.account.vaultConfig.fetch(vault);
   for (const { mint, programId } of mints) {
+    if (!finalizedCfg.executed) break;
     const tdPda = tokenDistPda(vault, mint);
     const td = await program.account.tokenDist.fetchNullable(tdPda);
     if (!td) continue;
