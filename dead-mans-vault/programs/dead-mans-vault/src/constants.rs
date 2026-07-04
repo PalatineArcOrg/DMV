@@ -59,3 +59,25 @@ pub fn full_mask_u32(n: usize) -> u32 {
 pub fn full_mask_u64(n: usize) -> u64 {
     ((1u128 << n) - 1) as u64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guards against shipping the demo floors to production: a default build
+    /// MUST enforce 1 day / 7 days; only the opt-in `devnet` feature lowers them.
+    /// CI runs `cargo test` (asserts prod) and `cargo test --features devnet`.
+    #[test]
+    fn min_durations_match_build_profile() {
+        #[cfg(feature = "devnet")]
+        {
+            assert_eq!(MIN_HEARTBEAT_INTERVAL, 10);
+            assert_eq!(MIN_GRACE_PERIOD, 30);
+        }
+        #[cfg(not(feature = "devnet"))]
+        {
+            assert_eq!(MIN_HEARTBEAT_INTERVAL, 86_400);
+            assert_eq!(MIN_GRACE_PERIOD, 604_800);
+        }
+    }
+}

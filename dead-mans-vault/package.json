@@ -2,7 +2,10 @@
   "license": "ISC",
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
+    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
+    "build:prod": "anchor build",
+    "build:devnet": "anchor build -- --features devnet",
+    "test:devnet": "anchor build -- --features devnet && anchor test --skip-build"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

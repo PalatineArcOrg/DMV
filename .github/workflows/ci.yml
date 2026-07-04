@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [devnet, main, mainnet]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- Notify-server: unit tests + dependency audit ----
+  notify-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: notify-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - name: Unit tests (owner-signed register/deregister, etc.)
+        run: npm test
+      - name: Dependency audit (high/critical, prod deps)
+        run: npm audit --omit=dev --audit-level=high
+
+  # ---- Mobile app: TypeScript typecheck ----
+  app-typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dead-mans-vault/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: yarn install --frozen-lockfile
+      - name: Type-check
+        run: npx tsc --noEmit
+      - name: Dependency audit (high/critical)
+        run: yarn npm audit --severity high || yarn audit --level high || true
+
+  # ---- Anchor program: prod-safe build + devnet tests ----
+  program:
+    runs-on: ubuntu-latest
+    env:
+      SOLANA_VERSION: v3.0.15
+      ANCHOR_VERSION: '0.32.1'
+    defaults:
+      run:
+        working-directory: dead-mans-vault
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Solana (Agave)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${SOLANA_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install Anchor (avm)
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+          avm install ${ANCHOR_VERSION}
+          avm use ${ANCHOR_VERSION}
+
+      - name: Program unit tests — PROD build (guards against demo 10s/30s floors)
+        run: cargo test -p dead-mans-vault --lib
+
+      - name: Program unit tests — devnet feature (asserts demo floors)
+        run: cargo test -p dead-mans-vault --lib --features devnet
+
+      - name: Build PROD (must compile with the 1-day / 7-day minimums; no devnet feature)
+        run: anchor build
+
+      - name: Install JS deps
+        run: yarn install --frozen-lockfile
+
+      - name: Build + test with the devnet feature (runs the ts-mocha suite incl. canonical-ATA regression tests)
+        run: yarn test:devnet
+
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked || true
+          cargo audit || true

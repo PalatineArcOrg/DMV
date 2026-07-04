@@ -208,7 +208,19 @@ A second **pre-mainnet** review across the program, the keyless watcher, and the
 
 ### Tests
 
-23/23 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof), idempotency/resume, the post-grace freeze, and all setup/owner paths.
+27/27 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof, wrong fee recipient), owner Token-2022 withdrawal, idempotency/resume, the post-grace freeze, and all setup/owner paths.
+
+#### Building & testing (the `devnet` feature)
+
+The heartbeat/grace **minimums are feature-gated**. A plain build enforces the production floors (1 day / 7 days); the short demo floors (10s / 30s) that the tests rely on are behind the opt-in `devnet` Cargo feature. From `dead-mans-vault/`:
+
+```bash
+yarn test:devnet     # anchor build -- --features devnet, then the ts-mocha suite
+yarn build:devnet    # devnet build (demo minimums) — devnet only
+yarn build:prod      # PRODUCTION build (1-day / 7-day minimums) — mainnet
+```
+
+**Mainnet/production builds MUST NOT enable `devnet`.** `cargo test` guards this: it asserts the safe minimums on a default build and the demo floors under `--features devnet`, and CI runs both.
 
 ---
 
