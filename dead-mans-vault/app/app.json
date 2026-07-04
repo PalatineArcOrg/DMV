@@ -22,6 +22,7 @@
       "package": "com.romulusol.deadmansvault",
       "googleServicesFile": "./google-services.json",
       "versionCode": 85,
+      "allowBackup": false,
       "permissions": [
         "POST_NOTIFICATIONS",
         "INTERNET",
