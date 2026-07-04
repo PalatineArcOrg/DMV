@@ -25,6 +25,10 @@ updates:
       - dependency-name: "react-native-safe-area-context"
       - dependency-name: "react-native-screens"
       - dependency-name: "react-native-svg"
+      # MWA 2.2.9 uses package `exports` subpaths that Metro (Expo SDK 52) can't
+      # resolve without config — the release bundle fails. Bump deliberately, not
+      # via auto-PR.
+      - dependency-name: "@solana-mobile/*"
     groups:
       app-minor-patch:
         update-types: ["minor", "patch"]
