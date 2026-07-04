@@ -1,10 +1,16 @@
 # BUILD SPEC — Serverless Triggers (Claim + Bounty + Mutual Keeping)
 
-Status: **Phases 1-2 SHIPPED (v1.9.0, v1.10.0)** · Phase 3 pending · Owner-approved decisions locked below.
+Status: **Phases 1-2 SHIPPED (v1.9.0, v1.10.0) · Phase 2.5 SHIPPED (v1.13.5)** · Phase 3 pending · Owner-approved decisions locked below.
 Phase 1 (claim) shipped 2026-07-02: `GET /inheritances` + InheritancesScreen + ClaimService (heir-paid MWA crank, resumable).
 Phase 2 (bounty) shipped 2026-07-02: `keeper_bounty` (from padding, non-breaking) carved out at begin_execution + paid to
-the finalize cranker; 23/23 tests + devnet e2e. Known: keeper fronts the ExecutionLog rent (~0.00185 SOL) → net ≈0.003 SOL.
-Neither device-tested yet. Phase 3 (mutual keeping) is next.
+the finalize cranker. (The "keeper fronts the ExecutionLog rent" gap is closed by Phase 2.5.)
+**Phase 2.5 (keeper economics + cleanup) shipped 2026-07-04 (v1.13.5):** new permissionless `close_executed_vault` — after
+execution + a 24h owner-exclusive window (`EXECUTED_CLOSE_DELAY`, 60s under the devnet feature; `CloseDelayNotElapsed`),
+ANY payer closes the core PDAs and claims their rents (~0.01–0.03 SOL); dust still → largest-share beneficiary; the
+owner-signed close keeps priority. Plus a standalone **`keeper-bot/`** (scan → crank → bounty + rents; devnet-proven:
+first tick cranked 5 expired vaults, keeper 0.05 → 0.1625 SOL) running as `dmv-keeper.service` alongside the
+notify-server — two independent crankers. Keeper net is now positive: bounty + rents, ExecutionLog rent recovered at close.
+Phase 3 (mutual keeping) is next.
 
 ## 0. Goal
 

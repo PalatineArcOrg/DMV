@@ -8,7 +8,7 @@ Dead Man's Vault monitors an owner's liveness through configurable heartbeat che
 
 Owners can also leave **specific bequests** — exact SOL or SPL token amounts, or whole NFTs, assigned to particular beneficiaries — carved out before the remainder splits pro-rata by share.
 
-Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initialize_vault` (a `fee_recipient` account pinned by address + a CPI transfer, so it cannot be bypassed).
+Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initialize_vault` (a `fee_recipient` account pinned by address + a CPI transfer, so it cannot be bypassed). Total activation cost is **≈ 0.028 SOL** (rent + 0.005 agent funding + fee + 0.005 keeper reward).
 
 **Built for the Monolith — Solana Mobile Hackathon (Feb 2 -- Mar 9, 2026)**
 
@@ -20,7 +20,7 @@ Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initi
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.12.2)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.5)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility
@@ -57,7 +57,9 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 - **Specific bequests + pro-rata** -- Assign exact SOL or SPL token amounts, or whole NFTs, to specific beneficiaries (carved out first); the remainder splits pro-rata by share. A beneficiary can receive both.
 - **Beneficiary claim** -- Heirs can trigger a matured vault's distribution from their own wallet. The in-app **Inheritances** screen auto-discovers every vault where the connected wallet is a beneficiary (plus manual import by owner address) and runs the same permissionless crank, MWA-signed, with the heir paying fees. No owner or server action required.
 - **On-chain keeper bounty** -- Each vault can reserve a small reward (default 0.005 SOL) paid by the program to whoever cranks `finalize_execution`, making permissionless cranking profitable. It is carved out of the SOL snapshot at execution start, so it never reduces beneficiary payouts.
-- **NFT support end-to-end** -- NFTs are scanned into the portfolio, deposited into the vault as whole units, and bequeathed to specific heirs via `execute_specific_asset`. Names and images resolve **with or without Helius DAS** — an RPC-only fallback reads each NFT's on-chain Metaplex Metadata account directly (compressed NFTs remain DAS-only) and caches the result. The Assets tab has a dedicated Tokens · NFTs · DeFi split, and the Dashboard shows inline NFT and DeFi sections.
+- **Permissionless cleanup (no stranded rent)** -- After execution, a 24-hour owner-exclusive window lets a living owner close the vault and reclaim its rents; after that, `close_executed_vault` lets *anyone* close the accounts and claim the rents (~0.01–0.03 SOL) as a cleanup reward — nothing strands with a dead owner. SOL dust still goes to the largest-share beneficiary.
+- **Standalone keeper bot** (`keeper-bot/`) -- A self-contained bot anyone can run: it discovers expired vaults straight from the chain, runs the permissionless crank, and earns the bounty + cleanup rents. Every keeper running strengthens the guarantee that every vault fires — no DMV server required.
+- **NFT support end-to-end** -- NFTs are scanned into the portfolio, deposited into the vault as whole units, and bequeathed to specific heirs via `execute_specific_asset`. Names and images resolve **with or without Helius DAS** — an RPC-only fallback reads each NFT's on-chain Metaplex Metadata account directly (compressed NFTs remain DAS-only) and caches the result. The Assets tab has a dedicated Tokens · NFTs · DeFi split, the Dashboard shows inline NFT and DeFi sections, and the vault's own asset view and Bequests picker show each NFT's name + thumbnail (not just a mint address).
 - **4-stage escalation system** -- Graduated warnings (Reminder -> Alert -> Warning -> Execution) with configurable durations
 - **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key (the agent signs heartbeats only)
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
@@ -80,7 +82,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 ### Notifications
 - **Stage-aware push notifications** -- Each escalation stage triggers a specific notification with contextual details (time overdue, beneficiary count, time remaining)
 - **Server-driven delivery (single source)** -- The keyless watcher service is the sole source of escalation alerts: it watches each registered vault's heartbeat on-chain and pushes stage alerts via FCM, so they arrive even when the app is killed and there are no duplicates. (Earlier builds also pre-scheduled a local OS timeline; that was removed in v1.7.3 because it double-fired alongside the server.)
-- **Execution progress** -- Notifications for completion summary and failures
+- **Execution progress** -- "Estate plan executing" at Stage 4 and an "Estate plan complete" push once autonomous distribution finalizes on-chain (sent by the watcher — the app may never run), plus failure notifications from app-driven cranks
 - **Heartbeat confirmation** -- Notification confirms heartbeat with next due date
 - **Foreground display** -- Notifications render in-app via foreground notification handler
 
@@ -108,6 +110,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 | On-chain program | Anchor 0.32.1 (Rust) | Computes payouts; enforces who/where/when/how-much |
 | Mobile app | React Native (Expo SDK 52) | Orchestrates scanning, escalation, and the execution crank |
 | Keyless watcher | Node.js (Express + SQLite) | Pushes escalation alerts and autonomously cranks distribution after grace |
+| Keeper bot | Node.js (standalone, `keeper-bot/`) | Independently scans for expired vaults, cranks them, and collects bounty + cleanup rents |
 | State management | Zustand + SQLite | Local persistence and crash recovery |
 | Wallet integration | Solana Mobile MWA | Owner authorization via Seed Vault |
 | Key management | Android Keystore (`expo-secure-store`), biometric-gated | Agent heartbeat-signing key (Seeker Seed Vault optional) |
@@ -183,6 +186,7 @@ All external API calls use exponential backoff with jitter on HTTP 429 (rate lim
 | `execute_token_shares` | Batched token residual pro-rata payout (`transfer_checked`) |
 | `finalize_execution` | Mark executed once all SOL + bequest masks are full |
 | `close_token_dist` | Sweep dust to the largest-share beneficiary, close the vault ATA + dist record |
+| `close_executed_vault` | After execution + a 24-hour owner-exclusive window (`CloseDelayNotElapsed` before it), close the core PDAs — rents pay the closer, dust goes to the largest-share beneficiary. Un-strands a dead owner's rent and pays keepers for cleanup |
 
 All transactions include per-instruction compute unit limits and dynamic priority fees for reliable landing.
 
@@ -198,7 +202,7 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 ### Error Codes
 
-39 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), specific-bequest shape including SOL bequests (`InvalidSolBequest`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, and vault lifecycle.
+41 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), specific-bequest shape including SOL bequests (`InvalidSolBequest`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, the owner-exclusive close window (`CloseDelayNotElapsed`), and vault lifecycle.
 
 ### Security
 
@@ -208,7 +212,7 @@ A second **pre-mainnet** review across the program, the keyless watcher, and the
 
 ### Tests
 
-27/27 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof, wrong fee recipient), owner Token-2022 withdrawal, idempotency/resume, the post-grace freeze, and all setup/owner paths.
+29/29 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof, wrong fee recipient), owner Token-2022 withdrawal, idempotency/resume, the post-grace freeze, the permissionless close (blocked inside the owner window; rents → cranker + dust → largest beneficiary after it), and all setup/owner paths.
 
 #### Building & testing (the `devnet` feature)
 
@@ -295,11 +299,11 @@ React Native's Hermes runtime requires several workarounds:
 ```
 dead-mans-vault/
 +-- programs/dead-mans-vault/src/    # Anchor program (Rust)
-|   +-- instructions/                # 19 instruction handlers
+|   +-- instructions/                # 20 instruction handlers
 |   +-- state/                       # Account definitions (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist)
-|   +-- errors.rs                    # 39 error codes
+|   +-- errors.rs                    # 41 error codes
 |   +-- constants.rs                 # On-chain constants (FEE_WALLET, VAULT_CREATION_FEE_LAMPORTS) + mask helpers
-+-- tests/                           # Anchor program tests (23/23 passing)
++-- tests/                           # Anchor program tests (29/29 passing)
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
         +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.
@@ -316,6 +320,8 @@ dead-mans-vault/
 ```
 
 A sibling **keyless watcher service** (`notify-server/`) — Node.js + Express + SQLite — polls each registered vault's heartbeat, pushes FCM escalation alerts, and runs the same permissionless crank to autonomously distribute after grace. It holds no authority over funds; it pays only transaction fees from its own keypair.
+
+A standalone **keeper bot** (`keeper-bot/`) — runnable by anyone — discovers vaults directly on-chain (no registry or API), cranks expired ones, and collects the keeper bounty plus post-window cleanup rents. Two independent crankers (watcher + any keeper) mean no single service is ever a liveness dependency for the switch.
 
 ---
 

@@ -266,7 +266,7 @@ cd android && ./gradlew assembleRelease
 # Build the Anchor program
 anchor build
 
-# Run program tests (23/23 passing; execution tests use real ~40s grace waits)
+# Run program tests (29/29 passing; execution tests use real ~40s grace waits)
 anchor test
 
 # Deploy to devnet
@@ -283,8 +283,8 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **App version** | 1.12.2 (versionCode 85) |
-| **Tests** | 23/23 passing |
+| **App version** | 1.13.5 (versionCode 91) |
+| **Tests** | 29/29 passing |
 
 ---
 
@@ -295,7 +295,7 @@ anchor deploy --provider.cluster devnet
 | Program instructions | 19 |
 | Program accounts (PDAs) | 5 (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist) |
 | Program error codes | 39 |
-| Program tests | 23/23 passing |
+| Program tests | 29/29 passing |
 | App screens | 14 |
 | App services | 10 |
 | Zustand stores | 6 |

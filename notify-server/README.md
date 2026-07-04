@@ -18,7 +18,7 @@ The app registers each vault with `POST /register` (owner, vault PDA, FCM device
 - Reads each registered vault's `VaultConfig` + `HeartbeatRecord` on-chain.
 - Computes the escalation stage; on a stage transition (or throttled recurring), sends the matching FCM push.
 - **When a vault reaches stage 4 (grace elapsed)** and the executor is enabled, runs `runExecutor(vault)` — the §7 crank.
-- Drops the registration once the vault is executed, revoked, or gone (self-cleaning; stale rows never accumulate).
+- Drops the registration once the vault is executed, revoked, or gone (self-cleaning; stale rows never accumulate). If the vault **executed** after reaching stage 4, the drop tick first sends one final **"Estate plan complete"** push — in autonomous mode the app never runs, so the server is the only thing that can say the distribution finished.
 
 ### The executor crank (`src/executor.js`)
 
@@ -30,12 +30,12 @@ ensureAta(vault, mint)  per mint    # idempotently create the vault's token ATA 
 begin_token_dist(mint)  per mint    # snapshot each token residual (canonical, anti-spoof ATA)
 execute_specific_asset(j)           # pay specific SPL/NFT bequests, in order
 execute_sol_shares([...])           # SOL pro-rata, batched <=8
-finalize_execution                  # once SOL + bequest masks are full; pays the keeper bounty to the cranker
+finalize_execution                  # once SOL + bequest masks are full (masks re-fetched FRESH); pays the keeper bounty to the cranker
 execute_token_shares(mint, [...])   # token residual pro-rata, batched <=8
 close_token_dist(mint)  per mint    # sweep dust -> largest-share beneficiary, close ATA + dist
 ```
 
-It never closes the core PDAs — that final cleanup is owner-signed by design (so a buggy crank can't orphan a never-distributed mint's tokens). Beneficiary ATAs are created idempotently by the cranker as needed. The executor also creates the **vault's** token ATA idempotently *before* `begin_token_dist` (`ensureAta`) — without it, a bequest for a mint the vault doesn't actually hold throws `AccountNotInitialized` at snapshot time and freezes the owner out post-grace; with it, an unheld-mint bequest snapshots/pays 0 and finalizes cleanly. If the vault set a `keeper_bounty`, whoever lands `finalize_execution` collects it (a reward carved out of the SOL snapshot at begin, so it never reduces beneficiary payouts).
+It never closes the core PDAs — that cleanup is the owner's (`close_executed_vault_by_owner`, anytime) or, after the 24-hour owner-exclusive window, any keeper's (`close_executed_vault`, e.g. the standalone `keeper-bot/`). Both the SOL and bequest masks are **re-fetched fresh right before the finalize gate** — a pass that just paid the last bequest would otherwise compare a stale in-memory mask, skip finalize, and abort on `close_token_dist` (`VaultNotExecuted`); the close loop is also guarded on a fresh `executed` check. Beneficiary ATAs are created idempotently by the cranker as needed. The executor also creates the **vault's** token ATA idempotently *before* `begin_token_dist` (`ensureAta`) — without it, a bequest for a mint the vault doesn't actually hold throws `AccountNotInitialized` at snapshot time and freezes the owner out post-grace; with it, an unheld-mint bequest snapshots/pays 0 and finalizes cleanly. If the vault set a `keeper_bounty`, whoever lands `finalize_execution` collects it (a reward carved out of the SOL snapshot at begin, so it never reduces beneficiary payouts).
 
 **Mint selection (dust-drain protection).** `collectMints` distributes owner-defined plan mints plus held mints with a non-zero balance. Zero-balance vault token accounts are skipped (on-chain `begin_token_dist` rejects a mint the vault neither holds nor bequeaths), and non-plan held mints beyond a per-vault cap (highest balance first) are deferred to the uncapped app/heir crank — so an attacker can't drain the cranker's SOL by dusting a vault with many junk mints.
 
@@ -77,7 +77,10 @@ Hardened for mainnet (see the repo CHANGELOG "Security hardening" entry):
   gap:* it does not prove the caller controls the owner wallet, so a holder of the shared
   secret could still re-point an existing owner's real vault to a different device token
   (hijacking/silencing its pushes). Closing that fully needs an owner-wallet signature over
-  `{vault, deviceToken}` — a tracked follow-up.
+  `{vault, deviceToken}` — a tracked follow-up. Owner-SIGNED register/deregister validators
+  exist in-code (`registerAuth.js` + the nonce table) but are **dormant**: they must ship
+  together with the signature-producing app (a coordinated mainnet release with a transition
+  window), so the active path is unsigned + ownership-proofed.
 - **Robust on-chain parsing.** `readVaultState`/`parseVaultConfig` verify program-owner +
   discriminator and bounds-check `benCount` before parsing (no OOB read / CPU DoS on crafted
   account bytes).
@@ -130,3 +133,7 @@ npm run dev               # node --watch src/server.js
 ```
 
 Stack: Express · better-sqlite3 · `@coral-xyz/anchor` + `@solana/spl-token` (executor) · google-auth-library (FCM v1). ESM, Node 24.
+
+> Liveness redundancy: this server is one of **two independent crankers** — the standalone
+> `keeper-bot/` discovers vaults directly on-chain and cranks them too. Either alone fires
+> every vault; losing this server never endangers an inheritance.
