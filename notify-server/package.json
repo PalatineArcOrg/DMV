@@ -14,7 +14,7 @@
     "@coral-xyz/anchor": "^0.32.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.95.3",
-    "better-sqlite3": "^11.3.0",
+    "better-sqlite3": "^12.11.1",
     "express": "^4.21.0",
     "google-auth-library": "^9.14.1"
   },
