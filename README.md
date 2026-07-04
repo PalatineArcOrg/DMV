@@ -96,7 +96,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 
 - **Permissionless execution** -- after grace, payouts are computed entirely on-chain; any signer can submit them and controls nothing
 - **Optional keyless watcher** -- a bundled keyless service distributes automatically when the app is closed; the app remains fully self-sufficient. Neither holds authority over funds.
-- **TEE-first security** -- agent signing key stored in hardware secure enclave (signs heartbeats only)
+- **Hardware-backed key storage** -- agent signing key stored in the Android Keystore (`expo-secure-store`) behind a biometric/device-credential gate; signs heartbeats only, never fund movement
 - **Idempotent, resumable execution** -- on-chain bitmasks are the authoritative idempotency layer; a partial crank is safely resumed by anyone
 - **Owner supremacy (pre-grace)** -- owner can override or revoke authority until the deadline, after which the vault freezes
 - **On-chain constraints** -- program enforces who/where/when/how-much even if a device is compromised
@@ -110,7 +110,7 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 | Keyless watcher | Node.js (Express + SQLite) | Pushes escalation alerts and autonomously cranks distribution after grace |
 | State management | Zustand + SQLite | Local persistence and crash recovery |
 | Wallet integration | Solana Mobile MWA | Owner authorization via Seed Vault |
-| Key management | Seeker TEE | Agent key for autonomous operations |
+| Key management | Android Keystore (`expo-secure-store`), biometric-gated | Agent heartbeat-signing key (Seeker Seed Vault optional) |
 | Portfolio data | Helius DAS API | Token balances and metadata |
 | Price oracles | Pyth Hermes + Jupiter | Dual-source USD pricing with 60s cache |
 | DeFi detection | Helius Enhanced TX + on-chain scanning | Protocol position discovery |
@@ -203,6 +203,8 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 ### Security
 
 The permissionless design was hardened by a multi-agent security review — including a **CRITICAL** fund-misdirection bug (a caller-supplied token-program could spoof a mint's residual snapshot to zero) found and fixed before deploy.
+
+A second **pre-mainnet** review across the program, the keyless watcher, and the app's key storage produced further fixes (see the CHANGELOG "Security hardening" entry): the canonical-ATA anti-spoof was extended to `execute_specific_asset` (a specific bequest could otherwise be misdirected), the production heartbeat/grace minimums (1 day / 7 days) are the default build (demo floors gated behind a `devnet` feature), the keeper bounty is capped on-chain, and checks-effects-interactions ordering blocks transfer-hook reentrancy. The watcher is fail-closed on auth, ownership-proofs registrations on-chain, rate-limits public reads, and bounds cranker spend; the app's agent key is biometric-gated and backup-excluded. A program **redeploy + IDL upgrade** and a **new APK build** apply the program/app fixes; the watcher fixes are deployed.
 
 ### Tests
 

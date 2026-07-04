@@ -5,6 +5,54 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [Unreleased] — Security hardening (pre-mainnet)
+
+A pre-mainnet security review across the on-chain program, the notify-server, and the
+app's agent-key storage. **The notify-server changes are deployed;** the program changes
+require a **redeploy + IDL upgrade**, and the app changes require a **new APK build**.
+Devnet Program ID unchanged.
+
+### On-chain program (Anchor) — redeploy + IDL upgrade required
+- **CRITICAL — specific bequests could be misdirected.** `execute_specific_asset` didn't
+  pin `vault_ata` to the canonical associated-token address (the anti-spoof guard the
+  other token instructions already used). A permissionless caller could pass an empty
+  vault-owned token account, mark a specific SPL/NFT bequest paid at 0, and leak the real
+  asset to the largest-share beneficiary as dust. Now pinned → `InvalidVaultAta`; added a
+  regression test.
+- **CRITICAL — devnet timing minimums restored for mainnet.** The production
+  heartbeat/grace minimums (1 day / 7 days) are the DEFAULT build again; the 10s/30s demo
+  floors are behind an opt-in `devnet` Cargo feature (`anchor build -- --features devnet`
+  for tests). A plain build/deploy is now fail-safe.
+- **Keeper-bounty cap.** `initialize_vault` bounds `keeper_bounty` to 0.1 SOL
+  (`MAX_KEEPER_BOUNTY_LAMPORTS`, error `KeeperBountyTooLarge`) so it can't zero out
+  beneficiary SOL; mirrored client-side.
+- **Anti-grief on `begin_token_dist`** (`NothingToDistribute`): rejects a mint the vault
+  neither holds nor bequeaths, so junk mints can't inflate `open_token_dists` and block
+  the owner's rent reclaim.
+- **Checks-effects-interactions**: `execute_specific_asset` / `execute_token_shares` set
+  the paid bit before the transfer CPI (blocks Token-2022 transfer-hook reentrancy).
+- 23/23 tests pass. Two error codes appended: `KeeperBountyTooLarge`, `NothingToDistribute`.
+
+### Notify-server — deployed
+- **Fail-closed auth.** Refuses to boot without `REGISTER_SECRET` unless
+  `NODE_ENV=development`; constant-time secret compare; `/debug/push` is dev-only.
+- **Ownership-proofed registration.** `/register` verifies the vault is the canonical PDA
+  for the owner and a real on-chain `VaultConfig` (program-owner + discriminator + stored
+  owner) before writing; `readVaultState` verifies owner/discriminator and bounds-checks parsing.
+- **DoS / robustness.** `/inheritances`: per-IP rate limit + short-TTL RPC cache + scan cap.
+  Per-vault timeouts + bounded concurrency + a poll-tick watchdog so one hung vault can't
+  wedge the daemon; process-level crash guards; per-vault crank lock; `/execute-now` returns
+  a generic error (raw errors could leak the RPC api-key); `.env` set to mode 600.
+- **Cranker dust-drain bound.** The executor skips zero-balance token accounts and caps
+  non-plan mints per vault, bounding the rent an attacker can make the cranker spend.
+
+### App — new APK build required
+- **Agent key behind biometrics.** The heartbeat-signing key is stored with
+  `requireAuthentication` (device credential / biometric) plus a safe fallback, and its
+  secret is zeroized on destroy; `android.allowBackup=false`. Blocks extracted key material
+  from forging heartbeats and stalling the switch. (Key RNG verified CSPRNG-backed.)
+- Client-side keeper-bounty cap mirrors the on-chain limit.
+
 ## [1.12.2] — 2026-07-03
 
 ### Changed
