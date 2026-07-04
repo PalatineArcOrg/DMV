@@ -54,6 +54,7 @@ Environment:
 | `RPC_URL` | yes | — | use a paid/reliable RPC (public devnet RPC rate-limits the scan) |
 | `KEYPAIR_PATH` | yes | — | JSON keypair array; pays fees, receives rewards |
 | `POLL_MS` | no | `30000` | scan interval |
+| `CLOSE_EXECUTED` | no | `1` | `0` = **crank-only**: still distributes expired vaults, but never closes an executed vault to collect its rents (leaves them for the owner). Recommended on **devnet**, where the close window is only 60s and an always-on keeper would otherwise sweep an owner's own rent before they can reclaim it. Leave on (`1`) for mainnet, where the 24h window gives owners a fair shot and the rents are the keeper's incentive. |
 
 Program ID (devnet): `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`
 (baked into `idl/dead_mans_vault.json`; swap the IDL to target another deployment).

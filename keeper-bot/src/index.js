@@ -18,6 +18,13 @@ const RPC_URL = process.env.RPC_URL;
 const KEYPAIR_PATH = process.env.KEYPAIR_PATH;
 const POLL_MS = Number(process.env.POLL_MS || 30_000);
 const ONCE = process.argv.includes('--once');
+// Rent-claim close of executed vaults. On by default (the mainnet economic
+// incentive). Set CLOSE_EXECUTED=0 for a CRANK-ONLY keeper: it still fires the
+// switch (distributes expired vaults) but never closes an executed vault to
+// collect the core-PDA rents — leaving those for the owner. Recommended on
+// devnet, where the close window is only 60s and an always-on keeper would
+// otherwise sweep an owner's own rent before they can reclaim it.
+const CLOSE_EXECUTED = process.env.CLOSE_EXECUTED !== '0';
 
 if (!RPC_URL || !KEYPAIR_PATH) {
   console.error('Usage: RPC_URL=<url> KEYPAIR_PATH=<keypair.json> node src/index.js [--once]');
@@ -68,8 +75,11 @@ async function tick() {
   for (const { publicKey: vault, account: cfg } of vaults) {
     try {
       if (cfg.executed) {
-        // Executed → try the post-window rent-collecting close. An early attempt
-        // fails preflight (CloseDelayNotElapsed) without costing a fee.
+        // Executed → optionally do the post-window rent-collecting close. When
+        // CLOSE_EXECUTED is off (crank-only), leave the executed vault (and its
+        // rents) for the owner. Its distribution already completed. An early
+        // close attempt fails preflight (CloseDelayNotElapsed) at no cost.
+        if (!CLOSE_EXECUTED) continue;
         const r = await cleanupExecutedVault(ctx, vault, cfg);
         if (r === 'closed') {
           cleaned++;
@@ -100,7 +110,7 @@ async function tick() {
   );
 }
 
-console.log(`[keeper] ${keeper.publicKey.toBase58()} watching program ${program.programId.toBase58()}`);
+console.log(`[keeper] ${keeper.publicKey.toBase58()} watching program ${program.programId.toBase58()} (${CLOSE_EXECUTED ? 'crank + rent-close' : 'CRANK-ONLY, no rent-close'})`);
 if (ONCE) {
   await tick();
 } else {
