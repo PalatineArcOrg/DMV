@@ -1766,16 +1766,14 @@
   dependencies:
     "@sinonjs/commons" "^3.0.0"
 
-"@solana-mobile/mobile-wallet-adapter-protocol-web3js@2.2.2":
-  version "2.2.2"
-  resolved "https://registry.yarnpkg.com/@solana-mobile/mobile-wallet-adapter-protocol-web3js/-/mobile-wallet-adapter-protocol-web3js-2.2.2.tgz#3172924d9bcbc983cc1a565a5909e6a2ab612c0c"
-  integrity sha512-XmLJrEdkAJ3CBV+bkYDKSBqF6QfjGTIeX+tFGPcwcc9rQ68sE1MPhpUKV9ehRwDLrZXcin2UDMOpWB/S6FJWBQ==
+"@solana-mobile/mobile-wallet-adapter-protocol-web3js@2.2.9":
+  version "2.2.9"
+  resolved "https://registry.yarnpkg.com/@solana-mobile/mobile-wallet-adapter-protocol-web3js/-/mobile-wallet-adapter-protocol-web3js-2.2.9.tgz#ea75f809f96fa6e467fa4289b6c19281c02e0367"
+  integrity sha512-TAMItAuOb7duwYQ+PZ6JNqw/6TEhCWLObHF5uOBGV9tjCozHGVunxa7lTeuHAWIgO68IAo86MZdE5kethDATpw==
   dependencies:
-    "@solana-mobile/mobile-wallet-adapter-protocol" "^2.2.0"
-    bs58 "^5.0.0"
-    js-base64 "^3.7.5"
+    "@solana-mobile/mobile-wallet-adapter-protocol" "^2.2.9"
 
-"@solana-mobile/mobile-wallet-adapter-protocol@2.2.9", "@solana-mobile/mobile-wallet-adapter-protocol@^2.2.0":
+"@solana-mobile/mobile-wallet-adapter-protocol@2.2.9", "@solana-mobile/mobile-wallet-adapter-protocol@^2.2.9":
   version "2.2.9"
   resolved "https://registry.yarnpkg.com/@solana-mobile/mobile-wallet-adapter-protocol/-/mobile-wallet-adapter-protocol-2.2.9.tgz#4400229c0bcbcf39226e1d0782a79e2e61fda1c5"
   integrity sha512-qtWJq0hzKgngVG0So2ViBRPYDculaxgj40WDSP1nzgdg85MXyAmTEjQqV10uSVbZRm9b1hl601HDJX1sHTgeiw==
@@ -3052,11 +3050,6 @@ base-x@^3.0.2:
   dependencies:
     safe-buffer "^5.0.1"
 
-base-x@^4.0.0:
-  version "4.0.1"
-  resolved "https://registry.yarnpkg.com/base-x/-/base-x-4.0.1.tgz#817fb7b57143c501f649805cb247617ad016a885"
-  integrity sha512-uAZ8x6r6S3aUM9rbHGVOIsR15U/ZSc82b3ymnCPsT45Gk1DDvhDPdIgB5MrhirZWt+5K0EEPQH985kNqZgNPFw==
-
 base-x@^5.0.0:
   version "5.0.1"
   resolved "https://registry.yarnpkg.com/base-x/-/base-x-5.0.1.tgz#16bf35254be1df8aca15e36b7c1dda74b2aa6b03"
@@ -3196,13 +3189,6 @@ bs58@^4.0.0, bs58@^4.0.1:
   integrity sha512-Ok3Wdf5vOIlBrgCvTq96gBkJw+JUEzdBgyaza5HLtPm7yTHkjRy8+JzNyHF7BHa0bNWOQIp3m5YF0nnFcOIKLw==
   dependencies:
     base-x "^3.0.2"
-
-bs58@^5.0.0:
-  version "5.0.0"
-  resolved "https://registry.yarnpkg.com/bs58/-/bs58-5.0.0.tgz#865575b4d13c09ea2a84622df6c8cbeb54ffc279"
-  integrity sha512-r+ihvQJvahgYT50JD05dyJNKlmmSlMoOGwn1lCcEzanPglg7TxYjioQUYehQ9mAR/+hOSd2jRc/Z2y5UxBymvQ==
-  dependencies:
-    base-x "^4.0.0"
 
 bs58@^6.0.0:
   version "6.0.0"
@@ -5109,11 +5095,6 @@ join-component@^1.1.0:
   version "1.1.0"
   resolved "https://registry.yarnpkg.com/join-component/-/join-component-1.1.0.tgz#b8417b750661a392bee2c2537c68b2a9d4977cd5"
   integrity sha512-bF7vcQxbODoGK1imE2P9GS9aw4zD0Sd+Hni68IMZLj7zRnquH7dXUmMw9hDI5S/Jzt7q+IyTXN0rSg2GI0IKhQ==
-
-js-base64@^3.7.5:
-  version "3.8.0"
-  resolved "https://registry.yarnpkg.com/js-base64/-/js-base64-3.8.0.tgz#cfc7b3d0f15dc6f69403c50df8ff2decca1a23ad"
-  integrity sha512-65kvbemyZhj+ExQt1PEFyBEjL5vAHysu1lJdW1AwhhChkO8ZBPizYk/m9GVrpbS2Je1hF+UYZ+6KywqtZV8mHw==
 
 "js-tokens@^3.0.0 || ^4.0.0", js-tokens@^4.0.0:
   version "4.0.0"
