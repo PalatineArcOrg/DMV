@@ -17,7 +17,7 @@ import { useWallet } from '../hooks/useWallet';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { RpcStatusBanner } from '../components/RpcStatusBanner';
 import { useVaultStore } from '../store/useVaultStore';
-import { DeFiPosition, DeFiPositionAction } from '../types/defi';
+import { DeFiPosition } from '../types/defi';
 import { COLORS, SPACING, FONTS, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount } from '../utils/formatting';
 
@@ -35,8 +35,6 @@ const PROTOCOL_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMa
   marginfi: 'trending-up',
   native_stake: 'lock',
 };
-
-const ACTIONS: DeFiPositionAction[] = ['close', 'transfer', 'ignore'];
 
 function TokenIcon({ symbol, logoUri }: { symbol: string; logoUri?: string | null }) {
   const color = TOKEN_COLORS[symbol] || COLORS.accent;
@@ -141,14 +139,6 @@ export function AssetsScreen() {
       }
     })();
   }, [isSetupComplete, publicKey, vaultConfig?.executed, balances]);
-
-  const updateAction = useCallback((index: number, action: DeFiPositionAction) => {
-    setPositions((prev) => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], action };
-      return updated;
-    });
-  }, []);
 
   const onRefresh = useCallback(async () => {
     await refresh();
@@ -384,7 +374,6 @@ export function AssetsScreen() {
                 </View>
 
                 {protocolPositions.map((pos, i) => {
-                  const globalIndex = positions.indexOf(pos);
                   return (
                     <View key={i} style={styles.positionCard}>
                       <View style={styles.positionHeader}>
@@ -404,21 +393,6 @@ export function AssetsScreen() {
                         {pos.estimatedValueUsd > 0 && (
                           <Text style={styles.positionUsd}>${pos.estimatedValueUsd.toFixed(2)}</Text>
                         )}
-                      </View>
-
-                      {/* Action Row */}
-                      <View style={styles.actionRow}>
-                        {ACTIONS.map((action) => (
-                          <TouchableOpacity
-                            key={action}
-                            style={[styles.actionButton, pos.action === action && styles.actionButtonActive]}
-                            onPress={() => updateAction(globalIndex, action)}
-                          >
-                            <Text style={[styles.actionText, pos.action === action && styles.actionTextActive]}>
-                              {action.charAt(0).toUpperCase() + action.slice(1)}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
                       </View>
                     </View>
                   );
@@ -519,9 +493,4 @@ const styles = StyleSheet.create({
   vaultBadgeText: { fontSize: 10, color: COLORS.accent, fontWeight: '600', fontFamily: FONTS.primarySemiBold },
 
   // Action buttons
-  actionRow: { flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.md },
-  actionButton: { flex: 1, paddingVertical: SPACING.sm, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center' },
-  actionButtonActive: { borderColor: COLORS.accent, backgroundColor: COLORS.accent + '20' },
-  actionText: { fontSize: 12, color: COLORS.textMuted },
-  actionTextActive: { color: COLORS.accent, fontWeight: '600' },
 });
