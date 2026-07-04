@@ -90,9 +90,7 @@ export function EstateReviewScreen() {
       if (existingAccount && existingAccount.data.length > 0) {
         let existingVault = await txService.fetchVaultConfig(publicKey);
         if (!existingVault && existingAccount.data.length >= 92) {
-          existingVault = VaultTransactionService.parseVaultConfigRaw(
-            Buffer.from(existingAccount.data),
-          );
+          existingVault = VaultTransactionService.parseVaultConfigRaw(existingAccount);
         }
         if (existingVault) {
           if (existingVault.active && !existingVault.executed) {

@@ -27,6 +27,18 @@ import type { AssetAssignment } from '../types/vault';
 
 const programId = new PublicKey(PROGRAM_ID);
 
+// Anchor account discriminators (sha256("account:<Name>")[..8], lowercase hex).
+// The app falls back to raw byte parsing when Anchor's deserializer fails on
+// Hermes; these let it verify an account is genuinely the expected program type
+// before trusting its bytes, so a malicious/broken RPC can't feed fake state.
+// NB: kept inline here (not a separate module) — a shared parser module resolved
+// to `undefined` in the release bundle once (v1.13.0) despite working in Node.
+const DISC_VAULT_CONFIG = '63562bd8b866774d';
+const DISC_EXECUTION_LOG = '739734d563abc8f0';
+const DISC_ASSET_PLAN = 'b273a24f4e46c32d';
+const DISC_TOKEN_DIST = 'fafdae6f2a52b22a';
+const DISC_HEARTBEAT = '1d0450269f346acb';
+
 /** On-chain beneficiary shape (UI Beneficiary carries extra display-only fields). */
 type OnChainBeneficiary = { wallet: PublicKey; shareBps: number };
 
@@ -1201,11 +1213,27 @@ export class VaultTransactionService {
     }
     try {
       const rawAccount = await this.connection.getAccountInfo(pda);
-      if (!rawAccount || rawAccount.data.length < 92) return null;
-      return VaultTransactionService.parseVaultConfigRaw(rawAccount.data);
+      return VaultTransactionService.parseVaultConfigRaw(rawAccount);
     } catch {
       return null;
     }
+  }
+
+  /** Verify a fetched account is program-owned, long enough, and carries the
+   *  expected Anchor discriminator before its raw bytes are trusted — guards the
+   *  raw-parse fallback against a malicious/broken RPC. Uses toString('hex', 0, 8)
+   *  (offset form), NOT subarray().toString, which mis-encodes on Hermes. */
+  private static verifyAccount(
+    info: { owner: PublicKey; data: Buffer } | null | undefined,
+    discHex: string,
+    minLen: number,
+  ): boolean {
+    return (
+      !!info &&
+      info.owner.equals(programId) &&
+      info.data.length >= minLen &&
+      info.data.toString('hex', 0, 8) === discHex
+    );
   }
 
   /**
@@ -1213,8 +1241,12 @@ export class VaultTransactionService {
    * 8 disc | 32 owner | 32 agent | 8 interval | 8 grace | 4 vec_len |
    * N*(32 wallet + 2 shareBps) | 1 executed | 1 active | 8 created | 8 updated |
    * 1 bump | 1 is_mutable | 1 has_asset_plan | 2 open_token_dists
+   * Verifies program-owner + discriminator and bounds the beneficiary vector
+   * before parsing (returns null on anything untrusted/malformed).
    */
-  static parseVaultConfigRaw(data: Buffer): any {
+  static parseVaultConfigRaw(info: { owner: PublicKey; data: Buffer } | null): any {
+    if (!VaultTransactionService.verifyAccount(info, DISC_VAULT_CONFIG, 92)) return null;
+    const data = info!.data;
     let offset = 8;
     const owner = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
     const agentPubkey = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
@@ -1222,8 +1254,10 @@ export class VaultTransactionService {
     const gracePeriod = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
 
     const beneficiaryCount = data.readUInt32LE(offset); offset += 4;
+    // Cap + ensure the beneficiary vector and the 23-byte fixed tail actually fit.
+    if (beneficiaryCount > 20 || data.length < offset + beneficiaryCount * 34 + 23) return null;
     const beneficiaries: { wallet: PublicKey; shareBps: number; hasSpecificAssets: boolean }[] = [];
-    for (let i = 0; i < beneficiaryCount && i < 20; i++) {
+    for (let i = 0; i < beneficiaryCount; i++) {
       const wallet = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
       const shareBps = data.readUInt16LE(offset); offset += 2;
       beneficiaries.push({ wallet, shareBps, hasSpecificAssets: false });
@@ -1254,8 +1288,8 @@ export class VaultTransactionService {
     const [vaultPda] = this.getVaultPDA(owner);
     const [executionPda] = this.getExecutionPDA(vaultPda);
     const info = await this.connection.getAccountInfo(executionPda);
-    if (!info || info.data.length < 66) return null;
-    const data = info.data;
+    if (!VaultTransactionService.verifyAccount(info, DISC_EXECUTION_LOG, 66)) return null;
+    const data = info!.data;
     let offset = 8 + 32;
     const solSnapshot = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
     const solPaidMask = data.readUInt32LE(offset); offset += 4;
@@ -1276,12 +1310,14 @@ export class VaultTransactionService {
     const [vaultPda] = this.getVaultPDA(owner);
     const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
     const info = await this.connection.getAccountInfo(assetPlanPda);
-    if (!info || info.data.length < 44) return null;
-    const data = info.data;
+    if (!VaultTransactionService.verifyAccount(info, DISC_ASSET_PLAN, 44)) return null;
+    const data = info!.data;
     let offset = 8 + 32;
     const len = data.readUInt32LE(offset); offset += 4;
+    // Cap + ensure the assignments (42B each) and the trailing 8B paid_mask fit.
+    if (len > 64 || data.length < offset + len * 42 + 8) return null;
     const assignments: { mint: PublicKey; amount: BN; beneficiaryIndex: number; isNft: boolean }[] = [];
-    for (let i = 0; i < len && i < 64; i++) {
+    for (let i = 0; i < len; i++) {
       const mint = new PublicKey(data.subarray(offset, offset + 32)); offset += 32;
       const amount = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
       const beneficiaryIndex = data[offset]; offset += 1;
@@ -1300,8 +1336,8 @@ export class VaultTransactionService {
     const [vaultPda] = this.getVaultPDA(owner);
     const [tokenDistPda] = this.getTokenDistPDA(vaultPda, mint);
     const info = await this.connection.getAccountInfo(tokenDistPda);
-    if (!info || info.data.length < 85) return null;
-    const data = info.data;
+    if (!VaultTransactionService.verifyAccount(info, DISC_TOKEN_DIST, 85)) return null;
+    const data = info!.data;
     let offset = 8 + 32 + 32;
     const snapshot = new BN(data.subarray(offset, offset + 8), 'le'); offset += 8;
     const paidMask = data.readUInt32LE(offset);
@@ -1316,10 +1352,13 @@ export class VaultTransactionService {
         this.connection.getAccountInfo(vaultPda),
         this.connection.getAccountInfo(heartbeatPda),
       ]);
-      if (!vaultInfo || !hbInfo) return null;
-      const interval = Number(new BN(vaultInfo.data.subarray(72, 80), 'le'));
-      const grace = Number(new BN(vaultInfo.data.subarray(80, 88), 'le'));
-      const lastHeartbeat = Number(new BN(hbInfo.data.subarray(40, 48), 'le'));
+      if (
+        !VaultTransactionService.verifyAccount(vaultInfo, DISC_VAULT_CONFIG, 88) ||
+        !VaultTransactionService.verifyAccount(hbInfo, DISC_HEARTBEAT, 48)
+      ) return null;
+      const interval = Number(new BN(vaultInfo!.data.subarray(72, 80), 'le'));
+      const grace = Number(new BN(vaultInfo!.data.subarray(80, 88), 'le'));
+      const lastHeartbeat = Number(new BN(hbInfo!.data.subarray(40, 48), 'le'));
       return lastHeartbeat + interval + grace;
     } catch {
       return null;
