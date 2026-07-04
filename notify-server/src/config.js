@@ -1,11 +1,10 @@
 // Centralized config from environment. Loaded via `node --env-file=.env`.
 import { readFileSync } from 'node:fs';
 
-function required(name) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var: ${name}`);
-  return v;
-}
+// Only an explicit NODE_ENV=development is treated as "dev mode". Anything else
+// (including unset) is treated as production, so the fail-closed secret check
+// below applies by default.
+export const isDev = process.env.NODE_ENV === 'development';
 
 export const config = {
   rpcUrl: process.env.RPC_URL || 'https://api.devnet.solana.com',
@@ -21,6 +20,23 @@ export const config = {
   executorEnabled: process.env.EXECUTOR_ENABLED === '1',
   crankerKeypairPath: process.env.CRANKER_KEYPAIR || '',
 };
+
+/**
+ * Fail-closed guard, called at startup. The write endpoints (register,
+ * deregister, poll-now, execute-now, debug/push) are gated by REGISTER_SECRET;
+ * an empty secret opens them. Refuse to boot without a secret unless the
+ * operator explicitly opted into dev mode (NODE_ENV=development) — so a
+ * production misconfiguration cannot silently expose those endpoints.
+ */
+export function assertSecureConfig() {
+  if (!config.registerSecret && !isDev) {
+    throw new Error(
+      'REGISTER_SECRET is not set. Refusing to start with unauthenticated write ' +
+        'endpoints. Set REGISTER_SECRET in .env, or set NODE_ENV=development to ' +
+        'allow open endpoints for local development only.',
+    );
+  }
+}
 
 // Lazily load the service account so the server can boot (and serve /health)
 // even before the Firebase files are provided.

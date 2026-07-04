@@ -129,6 +129,11 @@ export function startPoller() {
     running = true;
     try {
       if (fcmReady() || executorReady()) await pollOnce();
+    } catch (e) {
+      // Never let a tick reject out of setInterval (would be an unhandled
+      // rejection and could crash the daemon). Per-vault errors are already
+      // caught inside pollOnce; this guards the prelude (e.g. DB read).
+      console.error('[poll] tick failed:', e?.message || e);
     } finally {
       running = false;
     }

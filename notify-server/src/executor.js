@@ -131,9 +131,24 @@ async function ensureAta(ctx, ata, mint, owner, programId) {
  * Run the crank for one vault. Idempotent; returns an {action} describing the
  * furthest state reached this tick. Safe to call every poll tick.
  */
+const inFlight = new Set(); // vaults currently being cranked (in-process lock)
+
 export async function runExecutor(vaultStr) {
   const ctx = getCtx();
   if (!ctx) return { action: 'executor_disabled' };
+  // In-process per-vault lock: /execute-now must not race a poll tick for the
+  // same vault. On-chain masks keep funds safe, but the loser's txs revert with
+  // MaskAlreadySet after paying fees. First caller wins; concurrent callers no-op.
+  if (inFlight.has(vaultStr)) return { action: 'busy' };
+  inFlight.add(vaultStr);
+  try {
+    return await runExecutorInner(ctx, vaultStr);
+  } finally {
+    inFlight.delete(vaultStr);
+  }
+}
+
+async function runExecutorInner(ctx, vaultStr) {
   const { connection, program, cranker } = ctx;
   const vault = new PublicKey(vaultStr);
   const payer = cranker.publicKey;
