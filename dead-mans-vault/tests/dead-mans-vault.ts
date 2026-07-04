@@ -23,6 +23,8 @@ const INTERVAL = 10;
 const GRACE = 30;
 // deadline = last_heartbeat + INTERVAL + GRACE. Wait a touch past it.
 const GRACE_WAIT_MS = (INTERVAL + GRACE + 3) * 1000;
+// Must match the on-chain FEE_WALLET (constants.rs) — passed explicitly, not auto-resolved.
+const FEE_WALLET = new PublicKey('98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp');
 
 describe("dead-mans-vault — permissionless execution", () => {
   const provider = anchor.AnchorProvider.env();
@@ -90,6 +92,7 @@ describe("dead-mans-vault — permissionless execution", () => {
         owner: opts.owner.publicKey,
         vaultConfig: vault,
         heartbeatRecord: heartbeat,
+        feeRecipient: FEE_WALLET,
         systemProgram: SystemProgram.programId,
       })
       .signers([opts.owner])
@@ -238,6 +241,36 @@ describe("dead-mans-vault — permissionless execution", () => {
         expect.fail("should reject");
       } catch (e) {
         expectErr(e, "GracePeriodTooShort");
+      }
+    });
+
+    it("rejects wrong fee recipient (InvalidFeeRecipient)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 2);
+      const { vault, heartbeat } = pdas(o.publicKey);
+      const wrongFee = Keypair.generate().publicKey;
+      try {
+        await program.methods
+          .initializeVault({
+            agentPubkey: agent.publicKey,
+            heartbeatInterval: new BN(INTERVAL),
+            gracePeriod: new BN(GRACE),
+            beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+            isMutable: true,
+            keeperBounty: new BN(0),
+          })
+          .accountsPartial({
+            owner: o.publicKey,
+            vaultConfig: vault,
+            heartbeatRecord: heartbeat,
+            feeRecipient: wrongFee, // not FEE_WALLET
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([o])
+          .rpc();
+        expect.fail("should reject wrong fee recipient");
+      } catch (e) {
+        expectErr(e, "InvalidFeeRecipient");
       }
     });
 

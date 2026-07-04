@@ -1,6 +1,11 @@
 import { Platform } from 'react-native';
 
 export const PROGRAM_ID = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
+
+/** Recipient of the on-chain 0.01 SOL vault-creation fee. Pinned on-chain by
+ *  `initialize_vault` (address = FEE_WALLET @ InvalidFeeRecipient). Passed
+ *  explicitly by the app rather than relying on Anchor IDL auto-resolution. */
+export const FEE_WALLET = '98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp';
 // RPC URL + Helius endpoints/key now live in ./rpcConfig (runtime-overridable via the
 // Settings → NETWORK custom-RPC field). Import the getters from there, not constants.
 

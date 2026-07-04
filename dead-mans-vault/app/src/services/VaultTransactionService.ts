@@ -19,7 +19,7 @@ import {
 } from '@solana/spl-token';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
 import { idl, DeadMansVault } from '../utils/idl';
-import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
+import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS, FEE_WALLET } from '../utils/constants';
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
 import type { PriorityFeeEstimateResult } from '../types/api';
@@ -237,6 +237,7 @@ export class VaultTransactionService {
         owner,
         vaultConfig: vaultPda,
         heartbeatRecord: heartbeatPda,
+        feeRecipient: new PublicKey(FEE_WALLET),
         systemProgram: SystemProgram.programId,
       })
       .transaction();
@@ -360,6 +361,7 @@ export class VaultTransactionService {
         owner,
         vaultConfig: vaultPda,
         heartbeatRecord: heartbeatPda,
+        feeRecipient: new PublicKey(FEE_WALLET),
         systemProgram: SystemProgram.programId,
       })
       .instruction();
@@ -420,6 +422,7 @@ export class VaultTransactionService {
         owner,
         vaultConfig: vaultPda,
         heartbeatRecord: heartbeatPda,
+        feeRecipient: new PublicKey(FEE_WALLET),
         systemProgram: SystemProgram.programId,
       })
       .instruction();
