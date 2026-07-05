@@ -3,7 +3,6 @@ import { TokenBalance, DeFiPosition } from '../types';
 import { KNOWN_TOKEN_LOGOS } from '../utils/constants';
 import { DeFiDetector } from '../defi/detector';
 import { KNOWN_TOKEN_SYMBOLS } from '../defi/registry';
-import { isStock, stockMeta } from '../defi/stocks';
 import { fetchWithRetry, rpcWithRetry } from '../utils/fetchWithRetry';
 import { metadataPda, parseMetadataAccount } from './metaplexMetadata';
 import { getNftMeta, setNftMeta, NftMeta } from '../db/nftMetaRepo';
@@ -24,6 +23,37 @@ const priceCache = new Map<string, { price: number; ts: number }>();
 const PRICE_CACHE_TTL_MS = 60_000; // 60 seconds
 
 const PYTH_HERMES_BASE = 'https://hermes.pyth.network';
+
+// Tokenized-stock (RWA) classification — INLINED here, NOT imported from a separate
+// module. A separate util module's named export can resolve to `undefined` under
+// Hermes/Metro (documented v1.13.0 bug); an `undefined` call inside the DAS parse loop
+// threw, was swallowed by fetchViaDAS, and dropped the whole DAS path to the legacy-only
+// fallback — hiding every Token-2022 token (the v1.13.9 "stocks invisible" bug).
+// Same-file code cannot hit that resolution hazard.
+const KNOWN_STOCK_MINTS: Record<string, { symbol: string; name: string }> = {
+  // Backed xStocks (mainnet)
+  XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB: { symbol: 'TSLAx', name: 'Tesla xStock' },
+  XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp: { symbol: 'AAPLx', name: 'Apple xStock' },
+  // Backpack Securities / Sunrise (mainnet)
+  SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb: { symbol: 'SPCX', name: 'SpaceX (Backpack)' },
+  SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH: { symbol: 'SNDK', name: 'SanDisk (Backpack)' },
+  // DMV devnet test stocks
+  '5vENRu8q3PFLCSfKwbcuWArX29Z139BFWNPFN5ytKrZz': { symbol: 'TSLAx', name: 'Tesla xStock (test)' },
+  Fmig3ToxDytDh5HRkHWVbPnZawoBJeKpwDU14WFs5xRi: { symbol: 'AAPLx', name: 'Apple xStock (test)' },
+  '3UxCSgNYLGdSPVizcmRxYS3wFf1gLw4T9AbfNNzBNEiG': { symbol: 'SPCXt', name: 'SpaceX (test)' },
+  GtedZCi6MiSwZSdSRYFHnE1uYt1cSSbqhtX7XuQ54W8b: { symbol: 'NVDAx', name: 'Nvidia xStock (test)' },
+  EXH8m657MQ7hUvwS8kXUztwUdJpZ2CxKD7QMTcWyoyB3: { symbol: 'MSFTx', name: 'Microsoft xStock (test)' },
+  EVJUoLBhg3qWpfF3SnM5A55YKWNU94Bn2caDfquMq9Rv: { symbol: 'GOOGLx', name: 'Alphabet xStock (test)' },
+};
+const XSTOCK_SYMBOL = /^[A-Z]{2,6}x$/;
+function stockMeta(mint: string): { symbol: string; name: string } | undefined {
+  return KNOWN_STOCK_MINTS[mint];
+}
+function isStock(t: { mint: string; symbol?: string; isNft?: boolean }): boolean {
+  if (t.isNft) return false;
+  if (KNOWN_STOCK_MINTS[t.mint]) return true;
+  return XSTOCK_SYMBOL.test((t.symbol || '').trim());
+}
 
 export class PortfolioScanner {
   private connection: Connection;
