@@ -105,8 +105,9 @@ export function DashboardScreen() {
   const storeDefiPositions = useVaultStore((s) => s.defiPositions);
   const storeBeneficiaryCount = useVaultStore((s) => s.beneficiaries.length);
   const defiPositions = portfolioDefi.length > 0 ? portfolioDefi : storeDefiPositions;
-  const fungibleTokens = useMemo(() => balances.filter((b) => !b.isNft), [balances]);
+  const fungibleTokens = useMemo(() => balances.filter((b) => !b.isNft && !b.isStock), [balances]);
   const walletNfts = useMemo(() => balances.filter((b) => b.isNft), [balances]);
+  const walletStocks = useMemo(() => balances.filter((b) => b.isStock), [balances]);
 
   const [vaultBalance, setVaultBalance] = useState(0);
   const [vaultTokenBalances, setVaultTokenBalances] = useState<{ mint: string; uiAmount: number; symbol: string; decimals: number }[]>([]);
@@ -617,6 +618,33 @@ export function DashboardScreen() {
               </View>
             </View>
           ))
+        )}
+
+        {/* Stocks (tokenized equities) — inline in portfolio card */}
+        {walletStocks.length > 0 && (
+          <>
+            <View style={styles.defiDivider}>
+              <Text style={styles.defiInlineLabel}>STOCKS</Text>
+              <TouchableOpacity
+                style={styles.defiViewAll}
+                onPress={() => navigation.getParent()?.navigate('Assets', { screen: 'AssetsOverview', params: { tab: 'stocks' } })}
+              >
+                <Text style={styles.defiViewAllText}>View All</Text>
+                <MaterialCommunityIcons name="chevron-right" size={14} color={COLORS.accent} />
+              </TouchableOpacity>
+            </View>
+            {walletStocks.slice(0, 3).map((stock, i) => (
+              <View key={`stock-${i}`} style={[styles.tokenRow, i < Math.min(walletStocks.length, 3) - 1 && styles.tokenRowBorder]}>
+                <TokenIcon symbol={stock.symbol} logoUri={stock.logoUri} />
+                <View style={styles.tokenLeft}>
+                  <Text style={styles.tokenSymbol} numberOfLines={1}>{stock.symbol}</Text>
+                  <Text style={styles.tokenAmount}>
+                    {formatTokenAmount(stock.amount, stock.decimals > 4 ? 4 : stock.decimals)} shares
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </>
         )}
 
         {/* NFTs — inline in portfolio card */}

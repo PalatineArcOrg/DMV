@@ -9,6 +9,7 @@ export interface TokenBalance {
   change24h?: number | null;
   logoUri?: string | null;
   isNft?: boolean;
+  isStock?: boolean;
   image?: string;
 }
 

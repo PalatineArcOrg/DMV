@@ -3,6 +3,7 @@ import { TokenBalance, DeFiPosition } from '../types';
 import { KNOWN_TOKEN_LOGOS } from '../utils/constants';
 import { DeFiDetector } from '../defi/detector';
 import { KNOWN_TOKEN_SYMBOLS } from '../defi/registry';
+import { isStock, stockMeta } from '../defi/stocks';
 import { fetchWithRetry, rpcWithRetry } from '../utils/fetchWithRetry';
 import { metadataPda, parseMetadataAccount } from './metaplexMetadata';
 import { getNftMeta, setNftMeta, NftMeta } from '../db/nftMetaRepo';
@@ -259,7 +260,8 @@ export class PortfolioScanner {
 
         const amount = Number(balance) / Math.pow(10, decimals);
         const known = KNOWN_TOKEN_SYMBOLS[mintStr];
-        const symbol = tokenInfo?.symbol || item.content?.metadata?.symbol || known?.symbol || mintStr.slice(0, 6);
+        const sMeta = stockMeta(mintStr);
+        const symbol = sMeta?.symbol || tokenInfo?.symbol || item.content?.metadata?.symbol || known?.symbol || mintStr.slice(0, 6);
 
         balances.push({
           mint: new PublicKey(mintStr),
@@ -268,6 +270,7 @@ export class PortfolioScanner {
           decimals,
           usdValue: 0,
           isNft: false,
+          isStock: isStock({ mint: mintStr, symbol, isNft: false }),
         });
       }
 

@@ -21,7 +21,7 @@ import { DeFiPosition } from '../types/defi';
 import { COLORS, SPACING, FONTS, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount } from '../utils/formatting';
 
-type Tab = 'tokens' | 'nfts' | 'defi';
+type Tab = 'tokens' | 'nfts' | 'defi' | 'stocks';
 
 const PROTOCOL_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   marinade: 'water',
@@ -59,9 +59,12 @@ export function AssetsScreen() {
   const isSetupComplete = useVaultStore((s) => s.isSetupComplete);
   const vaultConfig = useVaultStore((s) => s.vaultConfig);
 
-  // Split the wallet portfolio into fungible tokens and NFTs so each gets its own tab.
-  const fungibleTokens = useMemo(() => balances.filter((b) => !b.isNft), [balances]);
+  // Split the wallet portfolio into fungible tokens, NFTs, and tokenized stocks
+  // (Token-2022 RWAs) so each gets its own tab. Stocks are carved out of the
+  // plain-tokens list so they don't appear twice.
+  const fungibleTokens = useMemo(() => balances.filter((b) => !b.isNft && !b.isStock), [balances]);
   const nfts = useMemo(() => balances.filter((b) => b.isNft), [balances]);
+  const stocks = useMemo(() => balances.filter((b) => b.isStock), [balances]);
 
   const [activeTab, setActiveTab] = useState<Tab>('tokens');
 
@@ -69,7 +72,7 @@ export function AssetsScreen() {
   const route = useRoute<any>();
   useEffect(() => {
     const t = route.params?.tab;
-    if (t === 'tokens' || t === 'nfts' || t === 'defi') setActiveTab(t);
+    if (t === 'tokens' || t === 'nfts' || t === 'defi' || t === 'stocks') setActiveTab(t);
   }, [route.params?.tab]);
   const [positions, setPositions] = useState<DeFiPosition[]>([]);
   const [vaultSolBalance, setVaultSolBalance] = useState(0);
@@ -242,6 +245,14 @@ export function AssetsScreen() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
+          style={[styles.segmentTab, activeTab === 'stocks' && styles.segmentTabActive]}
+          onPress={() => setActiveTab('stocks')}
+        >
+          <Text style={[styles.segmentText, activeTab === 'stocks' && styles.segmentTextActive]}>
+            Stocks ({stocks.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={[styles.segmentTab, activeTab === 'nfts' && styles.segmentTabActive]}
           onPress={() => setActiveTab('nfts')}
         >
@@ -290,6 +301,49 @@ export function AssetsScreen() {
                     {token.isNft
                       ? '1 · non-fungible'
                       : `${formatTokenAmount(token.amount, token.decimals > 4 ? 4 : token.decimals)} ${token.symbol}`}
+                  </Text>
+                </View>
+                <View style={styles.tokenRight}>
+                  {token.usdValue > 0 && (
+                    <Text style={styles.tokenUsd}>{formatUsd(token.usdValue)}</Text>
+                  )}
+                  {token.change24h != null && (
+                    <Text style={[styles.tokenChange, { color: token.change24h >= 0 ? COLORS.accent : COLORS.critical }]}>
+                      {token.change24h >= 0 ? '+' : ''}{token.change24h.toFixed(1)}%
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      )}
+
+      {/* Stocks View (tokenized equities — Token-2022 RWAs: xStocks / Backpack) */}
+      {activeTab === 'stocks' && (
+        <View style={styles.card}>
+          {portfolioLoading && stocks.length === 0 ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={COLORS.accent} />
+              <Text style={styles.loadingText}>Loading stocks...</Text>
+            </View>
+          ) : stocks.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <MaterialCommunityIcons name="chart-line" size={36} color={COLORS.textMuted} />
+              <Text style={styles.emptyTitle}>No Stocks</Text>
+              <Text style={styles.emptyDesc}>No tokenized stocks (xStocks / Backpack) found in this wallet.</Text>
+            </View>
+          ) : (
+            stocks.map((token, i) => (
+              <View key={i} style={[styles.tokenRow, i < stocks.length - 1 && styles.tokenRowBorder]}>
+                <TokenIcon symbol={token.symbol} logoUri={token.logoUri} />
+                <View style={styles.tokenInfo}>
+                  <View style={styles.tokenNameRow}>
+                    <Text style={styles.tokenSymbol} numberOfLines={1}>{token.symbol}</Text>
+                    <MaterialCommunityIcons name="chart-line" size={12} color={COLORS.accent} style={{ marginLeft: 4 }} />
+                  </View>
+                  <Text style={styles.tokenAmount}>
+                    {`${formatTokenAmount(token.amount, token.decimals > 4 ? 4 : token.decimals)} shares`}
                   </Text>
                 </View>
                 <View style={styles.tokenRight}>
