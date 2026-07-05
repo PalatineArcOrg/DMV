@@ -39,7 +39,7 @@ If a **new** program keypair is used, update every hardcoded literal (the app `c
 > If the ID is **reused**, only the network target changes — no ID edits.
 
 ### 1.4 🔴 FEE_WALLET verification
-`initialize_vault` pins the 0.01 SOL creation fee to `FEE_WALLET = 98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp` via an on-chain `address =` constraint. On mainnet this **must be a wallet the owner controls**, and the app constant must match the program constant or every `initialize_vault` fails `InvalidFeeRecipient`. Change together if needed: `programs/.../constants.rs:8` **and** `app/src/utils/constants.ts:8` (+ the test). → Decision §2.2.
+`initialize_vault` pins the 0.01 SOL creation fee to `FEE_WALLET = 98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp` via an on-chain `address =` constraint. On mainnet this **must be a wallet the owner controls**, and the app constant must match the program constant or every `initialize_vault` fails `InvalidFeeRecipient`. Change together: `programs/.../constants.rs:8` **and** `app/src/utils/constants.ts:8` (+ the test). **DECIDED (2026-07-05): use a different mainnet treasury** (recommend a multisig) — owner to provide the address; applied at the mainnet rebuild.
 
 ### 1.5 🔴 Mainnet RPC in the build env
 `eas.json` has **no `env:` block**, and `rpcConfig.ts` + `.env.example` default to devnet. The released APK will **silently talk to devnet** unless the mainnet build sets `EXPO_PUBLIC_RPC_URL` to a mainnet (Helius) URL. Either add an `env` block to the `production` EAS profile, or ensure `app/.env` holds the mainnet URL at build time. (A paid Helius mainnet endpoint is needed — public mainnet RPC will rate-limit portfolio scans + cranks.)
@@ -59,8 +59,8 @@ If a **new** program keypair is used, update every hardcoded literal (the app `c
 
 | # | Decision | Options / recommendation |
 |---|----------|--------------------------|
-| 2.1 🟡 | **Security audit** | External firm (recommended; gates timeline + cost) vs proceed on the internal review (materially higher risk for an inheritance protocol). |
-| 2.2 🟡 | **FEE_WALLET treasury** | Is `98x9Rn63…UFsp` an owner-controlled mainnet wallet? If not, pick a treasury (ideally a multisig) and change the two constants together. |
+| 2.1 🟢→🟡 | **Security audit** | **DECIDED: get quotes first.** Scope/brief prepared → `tasks/AUDIT-SCOPE.md` (send to firms: OtterSec / Neodyme / Zellic / Sec3). Then decide + book. |
+| 2.2 🟢→🟡 | **FEE_WALLET treasury** | **DECIDED: use a different wallet** (not `98x9Rn63…`). ⏳ Owner to provide the mainnet treasury address; then change `constants.rs:8` + `app constants.ts:8` (+ test) together at the mainnet rebuild. |
 | 2.3 🟡 | **Fee + bounty economics** | Creation fee 0.01 SOL (~$1–2.50) and keeper bounty 0.005 SOL default — confirm both for mainnet. Keeper is net-positive on mainnet (bounty + rents via `close_executed_vault`), so 0.005 is workable; revisit if you want a bigger cushion. |
 | 2.4 🟡 | **Signed notify-registration** | The owner-signed register/deregister path is built but **dormant** (reverted on devnet). Activating it on mainnet is a coordinated app+server release (sign inside the activation MWA session, transition window). Recommend: ship mainnet v1 unsigned (on-chain ownership proof already gates it), enable signed as a fast-follow. |
 | 2.5 🟡 | **Biometric-per-heartbeat** | Still parked. Recommend **drop** the per-heartbeat prompt (the agent key can only sign heartbeats — worst case of compromise is *stalling* the switch, not theft; and it's redundant right after the app-unlock biometric). Keep the key behind the device lock at rest. |
@@ -72,8 +72,8 @@ If a **new** program keypair is used, update every hardcoded literal (the app `c
 
 These read the URL-driven `isDevnet()`, so they behave identically on devnet now and flip on a mainnet build. Doing them pre-cutover shrinks the mainnet diff to just the program ID + fee wallet + build env.
 
-- **3.1 Explorer links** — 12 hardcoded `?cluster=devnet` (BeneficiaryScreen, DashboardScreen, SettingsScreen ×4, EstateReviewScreen, SetupWizardScreen ×4). Replace with the `isDevnet()` pattern already used in `ExecutionDetailScreen.tsx`.
-- **3.2 UI network labels** — `SettingsScreen.tsx:488`, `EstateReviewScreen.tsx:304` + success copy `:185`, `SetupWizardScreen.tsx:384` hardcode "Devnet". Drive from `isDevnet()`.
+- **3.1 Explorer links** — 🟢 DONE (commit 77f2c17). `explorerTx()`/`explorerAddress()` helpers in `rpcConfig.ts`; all 12 sites now follow `isDevnet()`.
+- **3.2 UI network labels** — 🟢 DONE (commit 77f2c17). `networkLabel()` helper; all 4 sites now follow `isDevnet()`.
 - **3.3 Wallet cluster (§1.6)** — `useAuthorization.tsx` CLUSTER from `isDevnet()`. Critical path — change deliberately + verify wallet connect still works on devnet before/after.
 
 ---
