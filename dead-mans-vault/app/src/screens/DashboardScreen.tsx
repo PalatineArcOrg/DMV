@@ -224,6 +224,15 @@ export function DashboardScreen() {
       Alert.alert("Can't deposit this token", `${depositable.reason}, so it can't be moved into the vault.`);
       throw new Error(depositable.reason || 'Token cannot be deposited');
     }
+    if (depositable.warning) {
+      const proceed = await new Promise<boolean>((resolve) => {
+        Alert.alert('Heads up — transfer fee', depositable.warning!, [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Deposit anyway', onPress: () => resolve(true) },
+        ]);
+      });
+      if (!proceed) throw new Error('Deposit cancelled');
+    }
     try {
       const tx = await txService.buildDepositTokenTx(publicKey, mint, rawAmount);
       tx.feePayer = publicKey;

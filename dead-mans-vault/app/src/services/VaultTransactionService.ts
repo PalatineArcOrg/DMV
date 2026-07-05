@@ -18,6 +18,7 @@ import {
   getDefaultAccountState,
   getTransferHook,
   getPausableConfig,
+  getTransferFeeConfig,
   AccountState,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
@@ -501,7 +502,7 @@ export class VaultTransactionService {
    * SPL and plain Token-2022 mints; a human reason when it can't be deposited. Fails
    * open (ok=true) if the mint can't be read — the tx preflight will still catch it.
    */
-  async checkDepositable(mint: PublicKey): Promise<{ ok: boolean; reason?: string }> {
+  async checkDepositable(mint: PublicKey): Promise<{ ok: boolean; reason?: string; warning?: string }> {
     try {
       const tokenProgram = await this.getTokenProgramForMint(mint);
       if (tokenProgram.equals(TOKEN_PROGRAM_ID)) return { ok: true }; // legacy SPL — always transferable
@@ -520,6 +521,16 @@ export class VaultTransactionService {
       const pausable = getPausableConfig(mintInfo);
       if (pausable && pausable.paused) {
         return { ok: false, reason: 'This token is currently paused by the issuer' };
+      }
+      // Transfer-fee mints ARE depositable, but taxed on every hop — warn, don't block.
+      const fee = getTransferFeeConfig(mintInfo);
+      const bps = fee?.newerTransferFee?.transferFeeBasisPoints ?? 0;
+      if (bps > 0) {
+        const pct = bps % 100 === 0 ? String(bps / 100) : (bps / 100).toFixed(2);
+        return {
+          ok: true,
+          warning: `This token charges a ${pct}% fee on every transfer. You'll lose ~${pct}% moving it into the vault now, and the beneficiary loses another ~${pct}% when it's distributed to them.`,
+        };
       }
       return { ok: true };
     } catch {
