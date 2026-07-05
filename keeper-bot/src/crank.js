@@ -21,6 +21,8 @@ import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
   getAccount,
+  getTransferFeeAmount,
+  createHarvestWithheldTokensToMintInstruction,
 } from '@solana/spl-token';
 
 const BATCH = 8; // payout indices per tx (CU + tx-size budget)
@@ -251,21 +253,31 @@ export async function crankVault(ctx, vault, cfg) {
       if (bigMask(td.paidMask) !== fullMask(benCount)) continue;
       const vaultAta = getAssociatedTokenAddressSync(mint, vault, true, tokenPid);
       const maxWallet = beneficiaries[largestShareIndex(beneficiaries)].wallet;
-      let dust = 0n;
+      let dust = 0n, withheld = 0n;
       try {
-        dust = (await getAccount(connection, vaultAta, 'confirmed', tokenPid)).amount;
-      } catch { dust = 0n; }
+        const acc = await getAccount(connection, vaultAta, 'confirmed', tokenPid);
+        dust = acc.amount;
+        withheld = getTransferFeeAmount(acc)?.withheldAmount ?? 0n;
+      } catch { /* ATA missing */ }
       let dustAta = null;
       if (dust > 0n) {
         dustAta = getAssociatedTokenAddressSync(mint, maxWallet, false, tokenPid);
         await ensureAta(ctx, dustAta, mint, maxWallet, tokenPid);
       }
+      // Transfer-fee mints leave WITHHELD fees in the vault ATA (e.g. the deposit fee);
+      // Token-2022 refuses to CloseAccount while fees are withheld, which sticks
+      // close_token_dist and keeps open_token_dists > 0 (blocking the final close).
+      // Harvest them to the mint first (permissionless), atomically before the close.
+      const preIxs = withheld > 0n
+        ? [createHarvestWithheldTokensToMintInstruction(mint, [vaultAta], tokenPid)]
+        : [];
       await program.methods
         .closeTokenDist()
         .accountsPartial({
           payer, owner: freshCfg.owner, vaultConfig: vault, mint, vaultAta,
           tokenDist: tdPda, largestBenefAta: dustAta, tokenProgram: tokenPid,
         })
+        .preInstructions(preIxs)
         .rpc();
     }
   }
