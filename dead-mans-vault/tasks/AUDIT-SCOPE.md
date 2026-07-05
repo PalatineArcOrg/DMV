@@ -114,11 +114,9 @@ Per-vault, owners can also opt into **immutability** (`VaultConfig.is_mutable`),
 
 ---
 
-## 8. Docs vs. code — read the code, not the spec
-`tasks/BUILD-SPEC-permissionless-execution.md` explains the design but is **stale in two load-bearing places** — do **not** treat it as authoritative:
-- It says specific-**SOL** bequests were "cut to fast-follow," but **`execute_specific_sol` is shipped and in scope.**
-- Its §18 B2 says "v1 has NO permissionless `close_vault`," but **`close_executed_vault` (permissionless, 24h-gated) is shipped and in scope.**
-The **code at the pinned commit is the source of truth.** `CLAUDE.md` is a current, accurate model overview and is in the repo.
+## 8. Docs vs. code — the code is the source of truth
+`tasks/BUILD-SPEC-permissionless-execution.md` was reconciled to the as-built code on 2026-07-05 — its **§0.5 "As-built deltas"** authoritatively lists what shipped (specific-SOL via `execute_specific_sol`, the permissionless 24h-gated `close_executed_vault`, the keeper bounty, the 0.01 SOL creation fee, `open_token_dists`, the `devnet` feature, the 42 errors). Even so, **treat the on-chain code at the pinned commit as the source of truth** — the spec is prose context, not a substitute. `CLAUDE.md` is a current, accurate model overview and is in the repo.
+> Note: the frozen audit tag `audit-2026-07-05` predates the spec reconciliation, so the spec *at that tag* still reads pre-reconciliation. The program code is identical either way; this only affects the prose design doc, not what you audit.
 
 ---
 
