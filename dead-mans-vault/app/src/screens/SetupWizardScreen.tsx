@@ -13,6 +13,7 @@ import { validateBeneficiaryShares } from '../utils/validation';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, SPACING, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
 import { getExecutionSteps, clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
+import { deleteSetting } from '../db/settingsRepo';
 
 export function SetupWizardScreen() {
   const navigation = useNavigation<any>();
@@ -165,6 +166,10 @@ export function SetupWizardScreen() {
       await clearDistributableSnapshot(publicKey.toString());
       await clearTokenSnapshot(publicKey.toString());
     }
+    // Clear the PERSISTED heartbeat-config draft too. App.tsx re-hydrates it on launch,
+    // so without this the "Configure Heartbeat" step keeps showing a stale ✓ on a fresh
+    // setup even after Start Over (the in-memory reset alone doesn't survive a restart).
+    await deleteSetting('heartbeat_config');
     setHasPastExecution(false);
   }, [publicKey]);
 

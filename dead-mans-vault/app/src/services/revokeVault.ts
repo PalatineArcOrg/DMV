@@ -4,6 +4,7 @@ import { KeyManager } from '../tee/KeyManager';
 import { useVaultStore } from '../store/useVaultStore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
+import { deleteSetting } from '../db/settingsRepo';
 
 /** A single on-chain transaction produced during revoke, for the UI breakdown. */
 export interface TxRef {
@@ -155,6 +156,7 @@ export async function revokeVault(
     useVaultStore.getState().reset();
     useHeartbeatStore.getState().reset();
     useEscalationStore.getState().reset();
+    await deleteSetting('heartbeat_config');
 
     const { totalReturnedSol, vaultReturnedSol } = await finish();
     return {
@@ -204,6 +206,7 @@ export async function revokeVault(
   useVaultStore.getState().reset();
   useHeartbeatStore.getState().reset();
   useEscalationStore.getState().reset();
+  await deleteSetting('heartbeat_config');
 
   const { totalReturnedSol, vaultReturnedSol } = await finish();
   return {
