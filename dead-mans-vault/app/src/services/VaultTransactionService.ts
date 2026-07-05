@@ -12,6 +12,8 @@ import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferInstruction,
+  createTransferCheckedInstruction,
+  getMint,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -501,7 +503,11 @@ export class VaultTransactionService {
         createAssociatedTokenAccountIdempotentInstruction(owner, vaultAta, vaultPda, mint, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID),
       );
     }
-    tx.add(createTransferInstruction(ownerAta, vaultAta, owner, rawAmount, [], tokenProgram));
+    // Use transfer_checked, NOT the unchecked transfer: Token-2022 mints with the
+    // transfer-fee or pausable extension — including real tokenized stocks (xStocks /
+    // Backpack) — reject the unchecked transfer instruction, so the deposit would fail.
+    const mintInfo = await getMint(this.connection, mint, 'confirmed', tokenProgram);
+    tx.add(createTransferCheckedInstruction(ownerAta, mint, vaultAta, owner, rawAmount, mintInfo.decimals, [], tokenProgram));
     return this.addPriorityFee(tx, [owner, vaultPda, mint], 120_000);
   }
 

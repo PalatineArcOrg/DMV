@@ -97,10 +97,13 @@ export function BequestsScreen() {
       }
       const tokenAssets: VaultAsset[] = tokens.map((t) => {
         const m = meta.get(t.mint.toBase58());
+        // Known tokenized stocks (Token-2022 RWAs) have no Metaplex PDA and may no
+        // longer be in the wallet once deposited — resolve their label from the registry.
+        const sMeta = PortfolioScanner.stockMeta(t.mint.toBase58());
         const known = balances.find((b: any) => b.mint?.toBase58?.() === t.mint.toBase58());
         return {
           mint: t.mint,
-          symbol: m?.name || m?.symbol || known?.symbol || `${t.mint.toBase58().slice(0, 4)}…`,
+          symbol: sMeta?.symbol || m?.name || m?.symbol || known?.symbol || `${t.mint.toBase58().slice(0, 4)}…`,
           decimals: t.decimals,
           amount: t.uiAmount,
           image: m?.image ?? (known as any)?.image ?? undefined,

@@ -66,6 +66,14 @@ export class PortfolioScanner {
     this.rpcUrl = rpcUrl;
   }
 
+  /** Curated symbol/name for a known tokenized-stock mint — for pickers that can't
+   *  rely on DAS/wallet balances (e.g. the Bequests screen, once a stock has been
+   *  deposited into the vault and is no longer in the wallet). Static so callers can
+   *  use it without a live scanner. */
+  static stockMeta(mint: string): { symbol: string; name: string } | undefined {
+    return KNOWN_STOCK_MINTS[mint];
+  }
+
   async getTokenBalances(wallet: PublicKey): Promise<TokenBalance[]> {
     const balances: TokenBalance[] = [];
 
