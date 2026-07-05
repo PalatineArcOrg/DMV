@@ -227,17 +227,25 @@ export function SetupWizardScreen() {
         return;
       }
 
-      if (!isActuallySetup && publicKey && !useVaultStore.getState().isRevoked) {
+      // Always re-fetch the on-chain vault config on focus — NOT only pre-setup. An
+      // already-set-up vault can be EXECUTED by the crank while the app is idle; the old
+      // `!isActuallySetup` gate meant the app never re-checked, so `executed` stayed stale
+      // (false) and the screen kept showing the editable wizard with old beneficiaries
+      // (and offered edits that silently fail, since an executed vault is frozen).
+      if (publicKey && !useVaultStore.getState().isRevoked) {
         (async () => {
           try {
             const { VaultTransactionService } = require('../services/VaultTransactionService');
             const txService = new VaultTransactionService();
             const vault = await txService.fetchVaultConfig(publicKey);
-            if (vault && vault.active) {
+            if (vault) {
+              // Reflect the CURRENT state — active OR executed (active=false) — so an
+              // executed vault surfaces the "Vault Executed" summary + close flow.
               setVaultConfig(vault);
-            } else if (!vault && useVaultStore.getState().vaultConfig) {
-              // Only clear if we previously had a vault (PDAs closed post-execution)
-              // Don't clear during fresh setup — it would wipe local beneficiaries
+            } else if (useVaultStore.getState().vaultConfig) {
+              // PDAs gone (closed post-execution) — clear the stale config. The guard
+              // (only clear if we already had one) avoids wiping the beneficiaries being
+              // edited during a fresh setup, where no vault exists on-chain yet.
               setVaultConfig(null);
             }
           } catch {
