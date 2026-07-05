@@ -108,7 +108,7 @@ Repo: `https://github.com/Romulus-Sol/DMV`, license MIT (repo root `LICENSE`).
 ## 7. Program mutability / upgrade authority — **please advise + audit the model**
 This is central to the "non-custodial, no held keys" claim: **an upgradeable program controlled by a single key is de facto custodial** (that key could swap the program and drain every vault). Our planned model at mainnet launch:
 
-> **`<UPGRADE_AUTHORITY_PLAN>`** — *decision pending. Options: (a) revoke upgrade authority → immutable; (b) Squads **multisig** ± timelock; (c) single hardware key (not acceptable for launch).*
+> **Planned:** upgrade authority held by a **Squads V4 multisig** (launch: 2-of-3 — founder + two independent signers), with program upgrades **timelocked and publicly announced** so users can exit before any change takes effect. **Not immutable at launch** — vaults are long-lived (potentially years), so a bug discovered post-launch must be patchable; an immutable program could not be fixed and a latent bug would be catastrophic for an inheritance vault. We therefore plan governed-upgradeable (multisig + timelock), **never a single hot/deployer key**, and ask the auditor to advise on this tradeoff (immutable vs. governed-upgradeable) for a long-lived inheritance protocol.
 
 Per-vault, owners can also opt into **immutability** (`VaultConfig.is_mutable`), which blocks `update_vault`/`revoke_vault`. Please audit both the per-vault immutability enforcement and advise on the program-level authority model.
 
@@ -138,16 +138,16 @@ We can share the internal review notes + the ATA-spoof fix commit as an appendix
 
 | Item | Value |
 |---|---|
-| **Pinned commit** | `c2bacfb` (branch `devnet`) — will freeze / tag `audit-<date>` before kickoff; scope is immutable at that commit. The only pre-mainnet program change is the `FEE_WALLET` **constant value** (non-logic). |
+| **Pinned commit** | Tag **`audit-2026-07-05`** (branch `devnet`) — scope is frozen at that commit; the program is unchanged since. The only pre-mainnet program change will be the `FEE_WALLET` **constant value** (non-logic, not security-relevant). |
 | **In-scope files** | the 31 `.rs` under `programs/dead-mans-vault/src/` (primary) + the crank's completability question (§3). |
 | **Out of scope** | `tasks/*.md`, TEE/agent-key device custody, mobile UX, RPC/notify infra, economics. |
 | **Build/test** | `anchor build` (prod floors) — **mainnet must NOT set the `devnet` Cargo feature** (it lowers timing floors for tests only; CI asserts this). Tests: `yarn`/`ts-mocha` via `yarn test:devnet`. Caveat: local validator gossip port collides with another service — spec §11 has the standalone-validator recipe. |
 | **Deployment** | devnet live; mainnet reuses the same program keypair (same ID); upgrade-authority per §7. |
-| **Upgrade authority** | `<UPGRADE_AUTHORITY_PLAN>` (§7). |
-| **Risk posture** | `<EXPECTED_TVL / # VAULTS / LAUNCH PLAN>` — please fill; severity weighting + price scale with value-at-risk. |
-| **Timeline** | `<DESIRED START / REPORT-BY / REMEDIATION WINDOW / RE-AUDIT TURNAROUND>`. |
+| **Upgrade authority** | Squads V4 multisig (2-of-3) + timelocked/announced upgrades; not immutable at launch (see §7). |
+| **Risk posture** | Early mainnet launch: aggregate TVL modest initially (early-adopter cohort, small test vaults), but **each vault may hold an individual's entire estate** — please weight severity by **per-vault worst-case (total, irreversible loss of one estate)**, not aggregate TVL. Vault count low at launch, growing with adoption; soft launch to a small cohort → public. |
+| **Timeline** | Start: earliest available slot (flexible on scheduling). Effort: your estimate for ~2,700 LOC / 20 instructions. Remediation turnaround: days. Re-audit requested after remediation. **Mainnet launch is gated on a passing re-audit — no fixed external deadline; we'd rather it be thorough than fast.** |
 | **Prior report** | shareable on request (§9). |
-| **Contact / terms** | `<NAMED CONTACT, EMAIL, TIMEZONE, RESPONSE SLA>`; NDA/disclosure terms as needed; license MIT. |
+| **Contact / terms** | Romulus-Sol (repo owner) — GitHub `github.com/Romulus-Sol`; email + timezone: _add before sending_; mid-audit question SLA: same-day. NDA fine if required; license MIT; publication rights granted for the final report. |
 
 ---
 *Prepared 2026-07-05. This brief was itself reviewed for accuracy (claims verified against code) and completeness (skeptical-auditor pass) before sending.*
