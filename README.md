@@ -20,7 +20,7 @@ Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initi
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.5)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.8)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility

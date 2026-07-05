@@ -283,7 +283,7 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **App version** | 1.13.5 (versionCode 91) |
+| **App version** | 1.13.8 (versionCode 94) |
 | **Tests** | 29/29 passing |
 
 ---

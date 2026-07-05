@@ -5,6 +5,28 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.13.6–1.13.8] — 2026-07-04 — Rebrand + keeper crank-only + cleanup
+
+### App
+- **Rebrand (1.13.6–1.13.7).** New ECG-pulse brand mark everywhere: app icon, Android
+  adaptive icon, splash, and a proper tintable-silhouette notification icon (accent fixed to
+  the real brand mint `#00FFA3`); in-app, a react-native-svg `BrandMark` replaces the generic
+  icon-font shields at every logo position (auth gate, Dashboard header + connect hero, Welcome
+  hero), the all-clear status icon is now a pulse, and remaining shields became semantic icons
+  (check-decagram / alert-octagon / open-padlock / etc.). No shield glyphs remain in the UI.
+- **1.13.8.** Removed the non-functional Close / Transfer / Ignore buttons from DeFi positions
+  in the Assets screen — they were dead no-ops (only toggled unused local state).
+
+### Keeper bot (server-side)
+- Added a **`CLOSE_EXECUTED`** flag (default on). Set to `0` for a **crank-only** keeper: it
+  still distributes expired vaults but never closes an executed vault to collect its rents,
+  leaving those for the owner. Recommended on devnet, where the close window is only 60s and an
+  always-on keeper would otherwise sweep an owner's own rent before they can reclaim it; mainnet
+  keeps it on (the 24h window is a fair owner window).
+
+### Website
+- New pulse favicon/logo + phone-mockup mark, and a mobile-responsive layout pass.
+
 ## [1.13.5] — 2026-07-04 — Keeper economics + permissionless cleanup
 
 Removes the last stranded value from a fired vault and makes third-party keepers
