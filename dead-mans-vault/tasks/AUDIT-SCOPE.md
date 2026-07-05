@@ -115,8 +115,7 @@ Per-vault, owners can also opt into **immutability** (`VaultConfig.is_mutable`),
 ---
 
 ## 8. Docs vs. code — the code is the source of truth
-`tasks/BUILD-SPEC-permissionless-execution.md` was reconciled to the as-built code on 2026-07-05 — its **§0.5 "As-built deltas"** authoritatively lists what shipped (specific-SOL via `execute_specific_sol`, the permissionless 24h-gated `close_executed_vault`, the keeper bounty, the 0.01 SOL creation fee, `open_token_dists`, the `devnet` feature, the 42 errors). Even so, **treat the on-chain code at the pinned commit as the source of truth** — the spec is prose context, not a substitute. `CLAUDE.md` is a current, accurate model overview and is in the repo.
-> Note: the frozen audit tag `audit-2026-07-05` predates the spec reconciliation, so the spec *at that tag* still reads pre-reconciliation. The program code is identical either way; this only affects the prose design doc, not what you audit.
+`tasks/BUILD-SPEC-permissionless-execution.md` was reconciled to the as-built code on 2026-07-05 (included in the pinned tag) — its **§0.5 "As-built deltas"** authoritatively lists what shipped (specific-SOL via `execute_specific_sol`, the permissionless 24h-gated `close_executed_vault`, the keeper bounty, the 0.01 SOL creation fee, `open_token_dists`, the `devnet` feature, the 42 errors). Even so, **treat the on-chain code at the pinned commit as the source of truth** — the spec is prose context, not a substitute. `CLAUDE.md` is a current, accurate model overview and is in the repo.
 
 ---
 
@@ -136,7 +135,7 @@ We can share the internal review notes + the ATA-spoof fix commit as an appendix
 
 | Item | Value |
 |---|---|
-| **Pinned commit** | Tag **`audit-2026-07-05`** (branch `devnet`) — scope is frozen at that commit; the program is unchanged since. The only pre-mainnet program change will be the `FEE_WALLET` **constant value** (non-logic, not security-relevant). |
+| **Pinned commit** | Tag **`audit-2026-07-05b`** (branch `devnet`; supersedes `audit-2026-07-05` — adds the spec reconciliation, identical program code) — scope is frozen at that commit. The only pre-mainnet program change will be the `FEE_WALLET` **constant value** (non-logic, not security-relevant). |
 | **In-scope files** | the 31 `.rs` under `programs/dead-mans-vault/src/` (primary) + the crank's completability question (§3). |
 | **Out of scope** | `tasks/*.md`, TEE/agent-key device custody, mobile UX, RPC/notify infra, economics. |
 | **Build/test** | `anchor build` (prod floors) — **mainnet must NOT set the `devnet` Cargo feature** (it lowers timing floors for tests only; CI asserts this). Tests: `yarn`/`ts-mocha` via `yarn test:devnet`. Caveat: local validator gossip port collides with another service — spec §11 has the standalone-validator recipe. |
