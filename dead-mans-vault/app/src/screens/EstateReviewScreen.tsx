@@ -1,4 +1,6 @@
 import React, { useState, useCallback } from 'react';
+import { explorerTx, networkLabel } from '../utils/rpcConfig';
+
 import {
   View,
   Text,
@@ -182,14 +184,14 @@ export function EstateReviewScreen() {
 
       Alert.alert(
         'Vault Activated',
-        `Vault created on Solana devnet.\n\n` +
+        `Vault created on Solana ${networkLabel()}.\n\n` +
         `Deposit SOL into the vault from the Dashboard to set up distribution.\n\n` +
         `Tx: ${vaultTxSig.slice(0, 20)}...`,
         [
           {
             text: 'View on Explorer',
             onPress: () => {
-              Linking.openURL(`https://explorer.solana.com/tx/${vaultTxSig}?cluster=devnet`);
+              Linking.openURL(explorerTx(vaultTxSig));
               navigation.popToTop();
               navigation.getParent()?.navigate('Status');
             },
@@ -301,7 +303,7 @@ export function EstateReviewScreen() {
           <Text style={styles.sectionLabel}>ON-CHAIN DETAILS</Text>
         </View>
         <View style={styles.detailsBody}>
-          <DetailRow label="Network" value="Devnet" />
+          <DetailRow label="Network" value={networkLabel()} />
           <DetailRow label="Program" value={truncateAddress(PROGRAM_ID, 4)} mono />
           <DetailRow label="Vault Rent" value="~0.008 SOL" />
           <DetailRow label="Agent Funding" value="~0.005 SOL" />

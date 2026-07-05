@@ -26,6 +26,23 @@ export function isDevnet(): boolean {
   return activeRpcUrl.includes('devnet') || activeRpcUrl.includes('api.devnet');
 }
 
+// Human-readable network name for UI labels — follows the active RPC.
+export function networkLabel(): string {
+  return isDevnet() ? 'Devnet' : 'Mainnet';
+}
+
+// Solana Explorer links that follow the active network (append ?cluster=devnet
+// only on devnet). Use these everywhere instead of hardcoding the cluster.
+function explorerSuffix(): string {
+  return isDevnet() ? '?cluster=devnet' : '';
+}
+export function explorerTx(signature: string): string {
+  return `https://explorer.solana.com/tx/${signature}${explorerSuffix()}`;
+}
+export function explorerAddress(address: string): string {
+  return `https://explorer.solana.com/address/${address}${explorerSuffix()}`;
+}
+
 export function heliusNetPrefix(): string {
   return isDevnet() ? 'api-devnet' : 'api-mainnet';
 }

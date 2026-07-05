@@ -24,7 +24,7 @@ import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
 import { truncateAddress, formatDuration } from '../utils/formatting';
-import { getRpcUrl, maskRpc, isCustomRpc, RPC_OVERRIDE_KEY } from '../utils/rpcConfig';
+import { RPC_OVERRIDE_KEY, explorerAddress, explorerTx, getRpcUrl, isCustomRpc, maskRpc, networkLabel } from '../utils/rpcConfig';
 import { getSetting, setSetting, deleteSetting } from '../db/settingsRepo';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
@@ -174,7 +174,7 @@ export function SettingsScreen() {
               const buttons = [
                 ...summary.txs.slice(0, 2).map((t: { label: string; sig: string }, i: number) => ({
                   text: `View tx ${i + 1}`,
-                  onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${t.sig}?cluster=devnet`),
+                  onPress: () => Linking.openURL(explorerTx(t.sig)),
                 })),
                 { text: 'Done' },
               ];
@@ -220,7 +220,7 @@ export function SettingsScreen() {
               const buttons = [
                 ...summary.txs.slice(0, 2).map((t: { label: string; sig: string }, i: number) => ({
                   text: `View tx ${i + 1}`,
-                  onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${t.sig}?cluster=devnet`),
+                  onPress: () => Linking.openURL(explorerTx(t.sig)),
                 })),
                 { text: 'Done' },
               ];
@@ -461,13 +461,13 @@ export function SettingsScreen() {
       <View style={styles.sectionBlock}>
         <Text style={styles.sectionLabel}>VAULT CONTRACT</Text>
         <View style={styles.card}>
-          <TouchableOpacity onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID}?cluster=devnet`)}>
+          <TouchableOpacity onPress={() => Linking.openURL(explorerAddress(PROGRAM_ID))}>
             <SettingRow icon="check-decagram" iconColor={COLORS.accent} label="Vault Program" value={truncateAddress(PROGRAM_ID, 4)} link />
           </TouchableOpacity>
           {vaultConfig && vaultPda && (
             <>
               <View style={styles.rowDivider} />
-              <TouchableOpacity onPress={() => Linking.openURL(`https://explorer.solana.com/address/${vaultPda.toBase58()}?cluster=devnet`)}>
+              <TouchableOpacity onPress={() => Linking.openURL(explorerAddress(vaultPda.toBase58()))}>
                 <SettingRow icon="safe-square-outline" iconColor={COLORS.blueAccent} label="Your Vault" value={truncateAddress(vaultPda.toBase58(), 4)} link />
               </TouchableOpacity>
             </>
@@ -485,7 +485,7 @@ export function SettingsScreen() {
             </>
           )}
           <View style={styles.rowDivider} />
-          <SettingRow icon="web" iconColor="rgba(255,255,255,0.3)" label="Network" value="Devnet" />
+          <SettingRow icon="web" iconColor="rgba(255,255,255,0.3)" label="Network" value={networkLabel()} />
           {isOwner && vaultConfig && vaultConfig.active && !vaultConfig.executed && vaultConfig.isMutable !== false && (
             <>
               <View style={styles.rowDivider} />

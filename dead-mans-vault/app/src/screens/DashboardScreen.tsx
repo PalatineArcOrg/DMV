@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { explorerTx } from '../utils/rpcConfig';
+
 import {
   View,
   Text,
@@ -446,7 +448,7 @@ export function DashboardScreen() {
           {lastOnChainTx && (
             <TouchableOpacity
               style={styles.onChainTxRow}
-              onPress={() => Linking.openURL(`https://explorer.solana.com/tx/${lastOnChainTx}?cluster=devnet`)}
+              onPress={() => Linking.openURL(explorerTx(lastOnChainTx))}
             >
               <MaterialCommunityIcons name="open-in-new" size={10} color={COLORS.accent} />
               <Text style={styles.onChainTxText}>

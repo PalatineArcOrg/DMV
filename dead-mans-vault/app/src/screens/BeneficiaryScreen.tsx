@@ -1,4 +1,6 @@
 import React, { useState, useCallback } from 'react';
+import { explorerTx } from '../utils/rpcConfig';
+
 import {
   View,
   Text,
@@ -136,7 +138,7 @@ export function BeneficiaryScreen() {
                 }
 
                 Alert.alert('Vault Updated', `Beneficiaries updated on-chain.\n\nTx: ${txSig.slice(0, 20)}...`, [
-                  { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${txSig}?cluster=devnet`) },
+                  { text: 'View on Explorer', onPress: () => Linking.openURL(explorerTx(txSig)) },
                   { text: 'OK', onPress: () => navigation.goBack() },
                 ]);
               } catch (err: any) {

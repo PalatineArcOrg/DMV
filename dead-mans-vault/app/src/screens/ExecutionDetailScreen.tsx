@@ -10,7 +10,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRoute } from '@react-navigation/native';
 import { COLORS, FONTS } from '../utils/constants';
-import { isDevnet } from '../utils/rpcConfig';
+import { explorerTx } from '../utils/rpcConfig';
 import { HistoryStep } from '../services/ExecutionHistoryService';
 
 const TYPE_ICONS: Record<string, string> = {
@@ -26,9 +26,7 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 function openExplorer(signature: string) {
-  const url = isDevnet()
-    ? `https://explorer.solana.com/tx/${signature}?cluster=devnet`
-    : `https://explorer.solana.com/tx/${signature}`;
+  const url = explorerTx(signature);
   Linking.openURL(url);
 }
 

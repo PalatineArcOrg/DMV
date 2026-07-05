@@ -1,4 +1,6 @@
 import React, { useCallback, useRef, useMemo, useState, useEffect } from 'react';
+import { explorerAddress, explorerTx, networkLabel } from '../utils/rpcConfig';
+
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Linking, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -135,7 +137,7 @@ export function SetupWizardScreen() {
 
               setHasVaultAssets(false);
               Alert.alert('Assets Withdrawn', `${assetCount} asset(s) returned to your wallet.\n\nTx: ${lastSig.slice(0, 20)}...`, [
-                { text: 'View on Explorer', onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${lastSig}?cluster=devnet`) },
+                { text: 'View on Explorer', onPress: () => Linking.openURL(explorerTx(lastSig)) },
                 { text: 'OK' },
               ]);
             } catch (err: any) {
@@ -186,7 +188,7 @@ export function SetupWizardScreen() {
               const buttons = [
                 ...summary.txs.slice(0, 2).map((t: { label: string; sig: string }, i: number) => ({
                   text: `View tx ${i + 1}`,
-                  onPress: () => Linking.openURL(`https://explorer.solana.com/tx/${t.sig}?cluster=devnet`),
+                  onPress: () => Linking.openURL(explorerTx(t.sig)),
                 })),
                 { text: 'Done' },
               ];
@@ -381,19 +383,19 @@ export function SetupWizardScreen() {
             <Text style={styles.sectionLabel}>ON-CHAIN DETAILS</Text>
           </View>
           <View style={styles.detailsBody}>
-            <DetailRow label="Network" value="Devnet" />
+            <DetailRow label="Network" value={networkLabel()} />
             <DetailRow
               label="Program"
               value={truncateAddress(PROGRAM_ID, 4)}
               mono
-              onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID}?cluster=devnet`)}
+              onPress={() => Linking.openURL(explorerAddress(PROGRAM_ID))}
             />
             {vaultPda && (
               <DetailRow
                 label="Your Vault"
                 value={truncateAddress(vaultPda.toBase58(), 4)}
                 mono
-                onPress={() => Linking.openURL(`https://explorer.solana.com/address/${vaultPda.toBase58()}?cluster=devnet`)}
+                onPress={() => Linking.openURL(explorerAddress(vaultPda.toBase58()))}
               />
             )}
             <DetailRow label="Execution" value="Permissionless" />
