@@ -11,6 +11,17 @@ import {
   createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
+  // Token-2022 extension characterization (RWA / tokenized-stock surface):
+  ExtensionType,
+  AccountState,
+  getMintLen,
+  createInitializeMintInstruction,
+  createInitializeTransferFeeConfigInstruction,
+  createInitializeDefaultAccountStateInstruction,
+  createInitializePermanentDelegateInstruction,
+  createInitializeNonTransferableMintInstruction,
+  createInitializeTransferHookInstruction,
+  createThawAccountInstruction,
 } from "@solana/spl-token";
 
 const { Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL, Transaction } =
@@ -1445,6 +1456,140 @@ describe("dead-mans-vault — permissionless execution", () => {
       const gain = crankerAfter - crankerBefore;
       expect(gain).to.be.at.least(rents - 10000);
       expect(gain).to.be.at.most(rents);
+    });
+  });
+
+  // Characterizes DMV's plain `transfer_checked` behavior across the Token-2022
+  // extensions that tokenized stocks (xStocks, Backpack/Sunrise) use or could
+  // switch on. See tasks/TOKEN2022-RWA-SUPPORT.md for the on-chain findings.
+  describe("Token-2022 extension characterization (RWA / tokenized-stock surface)", function () {
+    this.timeout(240000);
+    const agent = Keypair.generate();
+    const cranker = Keypair.generate();
+    const X: any = {};
+
+    // Build a Token-2022 mint with extensions. Extension init ixs MUST precede
+    // initializeMint; the mint account is pre-sized via getMintLen. `extIxs`
+    // receives (mintPubkey, mintAuthorityPubkey).
+    async function makeExtMint(
+      payer: any,
+      exts: any[],
+      extIxs: (m: any, auth: any) => any[],
+      frozen = false
+    ) {
+      const mintKp = Keypair.generate();
+      const len = getMintLen(exts);
+      const lamports = await conn.getMinimumBalanceForRentExemption(len);
+      const tx = new Transaction().add(
+        SystemProgram.createAccount({ fromPubkey: payer.publicKey, newAccountPubkey: mintKp.publicKey, space: len, lamports, programId: TOKEN_2022_PROGRAM_ID }),
+        ...extIxs(mintKp.publicKey, payer.publicKey),
+        createInitializeMintInstruction(mintKp.publicKey, 0, payer.publicKey, frozen ? payer.publicKey : null, TOKEN_2022_PROGRAM_ID),
+      );
+      await provider.sendAndConfirm(tx, [payer, mintKp]);
+      return mintKp.publicKey;
+    }
+
+    // Full vault owned/minted by one keypair, funded with 1000 units of the ext mint.
+    async function makeVaultWithExtMint(exts: any[], extIxs: (m: any, auth: any) => any[], frozen = false) {
+      const owner = Keypair.generate();
+      await fund(owner.publicKey, 5);
+      const mint = await makeExtMint(owner, exts, extIxs, frozen);
+      const b1 = Keypair.generate();
+      const p = await initVault({ owner, agent: agent.publicKey, beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }] });
+      await depositSol(owner, p.vault, LAMPORTS_PER_SOL);
+      const ata = getAssociatedTokenAddressSync(mint, p.vault, true, TOKEN_2022_PROGRAM_ID);
+      const tx = new Transaction().add(createAssociatedTokenAccountInstruction(owner.publicKey, ata, p.vault, mint, TOKEN_2022_PROGRAM_ID));
+      if (frozen) tx.add(createThawAccountInstruction(ata, mint, owner.publicKey, [], TOKEN_2022_PROGRAM_ID));
+      await provider.sendAndConfirm(tx, [owner]);
+      await mintTo(conn, owner, mint, ata, owner, 1000, [], undefined, TOKEN_2022_PROGRAM_ID);
+      return { owner, b: b1, mint, ...p };
+    }
+
+    before(async function () {
+      this.timeout(240000);
+      await fund(cranker.publicKey, 20);
+
+      // (a) permanent delegate — what real xStocks/Backpack stocks actually carry
+      X.permDelegate = await makeVaultWithExtMint(
+        [ExtensionType.PermanentDelegate],
+        (m, auth) => [createInitializePermanentDelegateInstruction(m, auth, TOKEN_2022_PROGRAM_ID)]);
+
+      // (b) transfer fee (1% / max 1000) — other RWAs
+      X.transferFee = await makeVaultWithExtMint(
+        [ExtensionType.TransferFeeConfig],
+        (m, auth) => [createInitializeTransferFeeConfigInstruction(m, auth, auth, 100, BigInt(1000), TOKEN_2022_PROGRAM_ID)]);
+
+      // (c) default-frozen — permissioned RWA: fresh recipient ATA is frozen
+      X.frozen = await makeVaultWithExtMint(
+        [ExtensionType.DefaultAccountState],
+        (m) => [createInitializeDefaultAccountStateInstruction(m, AccountState.Frozen, TOKEN_2022_PROGRAM_ID)],
+        true);
+
+      // (d) non-transferable
+      X.nonTransferable = await makeVaultWithExtMint(
+        [ExtensionType.NonTransferable],
+        (m) => [createInitializeNonTransferableMintInstruction(m, TOKEN_2022_PROGRAM_ID)]);
+
+      // (e) active transfer hook (forward risk) — hook set to a dummy program id;
+      //     plain transfer_checked cannot resolve/forward the hook's extra accounts.
+      const dummyHook = Keypair.generate().publicKey;
+      X.hook = await makeVaultWithExtMint(
+        [ExtensionType.TransferHook],
+        (m, auth) => [createInitializeTransferHookInstruction(m, auth, dummyHook, TOKEN_2022_PROGRAM_ID)]);
+
+      await sleep(GRACE_WAIT_MS);
+    });
+
+    // Crank a single-beneficiary vault through execute_token_shares (no finalize
+    // needed — token ix gate on grace only). Throws if the transfer reverts.
+    async function tokenSharesCrank(s: any) {
+      await program.methods.beginExecution()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, heartbeatRecord: s.heartbeat, executionLog: s.execution, assetPlan: null, systemProgram: SystemProgram.programId })
+        .signers([cranker]).rpc();
+      const tokenDist = tokenDistPda(s.vault, s.mint);
+      const vaultAta = getAssociatedTokenAddressSync(s.mint, s.vault, true, TOKEN_2022_PROGRAM_ID);
+      await program.methods.beginTokenDist()
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, executionLog: s.execution, mint: s.mint, vaultAta, assetPlan: null, tokenDist, systemProgram: SystemProgram.programId })
+        .signers([cranker]).rpc();
+      const benefAta = getAssociatedTokenAddressSync(s.mint, s.b.publicKey, true, TOKEN_2022_PROGRAM_ID);
+      await provider.sendAndConfirm(new Transaction().add(
+        createAssociatedTokenAccountInstruction(cranker.publicKey, benefAta, s.b.publicKey, s.mint, TOKEN_2022_PROGRAM_ID)), [cranker]);
+      await program.methods.executeTokenShares(Buffer.from([0]))
+        .accountsPartial({ payer: cranker.publicKey, vaultConfig: s.vault, tokenDist, mint: s.mint, vaultAta, tokenProgram: TOKEN_2022_PROGRAM_ID })
+        .remainingAccounts([{ pubkey: benefAta, isWritable: true, isSigner: false }])
+        .signers([cranker]).rpc();
+      return { benefAta, vaultAta, tokenDist };
+    }
+
+    it("permanent-delegate mint (what real xStocks/Backpack stocks carry) → distributes correctly", async () => {
+      const { benefAta } = await tokenSharesCrank(X.permDelegate);
+      expect(Number((await getAccount(conn, benefAta, undefined, TOKEN_2022_PROGRAM_ID)).amount)).to.equal(1000);
+    });
+
+    it("transfer-fee mint → distribution SUCCEEDS (beneficiary funded; fee withheld to issuer)", async () => {
+      const { benefAta } = await tokenSharesCrank(X.transferFee);
+      const amt = Number((await getAccount(conn, benefAta, undefined, TOKEN_2022_PROGRAM_ID)).amount);
+      // transfer_checked succeeds; the 1% fee is withheld within the recipient account
+      // (claimable by the issuer's withdraw-withheld authority). Key point: it distributes.
+      expect(amt).to.be.greaterThan(0);
+      expect(amt).to.be.at.most(1000);
+    });
+
+    it("default-frozen mint (permissioned RWA) → frozen recipient ATA → distribution BRICKS", async () => {
+      try { await tokenSharesCrank(X.frozen); expect.fail("execute_token_shares should revert on a frozen recipient ATA"); }
+      catch (e: any) { expect(e, "expected a revert (AccountFrozen)").to.exist; }
+    });
+
+    it("non-transferable mint → distribution BRICKS", async () => {
+      try { await tokenSharesCrank(X.nonTransferable); expect.fail("execute_token_shares should revert on a non-transferable mint"); }
+      catch (e: any) { expect(e, "expected a revert (NonTransferable)").to.exist; }
+    });
+
+    it("active transfer-hook mint (forward risk) → plain transfer_checked BRICKS (extra accounts not forwarded)", async () => {
+      // Characterizes the forward risk: if an issuer attaches a hook, DMV's plain
+      // transfer_checked (no hook-account resolution) can no longer move the token.
+      try { await tokenSharesCrank(X.hook); expect.fail("execute_token_shares should revert: hook extra-accounts not forwarded"); }
+      catch (e: any) { expect(e, "expected a revert (transfer hook)").to.exist; }
     });
   });
 });
