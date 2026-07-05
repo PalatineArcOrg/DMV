@@ -12,8 +12,8 @@ Companion: `MAINNET-READINESS.md` (the why). Last updated 2026-07-05.
 |---|---|---|
 | `<TREASURY>` | Mainnet fee wallet | **DECIDED: new wallet, not `98x9…`.** Use a multisig (Squads). |
 | `<MAINNET_RPC>` | Helius mainnet URL | `https://mainnet.helius-rpc.com/?api-key=…` (paid; public RPC will 429). |
-| `<DEPLOYER>` | Deploy wallet keypair path | Funded with **~5 real SOL** (program account rent + fees). |
-| `<UPGRADE_AUTH>` | Program upgrade authority | A **multisig / hardware** wallet — never a hot key. |
+| `<DEPLOYER>` | Deploy wallet keypair path | Funded with **~13 real SOL** — the `.so` is ~602 KB; program-data rent is ~8.6 SOL (loader reserves 2× size) and the deploy buffer (~4.3 SOL) coexists before refund → ~13 SOL peak. Compute from the real binary: `solana rent $(stat -c%s target/deploy/dead_mans_vault.so)`. |
+| `<UPGRADE_AUTH>` | Program upgrade authority — the Squads **vault PDA** | The Squads V4 vault PDA (a PDA → needs `--skip-new-upgrade-authority-signer-check`, Step 12.5). Never a hot key. |
 | `<CRANKER_MAINNET>` | notify-server + keeper cranker keypairs | Funded with a little real SOL for fees. |
 
 `export PATH="$HOME/.local/share/solana/install/active_release/bin:$HOME/.cargo/bin:$HOME/.avm/bin:$HOME/.nvm/versions/node/v24.14.0/bin:$PATH"`
@@ -22,12 +22,15 @@ Companion: `MAINNET-READINESS.md` (the why). Last updated 2026-07-05.
 
 ## Pre-flight gates — ALL must be true before Step 1
 
-- [ ] ⛔ **Security audit complete**, findings remediated, and `anchor test` re-run green (29/29 + any regression tests from the audit).
+- [ ] ⛔ **Security audit complete**, findings remediated, and the 29 integration tests re-run green under the `devnet` feature (`yarn test:devnet` vs a local validator — the prod artifact only runs the `--lib` floor-guard in Step 4) + any audit regression tests.
 - [ ] `<TREASURY>` confirmed and control verified (send/receive test on mainnet).
-- [ ] `<DEPLOYER>` funded with ~5 mainnet SOL (`solana balance <DEPLOYER> --url mainnet-beta`).
+- [ ] `<DEPLOYER>` funded with **~13 mainnet SOL** (2× program-data rent + coexisting buffer — see the placeholder note) (`solana balance <DEPLOYER> --url <MAINNET_RPC>`).
 - [ ] `<MAINNET_RPC>` provisioned + smoke-tested (`getVersion`).
 - [ ] Working tree clean; on a fresh cutover branch (Step 0).
 - [ ] `CLOSE_EXECUTED`/economics/biometric/distribution decisions locked (§2.3–2.6 of readiness).
+- [ ] **Secrets not in git:** `<DEPLOYER>`, `<CRANKER_MAINNET>`, and all `.env` are gitignored + untracked (`git check-ignore`); the reused `dead_mans_vault-keypair.json` is restored from secure backup into `target/deploy/`.
+- [ ] **Dependency audit clean:** `cargo audit` (program) + `yarn audit` (app).
+- [ ] **Squads multisig provisioned + rehearsed:** created, all 3 signers confirmed, timelock configured, and a full propose→approve→execute **upgrade rehearsed on devnet** (readiness §1.8). A **fallback RPC** is configured alongside `<MAINNET_RPC>`.
 
 ---
 
@@ -58,7 +61,7 @@ Edit all three so the on-chain constraint, the client's explicit `feeRecipient`,
 import { isDevnet } from './rpcConfig';
 const CLUSTER = isDevnet() ? "devnet" : "mainnet-beta";
 ```
-(`CHAIN_IDENTIFIER` is computed at module load from the build's default RPC — which is mainnet after Step 7 — so wallets authorize on `solana:mainnet-beta`.)
+(`CHAIN_IDENTIFIER` is computed at module load from the build's default RPC — which is mainnet after Step 7 — so wallets authorize on `solana:mainnet-beta`. Edge: a user who sets a *custom devnet* RPC override at runtime would still authorize as mainnet, since these are module-level consts — acceptable for launch.)
 **Verify:** after the app build (Step 8), a wallet-connect prompt shows **mainnet**, not devnet.
 
 ---
@@ -78,27 +81,36 @@ dead_mans_vault = "GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb"
 cd /root/DMV/dead-mans-vault
 yarn build:prod                 # == `anchor build`  — NEVER build:devnet
 cargo test -p dead-mans-vault --lib   # asserts 1-day / 7-day / 24-h floors
+sha256sum target/deploy/dead_mans_vault.so            # RECORD this artifact hash
+solana-verify build                                    # reproducible build (docker: Agave 3.0.15 / Rust 1.89.0)
 ```
 **Verify (do NOT proceed if any fails):**
 - `cargo test` passes the `min_durations_match_build_profile` assertion → prod floors baked in.
 - `grep -c '"address": "<TREASURY>"' target/idl/dead_mans_vault.json` on the `fee_recipient` account → confirms the new fee wallet is in the IDL.
 - `solana address -k target/deploy/dead_mans_vault-keypair.json` → `GXCu5964…` (program ID unchanged).
+- Record the `.so` `sha256sum`; publish it + the single-constant (FEE_WALLET) diff from the audited tag `audit-2026-07-05b`, so users/auditor can confirm on-chain bytecode == audited source.
 
 ---
 
-## Step 5 — Deploy to mainnet-beta + set upgrade authority + IDL init ⛔
+## Step 5 — Deploy to mainnet-beta + IDL init (authority stays on the deployer) ⛔
+**Deploy through `<MAINNET_RPC>` (Helius), NOT the `mainnet` moniker** — `--provider.cluster mainnet` resolves to the *public* `api.mainnet-beta.solana.com`, which 429s on a ~602 KB (dozens-of-buffer-writes) deploy and strands a partially-funded buffer.
 ```bash
-solana balance <DEPLOYER> --url mainnet-beta        # ~5 SOL present?
-anchor deploy --provider.cluster mainnet --provider.wallet <DEPLOYER>
+solana config set --url <MAINNET_RPC>
+solana balance <DEPLOYER> --url <MAINNET_RPC>       # ~13 SOL present? (see budget note)
+# Deploy over the paid RPC, with a priority fee + retries (large-program deploys fail on congestion):
+anchor deploy --provider.cluster <MAINNET_RPC> --provider.wallet <DEPLOYER> \
+  -- --with-compute-unit-price 50000 --max-sign-attempts 100 --use-rpc
+# If it fails mid-write, RESUME from the buffer (don't re-deploy from scratch):
+#   solana program show --buffers --url <MAINNET_RPC>            # find the buffer
+#   solana program deploy --buffer <BUFFER> --url <MAINNET_RPC>  # resume
+#   solana program close --buffers --url <MAINNET_RPC>           # reclaim rent from a dead buffer
 # First mainnet deploy → the IDL account doesn't exist yet → INIT (not upgrade):
-anchor idl init  --provider.cluster mainnet --filepath target/idl/dead_mans_vault.json \
+anchor idl init  --provider.cluster <MAINNET_RPC> --filepath target/idl/dead_mans_vault.json \
   GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb
-# Move upgrade authority off the hot deployer to the multisig:
-solana program set-upgrade-authority GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb \
-  --new-upgrade-authority <UPGRADE_AUTH> --url mainnet-beta
 ```
-**Verify:** `solana program show GXCu5964… --url mainnet-beta` → shows the program, `Authority == <UPGRADE_AUTH>`. `anchor idl fetch … --provider.cluster mainnet | grep close_executed_vault` → present.
-⛔ **Point of no return for funds** is not here (no vaults exist yet) — but the upgrade-authority hand-off is; double-check `<UPGRADE_AUTH>` before running it.
+**Do NOT hand off upgrade authority yet.** Keep `<DEPLOYER>` (a hardware/secure key) as authority through the Step 12 first-funds smoke test, so a bug found there can be patched with a fast `anchor upgrade`. The multisig handoff is **Step 12.5**, after the smoke test.
+**Verify:** `solana program show GXCu5964… --url <MAINNET_RPC>` → program present, `Authority == <DEPLOYER>`. Then `solana program dump GXCu5964… onchain.so --url <MAINNET_RPC>` + `sha256sum onchain.so` → **must equal the Step 4 artifact hash** (deploys can partially succeed). `anchor idl fetch … | grep close_executed_vault` → present.
+⛔ **Point of no return for funds** is Step 12 (first real vault), not here.
 
 ---
 
@@ -195,18 +207,34 @@ Before announcing: on a real device, with a **small** amount:
 
 ---
 
+## Step 12.5 — Hand off upgrade authority to the Squads multisig ⛔ (only after Step 12 passes)
+Now that the program is proven on real funds, move authority off the deployer.
+```bash
+# <UPGRADE_AUTH> must be the Squads VAULT PDA (not the multisig account); a PDA can't sign the CLI
+# tx, so --skip-new-upgrade-authority-signer-check is REQUIRED (else the command aborts):
+solana program set-upgrade-authority GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb \
+  --new-upgrade-authority <UPGRADE_AUTH> --skip-new-upgrade-authority-signer-check \
+  --url <MAINNET_RPC>
+# Move the IDL authority too, so it isn't stranded on the hot deployer:
+anchor idl set-authority --provider.cluster <MAINNET_RPC> --program-id GXCu5964… <UPGRADE_AUTH>
+```
+**Verify:** `solana program show GXCu5964…` → `Authority == <UPGRADE_AUTH>`. Then run a **real propose→approve→execute upgrade through Squads end-to-end** to prove the governance path works (you rehearsed it on devnet in pre-flight). **NEVER pass `--final`** — it freezes the program, and an inheritance vault must stay patchable.
+
+---
+
 ## Step 13 — Merge, monitor, announce
 ```bash
 git checkout main && git merge mainnet && git push        # or make mainnet the release branch
 ```
-- Monitor cranker balances (notify + keeper) — top up before they drain.
-- Watch `journalctl -u dmv-notify -u dmv-keeper` for FCM rejects / crank failures.
+- **Automated** cranker-balance alerting (notify + keeper) with a top-up threshold — a drained cranker = vaults never execute = beneficiaries never inherit (availability-Critical). Manual watching is not a control.
+- **Automated** crank-failure + `solana logs <PROGRAM_ID>` alerting (Sentry/Discord/PagerDuty); watch the first hour after deploy closely.
+- Confirm the **fallback RPC** takes over if `<MAINNET_RPC>` (Helius) has an outage — it's a shared SPOF for the app + both crankers.
 - Update README/CHANGELOG "Network: Mainnet" + program links (drop `?cluster=devnet`).
 
 ---
 
 ## Abort / rollback
 - **Before Step 5 (deploy):** nothing is on mainnet — just `git checkout devnet`, discard the branch.
-- **After deploy, before users:** the program is deployed but holds no funds; you can `anchor upgrade` a fix (upgrade authority = `<UPGRADE_AUTH>`), or simply not distribute the APK. No user funds at risk.
+- **After deploy, before the Step 12.5 handoff:** authority is still on `<DEPLOYER>`, so you can `anchor upgrade` a fix directly (fast), or simply not distribute the APK. No user funds at risk. **After the Step 12.5 handoff**, a fix requires the Squads propose→approve→execute ceremony (that is the point) — never revert authority to a hot key to "move faster."
 - **After real vaults exist:** execution is permissionless + immutable-by-design once past deadline — treat any fix as a careful, audited program upgrade; never touch the upgrade authority casually. The devnet build + tag from Step 0 is the reference baseline.
 - **Servers** can revert to devnet by restoring their prior `.env` + `systemctl restart` at any time (they hold no authority).

@@ -23,9 +23,9 @@ A self-custody **inheritance** protocol moves a user's entire estate, irreversib
 
 ### 1.2 🔴 Mainnet program deploy — plain build, feature OFF
 - Build with **`yarn build:prod`** (= plain `anchor build`) — **never** `build:devnet`. Verified: default floors are the safe 1d/7d/24h. CI guards it.
-- Fund the deploy (~4–5 SOL for the program account on mainnet-beta).
+- Fund the deploy with **~13 SOL** — the `.so` is ~602 KB; program-data rent is ~8.6 SOL (loader reserves 2× size) and the deploy buffer (~4.3 SOL) coexists before refund. **Deploy through the Helius `<MAINNET_RPC>`, not the `mainnet` moniker** (public RPC 429s on a large-program deploy) — with `--with-compute-unit-price` + buffer-resume on failure (runbook Step 5).
 - Decide: **reuse the existing program keypair** (`target/deploy/dead_mans_vault-keypair.json` → same program ID everywhere, less churn) or generate a fresh mainnet keypair (then §1.3 applies). Recommend reuse unless there's a reason not to.
-- Set the upgrade authority deliberately (a multisig/hardware wallet, not a hot key).
+- Set the upgrade authority deliberately. **Keep it on the deployer through the §1.7 smoke test, then hand off to the Squads multisig** (runbook Step 12.5) with `--skip-new-upgrade-authority-signer-check` (the vault PDA can't sign). Produce a **verifiable build** (`solana-verify`) + publish the bytecode hash so users can confirm on-chain == audited source.
 
 ### 1.3 🔴 Program ID propagation (only if the mainnet ID differs from devnet)
 If a **new** program keypair is used, update every hardcoded literal (the app `constants.ts` + the 4 app IDL copies are the ones that silently break signing):
@@ -52,6 +52,17 @@ If a **new** program keypair is used, update every hardcoded literal (the app `c
 - Full autonomous cycle: create → escalate → autonomous execute → notifications ("executing" + "complete") → owner close & reclaim rent.
 - Beneficiary **claim** flow via a real MWA wallet.
 - Device migration / `rotate_agent`.
+
+### 1.8 🔴 Governance provisioned + rehearsed (upgrade-authority path)
+Because the program is governed-upgradeable (§2 / AUDIT-SCOPE §7), the multisig path is itself a launch dependency:
+- **Squads V4 multisig created**, all signers hold working keys, **timelock configured**.
+- A full **propose→approve→execute upgrade rehearsed on devnet** — an untested governance path means you may be unable to ship a post-launch security fix (availability-Critical).
+- Handoff sequenced **after** the §1.7 smoke test (runbook Step 12.5), never before.
+
+### 1.9 🔴 Cranker liveness monitoring + RPC redundancy
+A drained cranker or an RPC outage = vaults never execute = beneficiaries never inherit (availability-Critical):
+- **Automated** cranker-balance alerting (notify + keeper) with a top-up threshold; **automated** crank-failure + `solana logs` alerting. Manual `journalctl` watching is not a control.
+- A **fallback RPC** alongside the Helius `<MAINNET_RPC>` (a single endpoint is a shared SPOF for the app + both crankers).
 
 ---
 
