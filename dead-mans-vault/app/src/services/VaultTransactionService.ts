@@ -14,6 +14,11 @@ import {
   createTransferInstruction,
   createTransferCheckedInstruction,
   getMint,
+  getNonTransferable,
+  getDefaultAccountState,
+  getTransferHook,
+  getPausableConfig,
+  AccountState,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -487,6 +492,39 @@ export class VaultTransactionService {
       SystemProgram.transfer({ fromPubkey: owner, toPubkey: vaultPda, lamports: amountLamports }),
     );
     return this.addPriorityFee(tx, [owner, vaultPda], 80_000);
+  }
+
+  /**
+   * Can this token actually be moved into a vault? Reads the mint's Token-2022
+   * extensions and rejects tokens whose transfer would fail on-chain — so the UI can
+   * warn BEFORE the user signs a doomed transaction. Returns `{ ok: true }` for legacy
+   * SPL and plain Token-2022 mints; a human reason when it can't be deposited. Fails
+   * open (ok=true) if the mint can't be read — the tx preflight will still catch it.
+   */
+  async checkDepositable(mint: PublicKey): Promise<{ ok: boolean; reason?: string }> {
+    try {
+      const tokenProgram = await this.getTokenProgramForMint(mint);
+      if (tokenProgram.equals(TOKEN_PROGRAM_ID)) return { ok: true }; // legacy SPL — always transferable
+      const mintInfo = await getMint(this.connection, mint, 'confirmed', tokenProgram);
+      if (getNonTransferable(mintInfo)) {
+        return { ok: false, reason: 'This token is non-transferable' };
+      }
+      const das = getDefaultAccountState(mintInfo);
+      if (das && das.state === AccountState.Frozen) {
+        return { ok: false, reason: 'This token is frozen by default (a permissioned / KYC-gated asset)' };
+      }
+      const hook = getTransferHook(mintInfo);
+      if (hook && hook.programId && !hook.programId.equals(PublicKey.default)) {
+        return { ok: false, reason: 'This token uses a transfer hook, which the vault does not yet support' };
+      }
+      const pausable = getPausableConfig(mintInfo);
+      if (pausable && pausable.paused) {
+        return { ok: false, reason: 'This token is currently paused by the issuer' };
+      }
+      return { ok: true };
+    } catch {
+      return { ok: true };
+    }
   }
 
   async buildDepositTokenTx(owner: PublicKey, mint: PublicKey, rawAmount: number): Promise<Transaction> {

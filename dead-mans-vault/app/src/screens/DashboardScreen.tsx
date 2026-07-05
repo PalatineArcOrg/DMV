@@ -11,6 +11,7 @@ import {
   Animated,
   Linking,
   Image,
+  Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -216,20 +217,32 @@ export function DashboardScreen() {
     if (!publicKey || !signTransaction) throw new Error('Wallet not connected');
     const txService = new VaultTransactionService();
     const connection = txService.getConnection();
-    const tx = await txService.buildDepositTokenTx(publicKey, mint, rawAmount);
-    tx.feePayer = publicKey;
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    tx.recentBlockhash = blockhash;
-    const signed = await signTransaction(tx);
-    const sig = await connection.sendRawTransaction(
-      (signed as Transaction).serialize(),
-      { skipPreflight: false, preflightCommitment: 'confirmed' },
-    );
-    await connection.confirmTransaction(
-      { signature: sig, blockhash, lastValidBlockHeight },
-      'confirmed',
-    );
-    await loadVaultState();
+    // Warn BEFORE signing if this token can't be moved (non-transferable / frozen /
+    // transfer-hook / paused) — otherwise the tx fails at preflight and looks like a no-op.
+    const depositable = await txService.checkDepositable(mint);
+    if (!depositable.ok) {
+      Alert.alert("Can't deposit this token", `${depositable.reason}, so it can't be moved into the vault.`);
+      throw new Error(depositable.reason || 'Token cannot be deposited');
+    }
+    try {
+      const tx = await txService.buildDepositTokenTx(publicKey, mint, rawAmount);
+      tx.feePayer = publicKey;
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      tx.recentBlockhash = blockhash;
+      const signed = await signTransaction(tx);
+      const sig = await connection.sendRawTransaction(
+        (signed as Transaction).serialize(),
+        { skipPreflight: false, preflightCommitment: 'confirmed' },
+      );
+      await connection.confirmTransaction(
+        { signature: sig, blockhash, lastValidBlockHeight },
+        'confirmed',
+      );
+      await loadVaultState();
+    } catch (e: any) {
+      Alert.alert('Deposit failed', String(e?.message || e).slice(0, 200));
+      throw e;
+    }
   }, [publicKey, signTransaction, loadVaultState]);
 
   const handleWithdrawSol = useCallback(async (lamports: number) => {
