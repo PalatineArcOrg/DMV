@@ -58,36 +58,46 @@ export class PortfolioScanner {
     // RPC fallback: fetch SPL token accounts directly
     if (!gotTokens) {
       const fallbackNfts: { balance: TokenBalance; mint: PublicKey }[] = [];
-      try {
-        const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
-          wallet,
-          { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') },
-        );
-        for (const { account } of tokenAccounts.value) {
-          const parsed = account.data.parsed?.info;
-          if (!parsed) continue;
-          const amount = parsed.tokenAmount;
-          if (Number(amount.amount) <= 0) continue;
-          const mintStr = parsed.mint as string;
-          const known = KNOWN_TOKEN_SYMBOLS[mintStr];
-          // This fallback has no DAS metadata, so identify NFTs by their signature —
-          // 0 decimals, exactly 1 unit (the same heuristic the vault/bequest picker
-          // uses). Without this, NFTs land in the fungible token list (and the NFTs
-          // tab/section reads empty) whenever the DAS path is unavailable.
-          const isNft = amount.decimals === 0 && Number(amount.amount) === 1;
-          const balance: TokenBalance = {
-            mint: new PublicKey(mintStr),
-            symbol: known?.symbol || mintStr.slice(0, 6),
-            amount: Number(amount.uiAmountString),
-            decimals: amount.decimals,
-            usdValue: 0,
-            isNft,
-          };
-          balances.push(balance);
-          if (isNft) fallbackNfts.push({ balance, mint: balance.mint });
+      // Enumerate BOTH token programs — legacy SPL AND Token-2022. Tokenized stocks
+      // (xStocks / Backpack RWAs) and many modern tokens are Token-2022; querying only
+      // the legacy program made them invisible whenever DAS was unavailable (e.g. a
+      // custom non-Helius RPC), so the Stocks tab read empty while legacy tokens showed.
+      const TOKEN_PROGRAMS = [
+        new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), // legacy SPL Token
+        new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'), // Token-2022
+      ];
+      for (const programId of TOKEN_PROGRAMS) {
+        try {
+          const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(wallet, { programId });
+          for (const { account } of tokenAccounts.value) {
+            const parsed = account.data.parsed?.info;
+            if (!parsed) continue;
+            const amount = parsed.tokenAmount;
+            if (Number(amount.amount) <= 0) continue;
+            const mintStr = parsed.mint as string;
+            const known = KNOWN_TOKEN_SYMBOLS[mintStr];
+            const sMeta = stockMeta(mintStr);
+            // This fallback has no DAS metadata, so identify NFTs by their signature —
+            // 0 decimals, exactly 1 unit (the same heuristic the vault/bequest picker
+            // uses). Without this, NFTs land in the fungible token list (and the NFTs
+            // tab/section reads empty) whenever the DAS path is unavailable.
+            const isNft = amount.decimals === 0 && Number(amount.amount) === 1;
+            const symbol = sMeta?.symbol || known?.symbol || mintStr.slice(0, 6);
+            const balance: TokenBalance = {
+              mint: new PublicKey(mintStr),
+              symbol,
+              amount: Number(amount.uiAmountString),
+              decimals: amount.decimals,
+              usdValue: 0,
+              isNft,
+              isStock: isStock({ mint: mintStr, symbol, isNft }),
+            };
+            balances.push(balance);
+            if (isNft) fallbackNfts.push({ balance, mint: balance.mint });
+          }
+        } catch {
+          // RPC token fetch is non-fatal (per program)
         }
-      } catch {
-        // RPC token fetch is non-fatal
       }
       // Resolve NFT names/images from on-chain Metaplex metadata (no DAS needed).
       // Non-fatal: on any failure the NFTs still show with mint-slice symbols.
