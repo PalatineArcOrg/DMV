@@ -170,29 +170,30 @@ export async function revokeVault(
     };
   }
 
-  // Vault executed: close its core PDAs on-chain (owner-signed) so it no longer
-  // lingers and reappears on reopen, reclaiming the rent. Best-effort — it may
-  // already be closed, or hold undistributed tokens (open_token_dists > 0).
+  // Vault executed: close it on-chain (owner-signed) so it no longer lingers and
+  // reappears on reopen, and reclaim the rent. FIRST close any remaining TokenDists
+  // (harvest-aware — transfer-fee mints leave withheld fees that otherwise stick the
+  // close and keep open_token_dists > 0), THEN close the core PDAs. Failures PROPAGATE
+  // to the caller (which shows a real error) instead of silently "clearing local" and
+  // letting the vault reappear.
   if (vault && vault.executed) {
-    try {
-      const closeTx = await txService.buildCloseExecutedVaultTx(publicKey);
-      closeTx.feePayer = publicKey;
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash('confirmed');
-      closeTx.recentBlockhash = blockhash;
-      const signed = await signTransaction(closeTx);
+    const sendOwnerTx = async (tx: Transaction, label: string) => {
+      tx.feePayer = publicKey;
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      tx.recentBlockhash = blockhash;
+      const signed = await signTransaction(tx);
       const sig = await connection.sendRawTransaction(signed.serialize(), {
         skipPreflight: false,
         preflightCommitment: 'confirmed',
       });
-      await connection.confirmTransaction(
-        { signature: sig, blockhash, lastValidBlockHeight },
-        'confirmed',
-      );
-      txs.push({ label: 'Close executed vault', sig });
-    } catch (e: any) {
-      if (!refundError) refundError = e?.message || 'close failed';
-    }
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+      txs.push({ label, sig });
+    };
+    // 1. Close any fully-paid TokenDists still open (each harvests withheld fees first).
+    const tdTxs = await txService.buildCloseTokenDistTransactions(publicKey, publicKey);
+    for (const { label, tx } of tdTxs) await sendOwnerTx(tx, label);
+    // 2. Close the core PDAs (rent → owner). Throws (surfaced) if a residual still blocks it.
+    await sendOwnerTx(await txService.buildCloseExecutedVaultTx(publicKey), 'Close vault & reclaim rent');
   }
 
   // Executed / inactive / already-closed — clean up local state.

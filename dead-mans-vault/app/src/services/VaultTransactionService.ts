@@ -19,6 +19,8 @@ import {
   getTransferHook,
   getPausableConfig,
   getTransferFeeConfig,
+  getTransferFeeAmount,
+  createHarvestWithheldTokensToMintInstruction,
   AccountState,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
@@ -1222,6 +1224,19 @@ export class VaultTransactionService {
         if (!(await this.accountExists(largestBenefAta))) {
           ixs.push(createAssociatedTokenAccountIdempotentInstruction(heir, largestBenefAta, largestBenef, mint, tokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID));
         }
+      }
+      // Transfer-fee mints can leave WITHHELD fees in the vault ATA (e.g. the fee taken
+      // when the token was deposited), and Token-2022 refuses to CloseAccount an account
+      // that still holds withheld fees — which sticks close_token_dist and blocks the
+      // whole vault close (open_token_dists never reaches 0). Harvest them to the mint
+      // first (permissionless) so the close succeeds.
+      if (tokenProgram.equals(TOKEN_2022_PROGRAM_ID)) {
+        try {
+          const acc = await getAccount(this.connection, vaultAta, 'confirmed', tokenProgram);
+          if ((getTransferFeeAmount(acc)?.withheldAmount ?? 0n) > 0n) {
+            ixs.push(createHarvestWithheldTokensToMintInstruction(mint, [vaultAta], tokenProgram));
+          }
+        } catch { /* ATA may not exist — close_token_dist handles that */ }
       }
       ixs.push(
         await program.methods
