@@ -285,7 +285,7 @@ React Native's Hermes runtime requires several workarounds:
 |-----------|---------|
 | Anchor | 0.32.1 |
 | Solana CLI | 3.0.15 (Agave) |
-| Rust | 1.93.1 |
+| Rust | 1.89.0 |
 | Expo SDK | 52 |
 | React Native | 0.76.9 |
 | @solana/web3.js | 1.x |
@@ -331,7 +331,7 @@ A standalone **keeper bot** (`keeper-bot/`) — runnable by anyone — discovers
 
 - Solana CLI 3.0.x
 - Anchor 0.32.x
-- Rust 1.93+
+- Rust 1.89.0 (pinned via rust-toolchain.toml)
 - Node.js 18+
 - Yarn
 - Java 17 (for Android builds)

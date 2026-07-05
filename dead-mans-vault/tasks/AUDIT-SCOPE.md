@@ -26,7 +26,7 @@ Assumption to state explicitly and have the auditor weigh: **availability of the
 | | |
 |---|---|
 | Framework | **Anchor 0.32.1** (`anchor-lang`/`anchor-spl` 0.32.1); compiles against **`solana-program` 2.3.0** |
-| Toolchain | **Rust pinned to 1.89.0** (`rust-toolchain.toml`); built with the **Agave/Solana CLI 3.0.15**. *(Note: CI + some docs reference Rust 1.93 — we're reconciling this; the pinned toolchain is authoritative.)* |
+| Toolchain | **Rust pinned to 1.89.0** (`rust-toolchain.toml`); built with the **Agave/Solana CLI 3.0.15**. CI installs the same 1.89.0. |
 | Program source | **31 `.rs` files, ~2,700 LOC**, `programs/dead-mans-vault/src/` |
 | Instructions | **20** (11 owner/setup + 9 permissionless execution) |
 | State PDAs | **5**: `VaultConfig`, `HeartbeatRecord`, `ExecutionLog`, `AssetPlan`, `TokenDist` |

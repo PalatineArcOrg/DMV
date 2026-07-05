@@ -83,7 +83,7 @@ updates:
       interval: "weekly"
     labels: ["dependencies", "ci"]
     ignore:
-      # Pinned deliberately to the project toolchain (Rust 1.93.x) — don't bump.
+      # Pinned deliberately to the project toolchain (Rust 1.89.0, per rust-toolchain.toml) — don't bump.
       - dependency-name: "dtolnay/rust-toolchain"
     groups:
       github-actions:

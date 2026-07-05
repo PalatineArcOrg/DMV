@@ -172,7 +172,7 @@ Distribution supports both the legacy Token program and **Token-2022**. Rounding
 | Technology | Version | Purpose |
 |-----------|---------|---------|
 | **Anchor** | 0.32.1 | On-chain program framework (Rust) |
-| **Rust** | 1.93.1 | Program language |
+| **Rust** | 1.89.0 | Program language (pinned, rust-toolchain.toml) |
 | **React Native** | 0.76.9 | Mobile framework |
 | **Expo** | SDK 52 | Build toolchain + native modules |
 | **TypeScript** | 5.x | App language |
@@ -227,7 +227,7 @@ The complete flow, on a physical device:
 
 - **Node.js** 18+ and **Yarn**
 - **Android Studio** with SDK 34+ (for local builds)
-- **Rust** 1.93.1 and **Anchor CLI** 0.32.1 (for program development)
+- **Rust** 1.89.0 and **Anchor CLI** 0.32.1 (for program development)
 - **Solana CLI** 3.0.15 (Agave) configured for devnet
 - An MWA-compatible wallet (e.g., Phantom, Solflare, or Seed Vault) on your Android device
 - [Expo account](https://expo.dev/) (for EAS builds)
