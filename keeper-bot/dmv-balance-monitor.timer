@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the DMV cranker balance monitor periodically — mainnet-readiness §1.9
+
+[Timer]
+# Every 15 min. On mainnet, 15–30 min is plenty (a cranker drains slowly).
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -6,6 +6,7 @@ import {
   AuthorizeAPI,
   AuthToken,
   Base64EncodedAddress,
+  Chain,
   DeauthorizeAPI,
   SignInPayloadWithRequiredFields,
   SignInPayload,
@@ -13,10 +14,19 @@ import {
 import { toUint8Array } from "js-base64";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
+import { isDevnet } from "./rpcConfig";
 
 const CHAIN = "solana";
-const CLUSTER = "devnet";
-const CHAIN_IDENTIFIER = `${CHAIN}:${CLUSTER}`;
+// Cluster follows the active RPC URL (devnet today, mainnet on a mainnet build)
+// so MWA authorizes wallets on the correct cluster. NB the wallet-standard chain
+// id is "solana:mainnet" (NOT "mainnet-beta") — the MWA proxy maps that string to
+// the mainnet-beta cluster; anything else falls through to the devnet default.
+// Computed at call time,
+// not module load, because isDevnet() reads the runtime RPC override that App.tsx
+// hydrates during bootstrap — before any authorize() call, after module eval.
+function getChainIdentifier(): Chain {
+  return `${CHAIN}:${isDevnet() ? "devnet" : "mainnet"}`;
+}
 
 export type Account = Readonly<{
   address: Base64EncodedAddress;
@@ -131,7 +141,7 @@ export function useAuthorization() {
     async (wallet: AuthorizeAPI) => {
       const authorizationResult = await wallet.authorize({
         identity: APP_IDENTITY,
-        chain: CHAIN_IDENTIFIER,
+        chain: getChainIdentifier(),
         auth_token: authorization?.authToken,
       });
       return (await handleAuthorizationResult(authorizationResult))
@@ -143,7 +153,7 @@ export function useAuthorization() {
     async (wallet: AuthorizeAPI, signInPayload: SignInPayload) => {
       const authorizationResult = await wallet.authorize({
         identity: APP_IDENTITY,
-        chain: CHAIN_IDENTIFIER,
+        chain: getChainIdentifier(),
         auth_token: authorization?.authToken,
         sign_in_payload: signInPayload,
       });

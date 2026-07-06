@@ -1,0 +1,16 @@
+[Unit]
+Description=DMV cranker balance monitor (notify-cranker + keeper-bot) — mainnet-readiness §1.9
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/DMV/keeper-bot
+# Use the paid Helius endpoint here on mainnet (a public RPC will rate-limit).
+Environment=MONITOR_RPC_URL=https://api.devnet.solana.com
+Environment=MONITOR_FLOOR_SOL=0.05
+# Set this to your Slack/Discord webhook to turn logging into a real alert.
+# Environment=ALERT_WEBHOOK=https://hooks.slack.com/services/XXX
+# For mainnet, point at the mainnet cranker + keeper wallets:
+# Environment=MONITOR_WALLETS=notify-cranker:<PUBKEY>,keeper-bot:<PUBKEY>
+ExecStart=/root/.nvm/versions/node/v24.14.0/bin/node balance-monitor.mjs
+MemoryMax=128M
