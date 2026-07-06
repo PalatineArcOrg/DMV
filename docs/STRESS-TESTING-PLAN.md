@@ -17,8 +17,8 @@ substitutes for the "did the edge case get missed" part of a paid audit.
 | 2 | Specific bequests + theft-must-revert battery (P3/P4) | ✅ green |
 | 3a | Freeze-after-deadline (I7) — `freeze.fuzz.ts` P5 | ✅ green |
 | 3b | Token-2022 transfer-fee residual close (I8) — `transfer_fee.fuzz.ts` P6 | ✅ green |
-| 3c | NFT specifics + token-residual at scale | ⏳ next |
-| 4 | Trident instruction-sequence fuzzing | ⏳ |
+| 3c | NFT specifics + token-residual at scale — `nft.fuzz.ts` P7, `residual_scale.fuzz.ts` P8 | ✅ green |
+| 4 | Trident instruction-sequence fuzzing | ⏳ next |
 | 5 | Crank-client + RPC-failure stress (notify-server / keeper-bot) | ⏳ |
 | 6 | Mainnet-fork fidelity (surfpool) | ⏳ |
 
@@ -62,9 +62,14 @@ needs `ceil(amount*bps/10000)` or the deposit reverts.
   blocks these; assert the program-side behaviour matches (a paused mint mid-crank
   shouldn't strand the whole distribution — documents the current limit).
 
-### 3c. NFT specifics + token-residual at scale
-- Whole-NFT bequest (decimals 0 / supply 1) → `execute_specific_asset` + 0-residual
-  `close_token_dist`. Conservation with multiple mints, large `n`, dust-to-largest-heir.
+### 3c. NFT specifics + token-residual at scale — ✅ DONE (`nft.fuzz.ts` P7, `residual_scale.fuzz.ts` P8)
+- **P7:** whole-NFT bequest (decimals 0 / supply 1) → `execute_specific_asset`, residual snapshot
+  0 → `close_token_dist` with no dust, owner-close succeeds; heir holds exactly 1. Negative: two
+  NFT assignments for one mint → `DuplicateNftAssignment` (6031).
+- **P8:** pure pro-rata token residual at **n up to 20** — `floor` shares, dust `< n` → largest
+  share on close, `Σ == balance`. `*_shares` batched ≤8/tx; ran clean under the 2 GB heap, no cap.
+- Pausable / default-frozen / transfer-hook mints deferred to Phase 6 (mainnet fork) — their
+  interesting cases involve a mint paused/hooked *after* deposit. **Tier-1 property fuzzing complete.**
 
 **Acceptance (each):** new per-property file, `yarn test:fuzz` green 3× within the 2 GB
 heap; negative cases assert the *exact* error code.

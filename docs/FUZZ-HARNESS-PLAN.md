@@ -1,10 +1,11 @@
 # Fuzz / Property-Test Harness — Plan
 
-Status: **Phase 1 + Phase 2 done (green)** — started 2026-07-06. 4 properties passing via
+Status: **Phases 1–3 done (green)** — started 2026-07-06. **8 properties** passing via
 `yarn test:fuzz` (P1/P2 SOL conservation+idempotency; P3/P4 specific bequests + theft
-resistance). Part of the mainnet community-review route (`MAINNET-READINESS.md` §1.1):
-free tooling that substitutes for the "did the money math miss an edge case" part of a
-paid audit. No program bug found across either phase.
+resistance; P5 freeze-after-deadline; P6 Token-2022 transfer-fee close; P7 whole-NFT
+bequest; P8 token-residual at scale). Part of the mainnet community-review route
+(`MAINNET-READINESS.md` §1.1): free tooling that substitutes for the "did the money math
+miss an edge case" part of a paid audit. **No program bug found across any phase.**
 
 ## Why (vs the existing 29 tests)
 
@@ -201,6 +202,21 @@ ATA, and Token-2022 refuses to `CloseAccount` an account holding withheld fees �
   the passed fee, so the harness deposit must use `ceil(amount*bps/10000)` or it reverts.
 - No program bug found; the sticky case is real and the shipped harvest-before-close is correct.
 
+## Phase 3c — NFT specifics + token-residual at scale — ✅ done (`nft.fuzz.ts` P7, `residual_scale.fuzz.ts` P8)
+Completes Tier-1 property fuzzing. Two per-property files.
+- **P7 — whole-NFT specific bequest.** An NFT = a mint with decimals 0 / supply 1. The whole
+  supply is the specific, so `begin_token_dist` snapshots residual **0**: `execute_token_shares`
+  pays nothing, `close_token_dist` succeeds with **no dust** (`largest_benef_ata = None`), and the
+  owner-close then succeeds (its success IS the `open_token_dists==0` proof). Heir holds exactly 1
+  before and after close. Negative (P7b): two NFT assignments for one mint → **DuplicateNftAssignment
+  (6031)** at `set_asset_plan`, asserted by exact code.
+- **P8 — token-residual dust at scale.** Pure pro-rata (no specific/plan), **n up to 20**. Each
+  beneficiary gets `floor(snapshot×share/1e4)`; dust `= snapshot − Σfloor` is asserted `< n` and
+  swept to the largest-share beneficiary (ties → lowest index) on close; `Σ balances == balance`.
+  `*_shares` batched ≤8/tx; numRuns 8 keeps n=20 under the 2 GB heap (ran clean, no cap needed).
+- No program bug found. Pausable / default-frozen / transfer-hook mints are deferred to the
+  Phase 6 mainnet-fork (their interesting cases involve a mint paused/hooked *after* deposit,
+  better exercised against real xStocks than synthesised in LiteSVM).
+
 ## Later phases
-- **Phase 3c:** NFT specifics (whole-NFT bequest, 0-residual close), token-residual dust at large n.
 - **Phase 4:** Trident sequence-fuzzing over the full instruction set (see `STRESS-TESTING-PLAN.md`).
