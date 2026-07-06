@@ -182,7 +182,25 @@ As-built notes:
   the "succeeds pre-deadline" checks run on a dedicated vault and the boundary flip uses
   `withdraw_sol` (which leaves the deadline fixed). No program bug found.
 
+## Phase 3b — Token-2022 transfer-fee residual close (I8) — ✅ done (`tests/fuzz/transfer_fee.fuzz.ts`, P6)
+The documented "sticky close" regression. A transfer-fee mint withholds a fee in the
+*destination* on every transfer, so a fee-bearing DEPOSIT leaves withheld fees in the vault
+ATA, and Token-2022 refuses to `CloseAccount` an account holding withheld fees → the on-chain
+`close_token_dist` (a bare `CloseAccount`) reverts. The shipped fix is a CLIENT-side
+`HarvestWithheldTokensToMint(vault_ata→mint)` pre-instruction. P6 proves both sides.
+- **LiteSVM runs Token-2022 transfer-fee cleanly** (verified via a throwaway probe first).
+- **Snapshot excludes withheld:** `begin_token_dist` reads the token account's net `amount`
+  (= D − depositFee), so `execute_token_shares` distributes only spendable tokens — no
+  over-distribution despite the withheld fee sitting in the vault ATA.
+- **Sticky reproduced:** `close_token_dist` without harvest reverts with Token-2022
+  `custom program error: 0x23` (the one non-Anchor-code failure in the suite — asserted on the
+  token program, not a DMV code). **With harvest** it succeeds (ATA + `token_dist` closed,
+  `open_token_dists`→0) and the owner-close then succeeds (no `TokensRemain`).
+- **Exact conservation net of fees:** `Σ(bene amount + withheld) + depositFee == D`.
+- **Gotcha:** Token-2022 `calculate_fee` rounds UP (ceil). `transfer_checked_with_fee` asserts
+  the passed fee, so the harness deposit must use `ceil(amount*bps/10000)` or it reverts.
+- No program bug found; the sticky case is real and the shipped harvest-before-close is correct.
+
 ## Later phases
-- **Phase 3b/3c:** Token-2022 extension mints (transfer-fee residual close), NFT specifics,
-  token-residual dust edge cases at large n.
+- **Phase 3c:** NFT specifics (whole-NFT bequest, 0-residual close), token-residual dust at large n.
 - **Phase 4:** Trident sequence-fuzzing over the full instruction set (see `STRESS-TESTING-PLAN.md`).

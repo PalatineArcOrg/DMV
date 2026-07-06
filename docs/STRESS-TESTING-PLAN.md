@@ -16,7 +16,8 @@ substitutes for the "did the edge case get missed" part of a paid audit.
 | 1 | SOL conservation + idempotency (P1/P2) | ✅ green |
 | 2 | Specific bequests + theft-must-revert battery (P3/P4) | ✅ green |
 | 3a | Freeze-after-deadline (I7) — `freeze.fuzz.ts` P5 | ✅ green |
-| 3b/3c | Token-2022 extensions, NFT/residual-at-scale | ⏳ next |
+| 3b | Token-2022 transfer-fee residual close (I8) — `transfer_fee.fuzz.ts` P6 | ✅ green |
+| 3c | NFT specifics + token-residual at scale | ⏳ next |
 | 4 | Trident instruction-sequence fuzzing | ⏳ |
 | 5 | Crank-client + RPC-failure stress (notify-server / keeper-bot) | ⏳ |
 | 6 | Mainnet-fork fidelity (surfpool) | ⏳ |
@@ -41,7 +42,18 @@ owner mutation must revert. This is the core safety property of the trustless sw
   `is_mutable=false`); warp to `deadline` and `deadline + Δ` → each reverts with the
   exact freeze code. Assert the boundary flips at exactly `>=`.
 
-### 3b. Token-2022 extension mints — RWA reality (tokenized stocks are pausable/fee-bearing)
+### 3b. Token-2022 transfer-fee residual close — ✅ DONE (`tests/fuzz/transfer_fee.fuzz.ts` P6)
+RWA reality (tokenized stocks are pausable/fee-bearing). LiteSVM runs Token-2022
+transfer-fee mints cleanly. P6 funds the vault ATA via a fee-bearing deposit (so it
+accrues withheld fees), cranks the residual, and asserts: snapshot == D − depositFee
+(begin_token_dist reads the net `amount`, withheld excluded → no over-distribution);
+`close_token_dist` WITHOUT harvest **reverts in the token program** (`0x23`,
+close-with-withheld-fees); WITH `HarvestWithheldTokensToMint(vault_ata→mint)` prepended
+it **succeeds** (ATA + token_dist closed, `open_token_dists`→0), and the owner-close then
+succeeds; exact conservation `Σ(bene amount+withheld) + depositFee == D`. **No program
+bug** — the documented sticky case is real and the shipped harvest-before-close fixes it.
+Gotcha found: Token-2022 `calculate_fee` rounds UP (ceil), so `transfer_checked_with_fee`
+needs `ceil(amount*bps/10000)` or the deposit reverts.
 - **Transfer-fee residual close** — the documented sticky case: withheld fees in the
   vault ATA block `close_token_dist` unless harvested first. Property: fund a
   transfer-fee mint, run the full crank, assert `close_token_dist` succeeds (harvest
