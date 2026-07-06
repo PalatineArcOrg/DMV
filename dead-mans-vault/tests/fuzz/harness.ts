@@ -131,6 +131,26 @@ export function readI64LE(svm: LiteSVM, pk: PublicKey, offset: number): bigint {
   if (!buf || buf.length < offset + 8) throw new Error(`${pk.toBase58()} too short for i64@${offset}`);
   return buf.readBigInt64LE(offset);
 }
+/** Read small unsigned integer fields (masks, flags, counters) straight from the
+ *  account bytes — never through the anchor BN (whose toString() was observed to
+ *  intermittently return "…NaN" under the property loop). Used by P9 to read
+ *  sol_paid_mask/paid_mask (u32), open_token_dists (u16) and the executed/
+ *  has_asset_plan bool bytes at fixed offsets after the beneficiaries Vec. */
+export function readU32LE(svm: LiteSVM, pk: PublicKey, offset: number): number {
+  const buf = accountBytes(svm, pk);
+  if (!buf || buf.length < offset + 4) throw new Error(`${pk.toBase58()} too short for u32@${offset}`);
+  return buf.readUInt32LE(offset);
+}
+export function readU16LE(svm: LiteSVM, pk: PublicKey, offset: number): number {
+  const buf = accountBytes(svm, pk);
+  if (!buf || buf.length < offset + 2) throw new Error(`${pk.toBase58()} too short for u16@${offset}`);
+  return buf.readUInt16LE(offset);
+}
+export function readU8(svm: LiteSVM, pk: PublicKey, offset: number): number {
+  const buf = accountBytes(svm, pk);
+  if (!buf || buf.length < offset + 1) throw new Error(`${pk.toBase58()} too short for u8@${offset}`);
+  return buf.readUInt8(offset);
+}
 export const OFF_HEARTBEAT_LAST = 40;
 export const OFF_EXEC_SOL_SNAPSHOT = 40;
 export const OFF_TOKENDIST_SNAPSHOT = 72;

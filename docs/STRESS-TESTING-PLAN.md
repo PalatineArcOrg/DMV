@@ -7,7 +7,7 @@ substitutes for the "did the edge case get missed" part of a paid audit.
 **What "stress testing" covers here — four axes, hardest last:**
 1. Randomised *inputs* to a fixed crank (✅ done — Phases 1–2, `FUZZ-HARNESS-PLAN.md`).
 2. Randomised inputs to the *remaining* invariants (Phase 3).
-3. Randomised *instruction orderings* — the state machine itself (Phase 4, Trident).
+3. Randomised *instruction orderings* — the state machine itself (✅ done — Phase 4, P9, TS stateful fuzzer).
 4. The off-chain autonomy layer + real-liquidity fidelity (Phases 5–6).
 
 ## Status
@@ -18,7 +18,7 @@ substitutes for the "did the edge case get missed" part of a paid audit.
 | 3a | Freeze-after-deadline (I7) — `freeze.fuzz.ts` P5 | ✅ green |
 | 3b | Token-2022 transfer-fee residual close (I8) — `transfer_fee.fuzz.ts` P6 | ✅ green |
 | 3c | NFT specifics + token-residual at scale — `nft.fuzz.ts` P7, `residual_scale.fuzz.ts` P8 | ✅ green |
-| 4 | Trident instruction-sequence fuzzing | ⏳ next |
+| 4 | Instruction-SEQUENCE / state-machine fuzzing — `sequence.fuzz.ts` P9 (TS stateful fuzzer) | ✅ green |
 | 5 | Crank-client + RPC-failure stress (notify-server / keeper-bot) | ⏳ |
 | 6 | Mainnet-fork fidelity (surfpool) | ⏳ |
 
@@ -76,19 +76,32 @@ heap; negative cases assert the *exact* error code.
 
 ---
 
-## Phase 4 — Trident instruction-sequence fuzzing (the state machine)
-Everything above fuzzes inputs to a *fixed* crank order. Trident fuzzes the **order**:
-random interleavings of the whole instruction set (init, heartbeat, deposit, withdraw,
-begin_execution, every execute_*, finalize, all closes) by arbitrary signers. Catches
-state-machine bugs the single-flow harness cannot: execute-before-begin, double-finalize,
-close-before-finalize, mutate in the begin→deadline window, resume after partial crank.
-- **Invariants to assert across any reachable state:** no over-distribution per asset;
-  no payout to a non-beneficiary; `executed` monotonic; masks monotonic; owner mutations
-  impossible post-deadline; core PDA never closed while a token residual is open.
-- **Effort:** real — Rust + Trident vs anchor 0.32 (toolchain friction expected). Runs in
-  an isolated worktree. Highest-confidence addition before mainnet given irreversibility.
-- **Acceptance:** Trident campaign runs clean for a bounded iteration budget; any
-  crash/invariant-violation reproduced + triaged (program bug vs harness bug).
+## Phase 4 — instruction-SEQUENCE / state-machine fuzzing — ✅ done (`tests/fuzz/sequence.fuzz.ts`, P9)
+Everything above fuzzes inputs to a *fixed* crank order. **P9 fuzzes the order**: random-length,
+random-order sequences of the whole instruction set (heartbeat, deposit, withdraw, update, rotate,
+revoke, set/update_asset_plan, begin_execution, every execute_*, finalize, close_token_dist,
+close_executed_vault_by_owner) by random signers, interleaved with random clock warps that
+sometimes cross the deadline. Every step may fail (an illegal ordering reverting is expected); after
+EACH step the on-chain state is re-read and seven GLOBAL invariants are asserted against a JS shadow
+model. Catches exactly the state-machine bugs the single-flow harness cannot: execute-before-begin,
+double-finalize, finalize-before-all-shares, close-before-finalize, begin_token_dist twice, owner
+mutation past the deadline, resume after a partial crank.
+
+- **Built on the proven TS stack (litesvm + fast-check), NOT Trident** — a deliberate choice to
+  avoid re-introducing the anchor-0.32 Rust-host toolchain risk this harness was picked to sidestep.
+  The sequence is a **shuffled recipe** (guaranteed core multiset + noise), so ORDER stays random
+  (every out-of-order gate is hit) yet a meaningful fraction of runs actually finalize/close.
+- **Invariants asserted across any reachable state:** `executed` monotonic; every mask monotonic
+  (bits only set); no post-deadline owner mutation; no over-distribution per asset; exact SOL +
+  token conservation (no lamports/base-units created or destroyed); core PDA closed only when
+  `executed && open_token_dists==0`; ordering gates hold (unmet-precondition crank op must revert).
+- **Result:** green. **No program bug found** — no random ordering violated any global invariant.
+  Depth per 14-run invocation: ~10–11/14 runs begin execution, ~4–7 finalize, ~2–4 owner-close the
+  core PDAs, ~4–8 open a token_dist / ~1–4 close one — so both the success paths and the large
+  population of out-of-order reverts are exercised. Verified **3/3 consecutive clean `yarn
+  test:fuzz`** runs, `tsc` clean, no OOM. Full as-built + the seven invariants: `FUZZ-HARNESS-PLAN.md`.
+- **Trident remains an OPTIONAL future pass** — a Rust-native sequence fuzzer would add raw
+  throughput, but P9 already covers the state-machine invariants on the low-risk TS stack.
 
 ---
 
@@ -120,5 +133,6 @@ Fork mainnet state and exercise the paths litesvm/devnet can't:
 ## Execution order
 Top-down. Phases 3a→3b→3c are sequential (shared harness files). Each phase: fork
 implements → I verify independently (green 3×, guardrail + tsc clean, exact-error
-negatives) → commit → next. Phase 4 (Trident) runs in an isolated worktree and may
-overlap Phase 3. Phases 5–6 are separate harnesses (off-chain / fork) and can follow.
+negatives) → commit → next. Phase 4 (P9) landed on the SAME TS harness (`sequence.fuzz.ts`,
+its own file/process) rather than a separate Trident worktree — same litesvm + fast-check
+stack, so no toolchain risk. Phases 5–6 are separate harnesses (off-chain / fork) and can follow.

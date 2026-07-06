@@ -1,11 +1,12 @@
 # Fuzz / Property-Test Harness — Plan
 
-Status: **Phases 1–3 done (green)** — started 2026-07-06. **8 properties** passing via
+Status: **Phases 1–4 done (green)** — started 2026-07-06. **9 properties** passing via
 `yarn test:fuzz` (P1/P2 SOL conservation+idempotency; P3/P4 specific bequests + theft
 resistance; P5 freeze-after-deadline; P6 Token-2022 transfer-fee close; P7 whole-NFT
-bequest; P8 token-residual at scale). Part of the mainnet community-review route
-(`MAINNET-READINESS.md` §1.1): free tooling that substitutes for the "did the money math
-miss an edge case" part of a paid audit. **No program bug found across any phase.**
+bequest; P8 token-residual at scale; **P9 stateful instruction-SEQUENCE fuzzer**). Part
+of the mainnet community-review route (`MAINNET-READINESS.md` §1.1): free tooling that
+substitutes for the "did the money math miss an edge case" part of a paid audit. **No
+program bug found across any phase.**
 
 ## Why (vs the existing 29 tests)
 
@@ -72,6 +73,11 @@ tests/fuzz/
   conservation.fuzz.ts  # P1 + P2 — SOL conservation & idempotency (n≤20)
   specifics.fuzz.ts     # P3 — specific bequests carve-out + conservation (n≤5)
   theft.fuzz.ts         # P4 — theft-must-revert battery
+  freeze.fuzz.ts        # P5 — freeze-after-deadline (all owner mutations)
+  transfer_fee.fuzz.ts  # P6 — Token-2022 transfer-fee sticky close + harvest
+  nft.fuzz.ts           # P7 — whole-NFT specific bequest
+  residual_scale.fuzz.ts# P8 — token-residual pro-rata dust at scale (n≤20)
+  sequence.fuzz.ts      # P9 — stateful instruction-SEQUENCE fuzzer (the state machine)
   tsconfig.json         # extends ../../tsconfig.json, target es2020 (BigInt literals)
 ```
 - New dev-deps: **`litesvm` + `fast-check`** (only). `anchor-litesvm` was tried but its
@@ -218,5 +224,74 @@ Completes Tier-1 property fuzzing. Two per-property files.
   Phase 6 mainnet-fork (their interesting cases involve a mint paused/hooked *after* deposit,
   better exercised against real xStocks than synthesised in LiteSVM).
 
+## Phase 4 — stateful / instruction-SEQUENCE fuzzing (P9) — ✅ done (`tests/fuzz/sequence.fuzz.ts`)
+Everything in P1–P8 fuzzes INPUTS to a FIXED crank order. **P9 fuzzes the ORDER.** Deliberately
+built on the SAME proven LiteSVM + fast-check TS stack (not Trident) to avoid re-introducing the
+anchor-0.32 Rust-host toolchain risk this harness was chosen to sidestep. One property, its own
+file/process (memory isolation, as with P3–P8).
+
+**Shape.** fast-check generates a plain config: a random vault (`n∈[1,4]`, random `share_bps`,
+random `keeper_bounty`, optional token deposit, optional specific-bequest plan) + a **shuffled
+recipe** of step descriptors (`{op, signer, warp, big, amt}` — plain data, no live objects, so
+native SVM memory stays off the generated values). The predicate builds ONE LiteSVM vault, then
+applies the steps IN ORDER, each wrapped in try/catch (an illegal ordering reverting is EXPECTED
+and correct). The recipe is a **guaranteed core multiset** (2× each of begin / solShares /
+finalize / closeOwner, + token / specific steps when the vault holds them, + owner-mutation &
+deposit noise) **shuffled** by a random priority — so ORDER is random (every out-of-order gate is
+still hit) but the core is PRESENT, so a meaningful fraction of runs actually complete rather than
+just bouncing off gates. A `clock-warp` op (0–2 guaranteed leading big warps + in-recipe warps)
+lands mutations & executions in random temporal order relative to the deadline.
+
+**After EVERY step**, re-read on-chain state (byte-offset readers — `readU8/U16LE/U32LE` added to
+`harness.ts` for the executed byte / open_token_dists / the u32 masks; `readU64LE` for the u64
+snapshots + the plan mask, whose offset is computed from the assignment count) and assert seven
+GLOBAL invariants against a JS shadow model:
+1. **executed monotonic** — once true, never observed false again.
+2. **masks monotonic** — `sol_paid_mask` / each `token_dist.paid_mask` / `asset_plan.paid_mask`
+   bits only ever get SET (a token_dist legitimately closed+reopened resets its shadow to 0 first).
+3. **no post-deadline owner mutation** — a SUCCEEDING owner op (update/withdraw/revoke/rotate/
+   heartbeat/updatePlan) ⇒ the clock was `< deadline` at that step (deadline re-read from chain).
+4. **no over-distribution** — per-beneficiary SOL ≤ `floor(snapshot×share/1e4) + specific + n`;
+   per-beneficiary token ≤ `specific + floor + n`, for ALL beneficiaries incl. the largest-share
+   heir (the `+n` slack absorbs the <n-unit residual dust swept to the largest heir on close).
+5. **conservation** — exact per-step SOL identity `vault == baseline + externalNet − paidToBenes −
+   bountyPaid` (the vault PDA never signs → moves only by deposits/withdraws, beneficiary payouts,
+   and the finalize bounty; no fees, no created/destroyed lamports) + exact token conservation
+   `Σbenef + vaultAta + ownerAta == original balance`.
+6. **core-PDA close safety** — `close_executed_vault_by_owner` only SUCCEEDS with `executed==true`
+   AND `open_token_dists==0`.
+7. **ordering gates** — a crank op whose HARD precondition is unmet (execute-before-begin,
+   begin_token_dist twice, finalize-before-all-shares/plan, close-before-finalize, close-token
+   before its residual mask is full, close-owner while tokens remain) MUST revert. The shadow model
+   computes a `mustFail` flag conservatively (only guaranteed-revert cases) and asserts the tx did
+   NOT succeed when it held.
+
+**Depth reached (per 14-run invocation, typical):** ~10–11/14 runs begin execution; ~4–7 fully
+finalize; ~2–4 owner-close the core PDAs; ~4–8 open a `token_dist` and ~1–4 close one; the rest
+revoke pre-deadline or bounce off gates — so both the SUCCESS paths (mask/close monotonicity,
+bounty, dust sweep) and the huge population of out-of-order REVERTS (gates #7) are exercised.
+
+**As-built notes / gotchas:**
+- **numRuns 14, `endOnFailure`, `gcAfter`, `withTransactionHistory(0)`** — same memory stack as
+  P3–P8. Each run is a full 15–27-step sequence over one vault; peak RSS for the file is well under
+  the theft-file high-water mark. Verified **3/3 consecutive clean `yarn test:fuzz`** runs.
+- **executedAfter carries executedBefore through a close** — on close `executed` is unreadable but
+  unchanged (owner-close requires it true, revoke requires it false), so the shadow doesn't misread
+  a revoke as an execution.
+- **Transpile quirk:** ts-node in this harness was observed to miscompile a `x % n` written
+  *directly inside a `[ ]` index* to `NaN`; the signer index is therefore computed in a plain
+  statement + clamped with a fallback. (Cosmetic — signer choice only; the bigint invariant math is
+  unaffected.)
+- **No program bug found.** No random ordering violated any global invariant. (Reviewer note: an
+  earlier draft exempted the largest-share heir from the token over-distribution cap, on the theory
+  that `close_token_dist` could sweep an *unpaid* specific to it. That ordering is UNREACHABLE —
+  `close_token_dist` requires `executed`, and `finalize` sets `executed` only once the full
+  `asset_plan.paid_mask` is set, so every specific is paid before any close and the sweep is bounded
+  rounding dust (<n) only. The exemption was removed: the largest heir now gets the same
+  `specific + floor + n` cap as everyone else and the suite stays green — proving the program never
+  over-distributes to the largest-share heir either.)
+
 ## Later phases
-- **Phase 4:** Trident sequence-fuzzing over the full instruction set (see `STRESS-TESTING-PLAN.md`).
+- **Phase 5+:** crank-client / RPC-failure stress and mainnet-fork fidelity (see `STRESS-TESTING-PLAN.md`).
+- **Trident (optional):** a Rust-native instruction-sequence pass remains a possible future addition
+  for raw throughput, but P9 already covers the state-machine invariants on the proven TS stack.
