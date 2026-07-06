@@ -12,6 +12,9 @@ SUBMISSION_CHECKLIST.md
 FIGMA_IMPLEMENTATION.md
 figma-reference/
 DMV.make
+# Internal working docs — planning, ops runbooks, roadmap, lessons (public docs live in /docs)
+dead-mans-vault/tasks/
+dead-mans-vault/DEFI_DEVNET_LINKS.md
 
 # Tokens and secrets
 .github_token
