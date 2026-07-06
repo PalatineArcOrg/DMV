@@ -15,7 +15,8 @@ substitutes for the "did the edge case get missed" part of a paid audit.
 |-------|-------|-------|
 | 1 | SOL conservation + idempotency (P1/P2) | ✅ green |
 | 2 | Specific bequests + theft-must-revert battery (P3/P4) | ✅ green |
-| 3 | Freeze-after-deadline, Token-2022 extensions, NFT/residual-at-scale | ⏳ this effort |
+| 3a | Freeze-after-deadline (I7) — `freeze.fuzz.ts` P5 | ✅ green |
+| 3b/3c | Token-2022 extensions, NFT/residual-at-scale | ⏳ next |
 | 4 | Trident instruction-sequence fuzzing | ⏳ |
 | 5 | Crank-client + RPC-failure stress (notify-server / keeper-bot) | ⏳ |
 | 6 | Mainnet-fork fidelity (surfpool) | ⏳ |
@@ -28,7 +29,8 @@ litesvm + fast-check, one property per file (native-memory reset), `gcAfter` +
 
 ## Phase 3 — remaining on-chain invariants (extends `tests/fuzz/`)
 
-### 3a. Freeze-after-deadline (I7) — the switch cannot be cancelled once it fires
+### 3a. Freeze-after-deadline (I7) — ✅ DONE (`tests/fuzz/freeze.fuzz.ts` P5)
+The switch cannot be cancelled once it fires.
 Once `now >= deadline` (= `last_heartbeat + heartbeat_interval + grace_period`), every
 owner mutation must revert. This is the core safety property of the trustless switch.
 - **VaultFrozen (6035):** `update_vault`, `withdraw_sol_from_vault`, `withdraw_from_vault`,

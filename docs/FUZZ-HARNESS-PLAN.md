@@ -163,7 +163,26 @@ P3 (`specifics.fuzz.ts`) + P4 (`theft.fuzz.ts`) — separate files/processes (se
   Lesson: an invalid generated input that trips a program guard looks exactly like a flaky
   failure once shrinking hides the error — `endOnFailure` surfaces the raw counterexample.
 
-## Later phases (not this session)
-- **Phase 3:** freeze-after-deadline interleavings (I7), Token-2022 extension mints
-  (transfer-fee residual close), NFT specifics, token-residual dust edge cases, and —
-  if warranted — Trident sequence-fuzzing over the full instruction set.
+## Phase 3a — freeze-after-deadline (I7) — ✅ done (`tests/fuzz/freeze.fuzz.ts`, P5)
+Once `now >= deadline` every owner mutation must revert — the core safety property of the
+trustless switch (a post-deadline heartbeat/withdraw/revoke would cancel an already-firing
+distribution). P5 covers all 8 owner instructions with the EXACT error code:
+- **VaultFrozen (6035):** `update_vault`, `withdraw_sol_from_vault`, `withdraw_from_vault`,
+  `revoke_vault`, `rotate_agent`, `record_heartbeat`.
+- **AssetPlanImmutable (6022):** `set_asset_plan` (no-plan vault), `update_asset_plan` (plan vault).
+- **Exact `>=` boundary proved:** `withdraw_sol` succeeds at `deadline − 1` and reverts
+  `VaultFrozen` at *exactly* `deadline`; `record_heartbeat` + `rotate_agent` are also shown to
+  succeed pre-deadline (so the battery's freeze is the deadline, not an always-fail state).
+
+As-built notes:
+- **One shared clock, one deadline.** LiteSVM has a single clock, so all four vaults in a run
+  pin `last_heartbeat` to a fixed `BASE` (warp before each `initialize_vault`) → a common
+  deadline `D0`. Four vaults in ONE SVM (bounds native memory to ~1 SVM/run).
+- `record_heartbeat`/`rotate_agent` RESET `last_heartbeat` (moving that vault's deadline), so
+  the "succeeds pre-deadline" checks run on a dedicated vault and the boundary flip uses
+  `withdraw_sol` (which leaves the deadline fixed). No program bug found.
+
+## Later phases
+- **Phase 3b/3c:** Token-2022 extension mints (transfer-fee residual close), NFT specifics,
+  token-residual dust edge cases at large n.
+- **Phase 4:** Trident sequence-fuzzing over the full instruction set (see `STRESS-TESTING-PLAN.md`).
