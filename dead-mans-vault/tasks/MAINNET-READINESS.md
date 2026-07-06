@@ -88,7 +88,7 @@ A drained cranker or an RPC outage = vaults never execute = beneficiaries never 
 | 2.3 🟢 | **Fee + bounty economics** | **CONFIRMED (07-06): creation fee 0.01 SOL, keeper bounty 0.005 SOL** for mainnet. Keeper is net-positive (bounty + rents via `close_executed_vault`). |
 | 2.4 🟢 | **Signed notify-registration** | **DECIDED (07-06): ship mainnet v1 UNSIGNED**, enable signed as a fast-follow. Registration controls *notifications + who cranks*, **not** where funds go (execution is permissionless + computed on-chain), and the on-chain ownership proof already gates it — so the fund-safety blast radius is nil. The owner-signed path is built but dormant; activating it is a coordinated app+server release. |
 | 2.5 🟢 | **Biometric-per-heartbeat** | **DECIDED (07-06): DROP** it in the next build. The agent key signs heartbeats only — worst case of compromise is *stalling* the switch, not theft; and it's redundant right after app-unlock. Key stays behind the device lock at rest. |
-| 2.6 🟡 | **Distribution** | **STILL OPEN.** Sideloaded APK vs Google Play. Real funds via a sideloaded APK is a trust/updateability concern; Play Store (or at least a signed, verifiable APK + a stable download) is stronger for mainnet. |
+| 2.6 🟢 | **Distribution** | **DECIDED (07-06): Solana dApp Store (SMS) + Android, plus a matching iOS app.** dApp Store publishing is a good fit (crypto-native audience, no Play-Store payments friction) and gives a verifiable, stable download. ⚠️ **iOS is a real new workstream, not a build flag** — see §8. |
 
 ---
 
@@ -131,4 +131,17 @@ These read the URL-driven `isDevnet()`, so they behave identically on devnet now
 5. Cut the mainnet APK; cut over the two servers (§5).
 6. Real-device E2E on mainnet with a small vault (§1.7) + DeFi real-path check (§4).
 7. Launch; monitor cranker balances + notify/keeper logs.
+
+---
+
+## 8. iOS app (new workstream — decided 07-06, do NOT block the Android mainnet launch on it)
+
+The decision to ship a matching iOS app is sound, but it is a **genuine new build, not a platform flip** — the current app is Android-only *by architecture*, and the on-chain program / servers are already iOS-agnostic (they don't care what signed the tx). The work is entirely in the mobile client's wallet + key layer:
+
+- 🔴 **Wallet connection — MWA is Android-only.** `useAuthorization.tsx` / `transact()` (`@solana-mobile/mobile-wallet-adapter-protocol`) has **no iOS implementation** — this is the single biggest item. iOS needs a different owner-signing path: deep-link / universal-link into a wallet app (Phantom/Solflare iOS deep-link APIs), or WalletConnect, or Phantom's embedded-wallet SDK. This changes how every owner-signed tx (init, update, set_asset_plan, withdraw, revoke, rotate, owner-close, **and the heir claim flow**) is signed. Design this first; it drives the rest.
+- 🟢 **Agent key storage ports cleanly.** `expo-secure-store` already abstracts Android Keystore ↔ **iOS Keychain**, and its `requireAuthentication` biometric gate maps to Face/Touch ID via the Keychain's access control. `KeyManager` should work with little change. (Note: dropping biometric-per-heartbeat, §2.5, applies to both.)
+- 🟢 **Everything else is cross-platform already** — the crank/execution logic, SQLite, notifications (APNs via `expo-notifications` + FCM; the notify-server sends per-channel, add an APNs path), portfolio/RPC (URL-driven), UI. Seed Vault / Seeker features are Android-only and simply absent on iOS (fine — the app already runs on any Android phone without Seed Vault).
+- ⚪ **Release APK is `arm64-v8a`-only** today; iOS builds are a separate EAS profile + Apple Developer account ($99/yr) + App Store review (crypto/wallet apps get extra scrutiny — no in-app token *sales*, which this doesn't do).
+
+**Recommendation:** ship the **Android mainnet launch first** (it's the near-done path), then treat iOS as a fast-follow whose critical-path item is the MWA-replacement wallet-connection layer. A dedicated build-spec for the iOS wallet path is the right next artifact when you start it.
 </content>
