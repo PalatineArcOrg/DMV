@@ -84,6 +84,9 @@ WantedBy=multi-user.target
 2. For each **active, un-executed** vault: read its heartbeat, compute
    `deadline = last_heartbeat + interval + grace`; if passed, run the full crank
    (begin → token snapshots → specific bequests → SOL shares → **finalize (bounty
-   → you)** → token residuals → close token dists).
+   → you)** → token residuals → close token dists). For a **transfer-fee** Token-2022
+   mint the close first harvests any withheld fees from the vault ATA to the mint
+   (permissionless) — otherwise Token-2022 won't close the fee-holding account and the
+   TokenDist sticks (`open_token_dists > 0`), blocking the vault close.
 3. For each **executed** vault: attempt `close_executed_vault` — succeeds only
    after the 24 h window, paying the core-PDA rents to you.

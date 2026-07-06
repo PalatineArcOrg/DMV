@@ -20,7 +20,7 @@ Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initi
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.8)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.13)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility
@@ -59,14 +59,14 @@ Any heartbeat confirmation at Stages 1--3 resets the vault to normal. Once grace
 - **On-chain keeper bounty** -- Each vault can reserve a small reward (default 0.005 SOL) paid by the program to whoever cranks `finalize_execution`, making permissionless cranking profitable. It is carved out of the SOL snapshot at execution start, so it never reduces beneficiary payouts.
 - **Permissionless cleanup (no stranded rent)** -- After execution, a 24-hour owner-exclusive window lets a living owner close the vault and reclaim its rents; after that, `close_executed_vault` lets *anyone* close the accounts and claim the rents (~0.01–0.03 SOL) as a cleanup reward — nothing strands with a dead owner. SOL dust still goes to the largest-share beneficiary.
 - **Standalone keeper bot** (`keeper-bot/`) -- A self-contained bot anyone can run: it discovers expired vaults straight from the chain, runs the permissionless crank, and earns the bounty + cleanup rents. Every keeper running strengthens the guarantee that every vault fires — no DMV server required.
-- **NFT support end-to-end** -- NFTs are scanned into the portfolio, deposited into the vault as whole units, and bequeathed to specific heirs via `execute_specific_asset`. Names and images resolve **with or without Helius DAS** — an RPC-only fallback reads each NFT's on-chain Metaplex Metadata account directly (compressed NFTs remain DAS-only) and caches the result. The Assets tab has a dedicated Tokens · NFTs · DeFi split, the Dashboard shows inline NFT and DeFi sections, and the vault's own asset view and Bequests picker show each NFT's name + thumbnail (not just a mint address).
+- **NFT support end-to-end** -- NFTs are scanned into the portfolio, deposited into the vault as whole units, and bequeathed to specific heirs via `execute_specific_asset`. Names and images resolve **with or without Helius DAS** — an RPC-only fallback reads each NFT's on-chain Metaplex Metadata account directly (compressed NFTs remain DAS-only) and caches the result. The Assets tab has a dedicated Tokens · NFTs · Stocks · DeFi split, the Dashboard shows inline NFT, Stocks, and DeFi sections, and the vault's own asset view and Bequests picker show each NFT's name + thumbnail (not just a mint address).
 - **4-stage escalation system** -- Graduated warnings (Reminder -> Alert -> Warning -> Execution) with configurable durations
 - **On-chain heartbeat recording** -- Every heartbeat confirmation is recorded on Solana via the agent key (the agent signs heartbeats only)
 - **Mutable or immutable vaults** -- Choose whether your vault can be revoked/updated, or make it permanent
 - **Frozen snapshots + idempotent masks** -- Residuals are snapshotted write-once at execution start; per-asset bitmasks make every payout idempotent and safely resumable by anyone after a crash
 - **Vault PDA asset storage** -- Owner deposits SOL / SPL tokens / NFTs into the vault PDA; distribution computes shares on-chain at Stage 4
 - **Owner supremacy (pre-grace)** -- Revoking closes on-chain PDAs and reclaims rent; re-initialization on the same wallet works atomically. All owner mutations freeze once the deadline is reached.
-- **Token-2022 support** -- Distribution handles both the legacy Token program and Token-2022 via `InterfaceAccount`
+- **Token-2022 & tokenized stocks (RWA)** -- Distribution handles both the legacy Token program and Token-2022 via `InterfaceAccount` / `transfer_checked`, including **transfer-fee** mints (the close harvests any withheld fees first, so a fee mint doesn't stick the vault close). A dedicated **Stocks** tab surfaces tokenized equities (xStocks / Backpack Securities-style RWAs); deposits use `transfer_checked` and a pre-sign check **blocks** non-transferable / frozen / transfer-hook / paused mints (with a clear reason) and **warns** on transfer-fee mints. The same harvest-before-close fix ships in all three cranks (app, keeper bot, notify-server).
 
 ### Portfolio & DeFi
 - **Live portfolio tracking** -- Token balances via Helius DAS API, USD prices via dual oracle (Pyth Hermes + Jupiter fallback), 24h price changes

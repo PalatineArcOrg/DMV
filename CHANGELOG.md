@@ -5,6 +5,52 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.13.9–1.13.13] — 2026-07-05 — Tokenized stocks (RWA) + transfer-fee close + setup fixes
+
+Adds a first-class **Stocks** section for Token-2022 tokenized equities (xStocks /
+Backpack Securities-style RWAs), makes fee/pausable stocks deposit and distribute
+correctly, and fixes two vault-close/setup bugs surfaced by on-device testing with a
+transfer-fee stock. Devnet build; single-release convention unchanged.
+
+### App
+- **Stocks tab (1.13.9).** New `Assets → Stocks` section and an inline Dashboard Stocks
+  list, mirroring the NFTs / DeFi split. Token-2022 fungibles are classified as stocks by a
+  known-mint registry (real mainnet xStocks + the devnet test mints) plus an `[A-Z]{2,6}x`
+  symbol heuristic; the Tokens tab excludes them.
+- **Stocks-invisible fix (1.13.10).** A separate-module import of the stock classifier
+  resolved to `undefined` under Hermes and threw inside the portfolio parse loop, silently
+  hiding **every Token-2022 token** (legacy tokens still showed). The classifier is now
+  inlined into `PortfolioScanner`, and the RPC-fallback scan enumerates both the legacy Token
+  and Token-2022 programs — so stocks show with or without a Helius key.
+- **Deposit correctness + guards (1.13.11).** Token deposits now use `transfer_checked` (the
+  unchecked transfer is rejected by transfer-fee **and pausable** mints, so real xStocks could
+  never deposit before). A pre-sign check reads the mint's Token-2022 extensions and **blocks**
+  non-transferable / frozen-by-default / transfer-hook / paused mints with a clear reason, and
+  **warns** on transfer-fee mints (a percentage is lost on every hop). The Bequests picker now
+  shows stock names instead of raw mint addresses.
+- **Executed-vault close actually closes on-chain (1.13.12).** Closing an executed vault now
+  closes any remaining TokenDists **and** the core PDAs on-chain and reclaims rent, surfacing a
+  real error if something blocks it — previously the executed path silently "cleared local
+  data," leaving the vault on-chain so it reappeared on restart.
+- **Transfer-fee close fix (1.13.12).** A transfer-fee mint leaves *withheld* fees in the
+  vault's token account (e.g. from the deposit), and Token-2022 refuses to close an account
+  that still holds withheld fees — which stuck `close_token_dist` and kept `open_token_dists >
+  0`, blocking the whole close. The close now **harvests the withheld fees to the mint first**
+  (permissionless), so fee / pausable stocks close cleanly.
+- **Setup wizard re-sync (1.13.12).** A vault that executes while the app is idle now surfaces
+  the "Vault Executed" summary instead of a stale editable wizard showing old beneficiaries —
+  the wizard re-fetches on-chain vault state on focus, not only before setup.
+- **Stale "Configure Heartbeat ✓" fix (1.13.13).** The heartbeat config is persisted to the
+  device (so a mid-setup draft survives a restart) and re-hydrated on launch, but Start Over
+  and revoke only reset it in memory — so it re-appeared on restart and marked the heartbeat
+  step done on a brand-new setup. Both reset paths now delete the persisted copy too.
+
+### Keeper bot + notify-server
+- Both autonomous cranks got the same **harvest-before-close** fix, so a transfer-fee /
+  pausable Token-2022 stock closes cleanly whether the owner's app, the standalone keeper bot,
+  or the notify-server runs the crank. This matters most for the fully-autonomous path (owner
+  gone, only the server or a keeper cranks).
+
 ## [1.13.6–1.13.8] — 2026-07-04 — Rebrand + keeper crank-only + cleanup
 
 ### App

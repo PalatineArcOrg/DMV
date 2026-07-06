@@ -80,7 +80,7 @@ Spec: `BUILD-SPEC-permissionless-execution.md` (§18 overrides §3–§13). Impl
 - [ ] **Serverless triggers — Phase 3 (Mutual keeping)** — living owners' heartbeats crank expired vaults for the bounty; opt-in, rides on Phase 2 (no program change). Spec `BUILD-SPEC-serverless-triggers.md` §4
 - [ ] Token-2022 **owner-withdraw** (`withdraw_from_vault` is legacy-Token only)
 - [ ] `set_asset_plan`/`append_asset_plan` **>18 assignments** chunking/append ix (single tx caps ~18; storage cap 64)
-- [ ] Token-2022 transfer-fee mints can stick `close_token_dist` (non-zero residual after fee) — documented limitation
+- [x] Token-2022 transfer-fee mints stuck `close_token_dist` (withheld fees block CloseAccount) — **FIXED v1.13.12**: app, keeper-bot, and notify-server all harvest withheld fees to the mint before `close_token_dist` (permissionless, atomic via preInstructions)
 - [ ] Harmless dev-console error from Cloudflare's injected bot-detection script on `dmv.palatinearc.com` (overlay suppressed; benign)
 
 ## Docs
@@ -88,3 +88,13 @@ Spec: `BUILD-SPEC-permissionless-execution.md` (§18 overrides §3–§13). Impl
 - [x] README.md refreshed for v2 + committed + pushed to pre-prod (default branch, live on GitHub)
 - [x] whole feature committed (281a2c6 on-chain / f035f98 client / 9823cda server) + pushed to pre-prod
 - [x] git remote URL fixed → origin = Romulus-Sol/DMV with working PAT (plain git push/pull work)
+
+## Phase 8 — Tokenized stocks (RWA) + transfer-fee close + setup fixes (v1.13.9–v1.13.13) ✅ shipped, on-device confirmed
+- [x] **Stocks tab (v1.13.9)** — `Assets → Stocks` + Dashboard section for Token-2022 tokenized equities; known-mint registry + `[A-Z]{2,6}x` heuristic; Tokens tab excludes them
+- [x] **Stocks-invisible fix (v1.13.10)** — separate-module classifier import resolved `undefined` under Hermes → threw in the parse loop → hid ALL Token-2022 tokens; inlined into PortfolioScanner + RPC fallback now enumerates both token programs
+- [x] **Deposit correctness + guards (v1.13.11)** — `transfer_checked` deposit (unchecked is rejected by fee/pausable mints, so real xStocks couldn't deposit); pre-sign `checkDepositable` blocks non-transferable/frozen/hook/paused + warns on transfer-fee; Bequests picker shows stock names
+- [x] **Executed-vault close runs on-chain (v1.13.12)** — revokeVault executed branch now closes remaining TokenDists + core PDAs on-chain (rent reclaimed) and surfaces real errors, instead of silently “cleared local data” (which let the vault reappear on restart)
+- [x] **Transfer-fee close fix (v1.13.12)** — harvest withheld fees before `close_token_dist` in ALL THREE cranks (app, keeper-bot, notify-server); withheld fees in the vault ATA otherwise block CloseAccount → `open_token_dists` stuck → whole close blocked
+- [x] **Setup wizard re-sync (v1.13.12)** — re-fetch on-chain vault state on focus even when set-up, so an executed vault shows the “Vault Executed” summary, not a stale editable wizard with old beneficiaries
+- [x] **Stale “Configure Heartbeat ✓” fix (v1.13.13)** — the persisted `heartbeat_config` draft (SQLite, re-hydrated by App.tsx) is now deleted by Start Over + revoke; an in-memory reset alone re-appeared on restart
+- [x] Docs updated (this round): CHANGELOG [1.13.9–1.13.13], README (version + stocks/RWA feature + Assets split), notify-server + keeper-bot READMEs (harvest note), website (v1.13.13 + stocks feature card), TOKEN2022-RWA-SUPPORT (fee-close fixed)

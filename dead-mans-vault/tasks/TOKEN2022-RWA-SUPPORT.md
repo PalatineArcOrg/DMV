@@ -51,7 +51,7 @@ If a mint's `transfer_checked` can't succeed (active hook not forwarded / paused
 ### 6a. Characterization tests (safe — no bytecode change; doesn't move the audit tag)
 Add a `Token-2022 extension characterization` suite proving current behavior per extension (what the real stocks use + the forward-risk flavors). Achievable with `@solana/spl-token@0.4.14`:
 - **permanent-delegate mint → distributes fine** (this is what the real stocks carry — proves DMV handles it).
-- **transfer-fee mint → distributes, beneficiary receives amount−fee, conservation holds** (documents the residual-stuck-close caveat).
+- **transfer-fee mint → distributes, beneficiary receives amount−fee, conservation holds** (the residual-stuck-close caveat is now FIXED (v1.13.12): all three cranks harvest withheld fees to the mint before close_token_dist).
 - **default-frozen mint → recipient ATA frozen → `execute_token_shares` reverts** (the permissioned-RWA / frozen-recipient brick).
 - **non-transferable mint → reverts** (brick).
 - **active transfer-hook mint → reverts** (the forward-risk brick; needs a minimal hook program or a dummy hook programId).
