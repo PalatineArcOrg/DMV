@@ -6,7 +6,7 @@
     "build:prod": "anchor build",
     "build:devnet": "anchor build -- --features devnet",
     "test:devnet": "anchor build -- --features devnet && anchor test --skip-build",
-    "test:fuzz": "ts-mocha -p ./tests/fuzz/tsconfig.json -t 120000 \"tests/fuzz/**/*.fuzz.ts\""
+    "test:fuzz": "NODE_OPTIONS='--max-old-space-size=2048 --expose-gc' bash -c 'for f in tests/fuzz/*.fuzz.ts; do echo \"→ $f\"; ts-mocha -p ./tests/fuzz/tsconfig.json -t 300000 \"$f\" || exit 1; done'"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

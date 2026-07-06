@@ -1,11 +1,11 @@
 // Phase 1 property tests — SOL conservation & idempotency (invariants I1/I2/I4).
-// See tasks/FUZZ-HARNESS-PLAN.md. Randomised vaults are driven through the real
+// See docs/FUZZ-HARNESS-PLAN.md. Randomised vaults are driven through the real
 // permissionless SOL-distribution flow on an in-process LiteSVM, with the clock
 // warped past the PRODUCTION deadline (1-day interval + 7-day grace).
 //
 // The owner is the fee payer for every tx (including the permissionless cranks) so
 // the cranker's balance moves ONLY by program lamport transfers — this keeps the
-// bounty assertion exact. numRuns is modest (P1=30, P2=25); each run spins up a
+// bounty assertion exact. numRuns is modest (P1=15, P2=15); each run spins up a
 // fresh SVM + loads the .so.
 
 import { expect } from "chai";
@@ -24,9 +24,14 @@ import {
   rentFor,
   accountDataLen,
   decode,
+  readU64LE,
+  readI64LE,
+  OFF_HEARTBEAT_LAST,
+  OFF_EXEC_SOL_SNAPSHOT,
   warpClockTo,
   send,
   expectTxError,
+  gcAfter,
   FEE_WALLET,
 } from "./harness";
 
@@ -149,13 +154,13 @@ async function beginState(c: Ctx) {
   const V = bal(svm, pdas.vault);
   const expectedSnapshot = V - rentMin - bounty;
 
-  const lastHb = BigInt(decode(svm, "heartbeatRecord", pdas.heartbeat).lastHeartbeat.toString());
+  const lastHb = readI64LE(svm, pdas.heartbeat, OFF_HEARTBEAT_LAST);
   warpClockTo(svm, lastHb + BigInt(INTERVAL) + BigInt(GRACE) + 5n);
 
   // owner is fee payer; cranker signs as `payer` (pays execution_log rent)
   send(svm, await txBegin(cranker, pdas), owner, [cranker]);
 
-  const snapshot = BigInt(decode(svm, "executionLog", pdas.execution).solSnapshot.toString());
+  const snapshot = readU64LE(svm, pdas.execution, OFF_EXEC_SOL_SNAPSHOT);
   const shares = c.shares.map((s) => BigInt(s));
   const expected = shares.map((s) => (snapshot * s) / 10000n);
   const sumExpected = expected.reduce((a, b) => a + b, 0n);
@@ -168,7 +173,7 @@ describe("fuzz — SOL conservation & idempotency (LiteSVM + fast-check)", () =>
   it("P1 conservation: exact floor shares, Σ ≤ snapshot, dust<n, vault retains rent+bounty+dust", async function () {
     this.timeout(120_000);
     await fc.assert(
-      fc.asyncProperty(vaultArb, async (c: Ctx) => {
+      fc.asyncProperty(vaultArb, gcAfter(async (c: Ctx) => {
         const { svm, owner, cranker, benes, pdas, bounty, rentMin, snapshot, expected, dust, expectedSnapshot } =
           await beginState(c);
 
@@ -189,15 +194,18 @@ describe("fuzz — SOL conservation & idempotency (LiteSVM + fast-check)", () =>
         expect(totalPaid <= snapshot, "conservation Σ ≤ snapshot").to.equal(true);
         expect(snapshot - totalPaid).to.equal(dust);
         expect(bal(svm, pdas.vault)).to.equal(rentMin + bounty + dust);
-      }),
-      { numRuns: 30 }
+      })),
+      // endOnFailure: skip shrinking — each run spins up a fresh LiteSVM whose native
+      // memory only frees on process exit, so a shrink storm would OOM the heap. The
+      // raw counterexample (seed) is still reported and reproducible.
+      { numRuns: 15, endOnFailure: true }
     );
   });
 
   it("P2 idempotency: replay no-ops, finalize gated by NotAllSharesPaid, bounty→finalizer once", async function () {
     this.timeout(120_000);
     await fc.assert(
-      fc.asyncProperty(vaultArb, async (c: Ctx) => {
+      fc.asyncProperty(vaultArb, gcAfter(async (c: Ctx) => {
         const { svm, owner, cranker, benes, pdas, bounty, rentMin, dust } = await beginState(c);
         const idx = benes.map((_, i) => i);
         const shares = (idxs: number[]) => txSolShares(cranker, pdas, idxs, idxs.map((i) => benes[i].publicKey));
@@ -233,8 +241,8 @@ describe("fuzz — SOL conservation & idempotency (LiteSVM + fast-check)", () =>
 
         expect(decode(svm, "vaultConfig", pdas.vault).executed).to.equal(true);
         expect(bal(svm, pdas.vault)).to.equal(rentMin + dust);
-      }),
-      { numRuns: 25 }
+      })),
+      { numRuns: 15, endOnFailure: true }
     );
   });
 });
