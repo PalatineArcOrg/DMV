@@ -95,9 +95,9 @@ const OFF_PLAN_MASK = (a: number) => 44 + a * 42;
 // bouncing off ordering gates. An independent per-step draw almost never lines up
 // begin→shares→specifics→finalize→close and left token/plan runs never completing.
 const OWNER_MUTS = new Set([
-  "heartbeat", "update", "withdrawSol", "withdrawTok", "rotate", "revoke", "updatePlan",
+  "heartbeat", "update", "withdrawSol", "withdrawTok", "rotate", "revoke", "updatePlan", "clearPlan",
 ]);
-const NOISE = ["heartbeat", "update", "withdrawSol", "withdrawTok", "rotate", "revoke", "updatePlan", "deposit", "deposit"];
+const NOISE = ["heartbeat", "update", "withdrawSol", "withdrawTok", "rotate", "revoke", "updatePlan", "clearPlan", "deposit", "deposit"];
 const SLOTS = 34; // upper bound on recipe length; prio/params arrays are this long
 
 // Per-slot params: which signer cranks, a warp size + big flag, a deposit/withdraw
@@ -254,6 +254,11 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
           .sort((a, b) => a.prio - b.prio)
           .map((x) => x.rop);
 
+        // Live plan flag: hasPlan is a per-run const, but clear_asset_plan closes the
+        // AssetPlan mid-run. After a successful clear, the account is GONE — so
+        // `planLive = hasPlan && !planCleared` guards every plan read + the plan arg
+        // (or the harness reads a closed account / passes a stale PDA and faults).
+        let planCleared = false;
         for (let k = 0; k < order.length; k++) {
           if (isClosed(svm, pdas.vault)) break; // vault revoked/owner-closed → nothing left to do
 
@@ -284,8 +289,11 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
           const openTokBefore = readU16LE(svm, pdas.vault, base + 21);
           const solMask = execLogExists ? readU32LE(svm, pdas.execution, OFF_EXEC_SOL_MASK) : 0;
           const solMaskFull = solMask === (1 << c.n) - 1;
-          const planMask = hasPlan ? Number(readU64LE(svm, assetPlan, OFF_PLAN_MASK(asgCount))) : 0;
-          const planMaskFull = hasPlan ? planMask === (1 << asgCount) - 1 : true;
+          // `planLive` (not the per-run `hasPlan` const) — false once clear_asset_plan
+          // has closed the AssetPlan mid-run. Every plan read + plan arg below gates on it.
+          const planLive = hasPlan && !planCleared;
+          const planMask = planLive ? Number(readU64LE(svm, assetPlan, OFF_PLAN_MASK(asgCount))) : 0;
+          const planMaskFull = planLive ? planMask === (1 << asgCount) - 1 : true;
           const tokExists = td ? !isClosed(svm, td) : false;
           const tokMask = tokExists ? readU32LE(svm, td!, OFF_TOKENDIST_MASK) : 0;
           const tokMaskFull = tokExists ? tokMask === (1 << c.n) - 1 : false;
@@ -326,7 +334,7 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
             }
             case "begin":
               ok = await attempt(
-                program.methods.beginExecution().accountsPartial({ payer: p.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, executionLog: pdas.execution, assetPlan: hasPlan ? assetPlan : null, systemProgram: SystemProgram.programId }).transaction(),
+                program.methods.beginExecution().accountsPartial({ payer: p.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, executionLog: pdas.execution, assetPlan: planLive ? assetPlan : null, systemProgram: SystemProgram.programId }).transaction(),
                 p
               );
               break;
@@ -338,14 +346,14 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
               break;
             case "finalize":
               ok = await attempt(
-                program.methods.finalizeExecution().accountsPartial({ payer: p.publicKey, vaultConfig: pdas.vault, executionLog: pdas.execution, assetPlan: hasPlan ? assetPlan : null }).transaction(),
+                program.methods.finalizeExecution().accountsPartial({ payer: p.publicKey, vaultConfig: pdas.vault, executionLog: pdas.execution, assetPlan: planLive ? assetPlan : null }).transaction(),
                 p
               );
               break;
             case "beginTok":
               if (!token) { ran = false; break; }
               ok = await attempt(
-                program.methods.beginTokenDist().accountsPartial({ payer: p.publicKey, vaultConfig: pdas.vault, executionLog: pdas.execution, mint: token.mint, vaultAta: token.vaultAta, assetPlan: hasPlan ? assetPlan : null, tokenDist: td, systemProgram: SystemProgram.programId }).transaction(),
+                program.methods.beginTokenDist().accountsPartial({ payer: p.publicKey, vaultConfig: pdas.vault, executionLog: pdas.execution, mint: token.mint, vaultAta: token.vaultAta, assetPlan: planLive ? assetPlan : null, tokenDist: td, systemProgram: SystemProgram.programId }).transaction(),
                 p
               );
               break;
@@ -382,7 +390,7 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
             case "closeOwner": {
               const solDust = bal(svm, pdas.vault) - rentFor(svm, accountDataLen(svm, pdas.vault));
               ok = await attempt(
-                program.methods.closeExecutedVaultByOwner().accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, executionLog: pdas.execution, assetPlan: hasPlan ? assetPlan : null, largestBenef: solDust > 0n ? benes[largest].publicKey : null }).transaction(),
+                program.methods.closeExecutedVaultByOwner().accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, executionLog: pdas.execution, assetPlan: planLive ? assetPlan : null, largestBenef: solDust > 0n ? benes[largest].publicKey : null }).transaction(),
                 owner
               );
               break;
@@ -423,18 +431,26 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
             }
             case "revoke":
               ok = await attempt(
-                program.methods.revokeVault().accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan: hasPlan ? assetPlan : null }).transaction(),
+                program.methods.revokeVault().accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan: planLive ? assetPlan : null }).transaction(),
                 owner
               );
               break;
             case "updatePlan":
-              if (!hasPlan) { ran = false; break; }
+              if (!planLive) { ran = false; break; }
               ok = await attempt(
                 program.methods.updateAssetPlan(
                   asg.map((a) => ({ mint: a.sentinel ? SENTINEL_MINT : (token as any).mint, amount: new BN(a.amount.toString()), beneficiaryIndex: a.benefIdx, isNft: false }))
                 ).accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan }).transaction(),
                 owner
               );
+              break;
+            case "clearPlan":
+              if (!planLive) { ran = false; break; } // no live plan → nothing to clear
+              ok = await attempt(
+                program.methods.clearAssetPlan().accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan }).transaction(),
+                owner
+              );
+              if (ok) planCleared = true; // AssetPlan closed on-chain — every later plan read/arg must skip it
               break;
           }
 
@@ -476,7 +492,9 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
             const solMaskAfter = !isClosed(svm, pdas.execution) ? readU32LE(svm, pdas.execution, OFF_EXEC_SOL_MASK) : prevSolMask;
             expect((solMaskAfter & prevSolMask) === prevSolMask, `#2 sol_paid_mask cleared a bit (${prevSolMask}→${solMaskAfter})`).to.equal(true);
             prevSolMask = solMaskAfter;
-            if (hasPlan) {
+            // Re-check planCleared here (not the top-of-loop planLive): a clear_asset_plan
+            // in THIS iteration just closed the account, so its mask is gone — skip it.
+            if (hasPlan && !planCleared) {
               const pm = Number(readU64LE(svm, assetPlan, OFF_PLAN_MASK(asgCount)));
               expect((pm & prevPlanMask) === prevPlanMask, `#2 asset_plan.paid_mask cleared a bit (${prevPlanMask}→${pm})`).to.equal(true);
               prevPlanMask = pm;

@@ -56,6 +56,10 @@ pub fn handler(ctx: Context<UpdateVault>, params: UpdateVaultParams) -> Result<(
             interval >= MIN_HEARTBEAT_INTERVAL,
             VaultError::HeartbeatIntervalTooShort
         );
+        require!(
+            interval <= MAX_HEARTBEAT_INTERVAL,
+            VaultError::HeartbeatIntervalTooLong
+        );
         vault.heartbeat_interval = interval;
     }
 
@@ -64,13 +68,17 @@ pub fn handler(ctx: Context<UpdateVault>, params: UpdateVaultParams) -> Result<(
             grace >= MIN_GRACE_PERIOD,
             VaultError::GracePeriodTooShort
         );
+        require!(
+            grace <= MAX_GRACE_PERIOD,
+            VaultError::GracePeriodTooLong
+        );
         vault.grace_period = grace;
     }
 
     if let Some(beneficiaries) = params.beneficiaries {
         // Beneficiary indices are referenced by the AssetPlan; changing the set
-        // would silently re-point assignments. Force the owner to clear the plan
-        // (update_asset_plan / re-set) before editing beneficiaries (P10/M-2).
+        // would silently re-point assignments. The owner must run `clear_asset_plan`
+        // first (pre-grace), then edit beneficiaries, then re-`set_asset_plan` (P10/M-2).
         require!(!vault.has_asset_plan, VaultError::BeneficiariesLockedByPlan);
 
         require!(

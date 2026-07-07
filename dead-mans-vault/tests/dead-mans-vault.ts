@@ -568,6 +568,144 @@ describe("dead-mans-vault — permissionless execution", () => {
       }
     });
 
+    // ── Tier 2: MAX interval/grace bounds (C1) ────────────────────────────
+    const MAX_INTERVAL = 31_536_000; // MAX_HEARTBEAT_INTERVAL (365d)
+    const MAX_GRACE = 63_072_000;    // MAX_GRACE_PERIOD (730d)
+
+    it("initialize_vault rejects interval/grace above the max, accepts exactly max (C1)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const benes = [{ wallet: b1.publicKey, shareBps: 10000 }];
+
+      // interval over max → HeartbeatIntervalTooLong (grace valid; both txs revert → PDA never created)
+      try {
+        await initVault({ owner: o, agent: agent.publicKey, beneficiaries: benes, interval: MAX_INTERVAL + 1, grace: MAX_GRACE });
+        expect.fail("should reject over-max interval");
+      } catch (e) { expectErr(e, "HeartbeatIntervalTooLong"); }
+
+      // grace over max → GracePeriodTooLong (interval valid)
+      try {
+        await initVault({ owner: o, agent: agent.publicKey, beneficiaries: benes, interval: MAX_INTERVAL, grace: MAX_GRACE + 1 });
+        expect.fail("should reject over-max grace");
+      } catch (e) { expectErr(e, "GracePeriodTooLong"); }
+
+      // boundary: exactly max on both → accepted (proves the bound is inclusive `<=`)
+      const o2 = Keypair.generate();
+      await fund(o2.publicKey, 3);
+      const { vault: v2 } = await initVault({ owner: o2, agent: agent.publicKey, beneficiaries: benes, interval: MAX_INTERVAL, grace: MAX_GRACE });
+      const cfg = await program.account.vaultConfig.fetch(v2);
+      expect(cfg.heartbeatInterval.toNumber()).to.equal(MAX_INTERVAL);
+      expect(cfg.gracePeriod.toNumber()).to.equal(MAX_GRACE);
+    });
+
+    it("update_vault rejects interval/grace above the max (C1)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat } = await initVault({
+        owner: o, agent: agent.publicKey, beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+      });
+      const upd = (interval: number | null, grace: number | null) =>
+        program.methods
+          .updateVault({ heartbeatInterval: interval === null ? null : new BN(interval), gracePeriod: grace === null ? null : new BN(grace), beneficiaries: null })
+          .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+          .signers([o])
+          .rpc();
+      try { await upd(MAX_INTERVAL + 1, null); expect.fail("reject over-max interval"); }
+      catch (e) { expectErr(e, "HeartbeatIntervalTooLong"); }
+      try { await upd(null, MAX_GRACE + 1); expect.fail("reject over-max grace"); }
+      catch (e) { expectErr(e, "GracePeriodTooLong"); }
+    });
+
+    // ── Tier 2: clear_asset_plan (C2a) ────────────────────────────────────
+    it("clear_asset_plan closes the plan, unlocks beneficiary edits, and frees the slot (C2a)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat, assetPlan } = await initVault({
+        owner: o, agent: agent.publicKey, beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+      });
+      const setPlan = (amount: number) =>
+        program.methods
+          .setAssetPlan([{ mint: PublicKey.default, amount: new BN(amount), beneficiaryIndex: 0, isNft: false }])
+          .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+          .signers([o])
+          .rpc();
+
+      await setPlan(1000);
+      expect((await program.account.vaultConfig.fetch(vault)).hasAssetPlan).to.be.true;
+      expect(await conn.getAccountInfo(assetPlan)).to.not.be.null;
+
+      const ownerBefore = await conn.getBalance(o.publicKey);
+      await program.methods
+        .clearAssetPlan()
+        .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan })
+        .signers([o])
+        .rpc();
+
+      // flag cleared + PDA closed + rent refunded to owner (net positive after the ~5000-lamport fee)
+      expect((await program.account.vaultConfig.fetch(vault)).hasAssetPlan).to.be.false;
+      expect(await conn.getAccountInfo(assetPlan)).to.be.null;
+      expect(await conn.getBalance(o.publicKey)).to.be.greaterThan(ownerBefore);
+
+      // beneficiary edit now unlocked (was BeneficiariesLockedByPlan)
+      await program.methods
+        .updateVault({ heartbeatInterval: null, gracePeriod: null, beneficiaries: [{ wallet: b2.publicKey, shareBps: 10000 }] })
+        .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat })
+        .signers([o])
+        .rpc();
+      const v = await program.account.vaultConfig.fetch(vault);
+      expect(v.beneficiaries.length).to.equal(1);
+      expect(v.beneficiaries[0].wallet.equals(b2.publicKey)).to.be.true;
+
+      // slot freed → a fresh set_asset_plan re-inits at the same PDA
+      await setPlan(500);
+      expect((await program.account.vaultConfig.fetch(vault)).hasAssetPlan).to.be.true;
+    });
+
+    it("clear_asset_plan on a vault with no plan is rejected (C2a)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat, assetPlan } = await initVault({
+        owner: o, agent: agent.publicKey, beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+      });
+      // No plan → the required asset_plan account can't be loaded, so Anchor rejects with
+      // AccountNotInitialized (before vault_config's defensive has_asset_plan constraint).
+      // Either way the no-plan clear is blocked; the client only calls clear when a plan exists.
+      try {
+        await program.methods
+          .clearAssetPlan()
+          .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan })
+          .signers([o])
+          .rpc();
+        expect.fail("should reject clear with no plan");
+      } catch (e) { expectErr(e, "AccountNotInitialized"); }
+    });
+
+    it("clear_asset_plan rejects a non-owner signer (C2a)", async () => {
+      const o = Keypair.generate();
+      await fund(o.publicKey, 3);
+      const { vault, heartbeat, assetPlan } = await initVault({
+        owner: o, agent: agent.publicKey, beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
+      });
+      await program.methods
+        .setAssetPlan([{ mint: PublicKey.default, amount: new BN(1000), beneficiaryIndex: 0, isNft: false }])
+        .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+        .signers([o])
+        .rpc();
+      const imposter = Keypair.generate();
+      await fund(imposter.publicKey, 1);
+      try {
+        await program.methods
+          .clearAssetPlan()
+          .accountsPartial({ owner: imposter.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan })
+          .signers([imposter])
+          .rpc();
+        expect.fail("should reject non-owner clear");
+      } catch (e) {
+        // seeds=[b"vault", owner] re-derive from the imposter → ConstraintSeeds blocks it.
+        expectErr(e, "ConstraintSeeds");
+      }
+    });
+
     it("revoke closes PDAs and allows re-init; rejects non-owner", async () => {
       const o = Keypair.generate();
       await fund(o.publicKey, 3);

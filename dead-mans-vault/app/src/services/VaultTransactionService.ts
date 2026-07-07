@@ -339,6 +339,31 @@ export class VaultTransactionService {
     return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 130_000);
   }
 
+  /**
+   * Pre-grace only. Closes the vault's AssetPlan (rent → owner) and clears
+   * `has_asset_plan`, so the owner can then edit beneficiaries (locked while a plan
+   * exists) and re-set a plan. Only call when a plan exists — the ix requires it.
+   * (UI wiring — a "Clear bequests" action on the Bequests screen — is a follow-up.)
+   */
+  async buildClearAssetPlanTx(owner: PublicKey): Promise<Transaction> {
+    const [vaultPda] = this.getVaultPDA(owner);
+    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+    const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
+    const program = this.programAs(owner);
+
+    const tx = await program.methods
+      .clearAssetPlan()
+      .accountsPartial({
+        owner,
+        vaultConfig: vaultPda,
+        heartbeatRecord: heartbeatPda,
+        assetPlan: assetPlanPda,
+      })
+      .transaction();
+
+    return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 130_000);
+  }
+
   async buildCloseRevokedVaultTx(owner: PublicKey): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);

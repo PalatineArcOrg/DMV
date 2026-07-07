@@ -46,16 +46,25 @@ pub struct InitializeVaultParams {
 }
 
 pub fn handler(ctx: Context<InitializeVault>, params: InitializeVaultParams) -> Result<()> {
-    // Validate heartbeat interval (minimum 1 day)
+    // Validate heartbeat interval (minimum 1 day, maximum 1 year — the MAX prevents a
+    // deadline() overflow that would brick the vault, see constants.rs).
     require!(
         params.heartbeat_interval >= MIN_HEARTBEAT_INTERVAL,
         VaultError::HeartbeatIntervalTooShort
     );
+    require!(
+        params.heartbeat_interval <= MAX_HEARTBEAT_INTERVAL,
+        VaultError::HeartbeatIntervalTooLong
+    );
 
-    // Validate grace period (minimum 7 days)
+    // Validate grace period (minimum 7 days, maximum 2 years)
     require!(
         params.grace_period >= MIN_GRACE_PERIOD,
         VaultError::GracePeriodTooShort
+    );
+    require!(
+        params.grace_period <= MAX_GRACE_PERIOD,
+        VaultError::GracePeriodTooLong
     );
 
     // Validate beneficiary count

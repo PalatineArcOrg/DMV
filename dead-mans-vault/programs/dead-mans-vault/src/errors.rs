@@ -129,4 +129,10 @@ pub enum VaultError {
 
     #[msg("Owner-exclusive close window has not elapsed yet")]
     CloseDelayNotElapsed,
+
+    #[msg("Heartbeat interval exceeds the maximum allowed (1 year)")]
+    HeartbeatIntervalTooLong,
+
+    #[msg("Grace period exceeds the maximum allowed (2 years)")]
+    GracePeriodTooLong,
 }

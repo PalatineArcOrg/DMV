@@ -9,6 +9,8 @@ pub struct RecordHeartbeat<'info> {
     pub agent: Signer<'info>,
 
     #[account(
+        seeds = [b"vault", vault_config.owner.as_ref()],
+        bump = vault_config.bump,
         constraint = vault_config.agent_pubkey == agent.key() @ VaultError::UnauthorizedAgent,
         constraint = vault_config.active @ VaultError::VaultInactive,
         constraint = !vault_config.executed @ VaultError::VaultAlreadyExecuted,

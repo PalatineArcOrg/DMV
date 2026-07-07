@@ -286,6 +286,107 @@ export type DeadMansVault = {
       "args": []
     },
     {
+      "name": "clearAssetPlan",
+      "discriminator": [
+        56,
+        107,
+        58,
+        21,
+        146,
+        189,
+        10,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "Owner signs and receives the AssetPlan rent refund."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "vaultConfig"
+          ]
+        },
+        {
+          "name": "vaultConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "heartbeatRecord",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  97,
+                  114,
+                  116,
+                  98,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "assetPlan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultConfig"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "closeExecutedVault",
       "docs": [
         "Permissionless keeper cleanup of an executed vault after the",
@@ -1361,12 +1462,31 @@ export type DeadMansVault = {
         {
           "name": "agent",
           "docs": [
-            "The agent's TEE-generated keypair signs this"
+            "The agent's device-held key (Keystore/expo-secure-store) signs this"
           ],
           "signer": true
         },
         {
-          "name": "vaultConfig"
+          "name": "vaultConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_config.owner",
+                "account": "vaultConfig"
+              }
+            ]
+          }
         },
         {
           "name": "heartbeatRecord",
@@ -2338,6 +2458,16 @@ export type DeadMansVault = {
       "code": 6041,
       "name": "closeDelayNotElapsed",
       "msg": "Owner-exclusive close window has not elapsed yet"
+    },
+    {
+      "code": 6042,
+      "name": "heartbeatIntervalTooLong",
+      "msg": "Heartbeat interval exceeds the maximum allowed (1 year)"
+    },
+    {
+      "code": 6043,
+      "name": "gracePeriodTooLong",
+      "msg": "Grace period exceeds the maximum allowed (2 years)"
     }
   ],
   "types": [
@@ -2349,7 +2479,7 @@ export type DeadMansVault = {
           {
             "name": "mint",
             "docs": [
-              "Mint of the bequeathed asset (SPL/NFT only in v1)"
+              "Mint of the bequeathed asset (SPL/NFT); the zero-pubkey sentinel = a SOL bequest"
             ],
             "type": "pubkey"
           },
@@ -2382,9 +2512,10 @@ export type DeadMansVault = {
     {
       "name": "assetPlan",
       "docs": [
-        "One per vault, fixed-size. Owner-defined specific bequests (SPL tokens + NFTs",
-        "only in v1). Created by `set_asset_plan` (strict `init` at full size), edited",
-        "by `update_asset_plan` (owner overwrite). Lives on the heap, not the stack."
+        "One per vault, fixed-size. Owner-defined specific bequests: SOL (via the",
+        "zero-pubkey sentinel mint), SPL tokens, and NFTs. Created by `set_asset_plan`",
+        "(strict `init` at full size), edited by `update_asset_plan` (owner overwrite).",
+        "Lives on the heap, not the stack."
       ],
       "type": {
         "kind": "struct",
@@ -2725,7 +2856,8 @@ export type DeadMansVault = {
           {
             "name": "agentPubkey",
             "docs": [
-              "Agent's TEE-generated execution pubkey (heartbeats only)"
+              "Agent pubkey — device-held key (Android Keystore / expo-secure-store,",
+              "biometric-gated). Signs `record_heartbeat` ONLY; never execution."
             ],
             "type": "pubkey"
           },

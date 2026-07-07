@@ -13,6 +13,7 @@ pub mod close_executed_vault;
 // Permissionless autonomous execution + specific bequests (v2)
 pub mod set_asset_plan;
 pub mod update_asset_plan;
+pub mod clear_asset_plan;
 pub mod begin_execution;
 pub mod begin_token_dist;
 pub mod execute_specific_asset;
@@ -35,6 +36,7 @@ pub use close_executed_vault::*;
 
 pub use set_asset_plan::*;
 pub use update_asset_plan::*;
+pub use clear_asset_plan::*;
 pub use begin_execution::*;
 pub use begin_token_dist::*;
 pub use execute_specific_asset::*;

@@ -93,6 +93,10 @@ pub mod dead_mans_vault {
         instructions::update_asset_plan::handler(ctx, assignments)
     }
 
+    pub fn clear_asset_plan(ctx: Context<ClearAssetPlan>) -> Result<()> {
+        instructions::clear_asset_plan::handler(ctx)
+    }
+
     // ---- Permissionless autonomous execution ----
 
     pub fn begin_execution(ctx: Context<BeginExecution>) -> Result<()> {

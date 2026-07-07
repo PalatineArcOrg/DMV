@@ -26,6 +26,7 @@ const DISCRIMINATOR: Record<string, string> = {
   b422252e9c00d3ee: 'withdraw_from_vault',
   '9aaeaacb1112478a': 'set_asset_plan',
   db840f16e667d9de: 'update_asset_plan',
+  '386b3a1592bd0ad8': 'clear_asset_plan',
 };
 
 // Instructions that belong to a distribution session.

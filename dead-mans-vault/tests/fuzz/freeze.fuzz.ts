@@ -108,6 +108,17 @@ const txUpdatePlan = (o: Keypair, p: any) =>
       assetPlan: assetPlanPda(p.vault),
     })
     .transaction();
+// clear_asset_plan is pre-grace only (VaultFrozen post-deadline); needs an existing plan.
+const txClearPlan = (o: Keypair, p: any) =>
+  program.methods
+    .clearAssetPlan()
+    .accountsPartial({
+      owner: o.publicKey,
+      vaultConfig: p.vault,
+      heartbeatRecord: p.heartbeat,
+      assetPlan: assetPlanPda(p.vault),
+    })
+    .transaction();
 
 /** Init a vault inside a shared SVM with last_heartbeat pinned to BASE. */
 async function initVault(svm: any, owner: Keypair, agent: Keypair, benes: Keypair[], shares: number[], deposit: bigint) {
@@ -212,6 +223,8 @@ describe("fuzz — freeze-after-deadline (LiteSVM + fast-check)", () => {
           await expectBadTx(svm, txRevoke(ownerA, pA), ownerA, [], VF);
           // Vault B: update_asset_plan on an existing plan → AssetPlanImmutable.
           await expectBadTx(svm, txUpdatePlan(ownerB, pB), ownerB, [], API);
+          // Vault B: clear_asset_plan post-deadline (has a plan) → VaultFrozen.
+          await expectBadTx(svm, txClearPlan(ownerB, pB), ownerB, [], VF);
         })
       ),
       { numRuns: 12, endOnFailure: true }

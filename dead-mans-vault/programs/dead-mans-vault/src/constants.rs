@@ -47,6 +47,16 @@ pub const EXECUTED_CLOSE_DELAY: i64 = 60;
 #[cfg(not(feature = "devnet"))]
 pub const EXECUTED_CLOSE_DELAY: i64 = 86_400; // 24 hours
 
+// Upper safety bounds on the owner-set heartbeat interval / grace period. These are
+// PLAIN (not `devnet`-gated) — they cap both build profiles. Without them, a value near
+// i64::MAX makes `deadline()`'s checked_add overflow, which errors out of EVERY freeze
+// check + begin_execution and bricks the vault (funds locked, no heartbeat/withdraw/
+// execute). Sized far above any value the app can send (app max = 30-day interval /
+// 17-day grace): 1 year / 2 years, so no legitimate config is ever rejected, while
+// interval+grace (≤ ~9.5e7) can never overflow i64 (~9.2e18) for any real timestamp.
+pub const MAX_HEARTBEAT_INTERVAL: i64 = 31_536_000; // 365 days
+pub const MAX_GRACE_PERIOD: i64 = 63_072_000; // 730 days
+
 /// Maximum beneficiaries per vault. Tracked with a u32 paid-mask.
 pub const MAX_BENEFICIARIES: usize = 20;
 
