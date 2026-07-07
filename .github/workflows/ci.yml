@@ -102,21 +102,19 @@ jobs:
         with:
           path: |
             ~/.local/share/solana
-            ~/.avm
-            ~/.cargo/bin/avm
             ~/.cargo/bin/anchor
-          key: solana-3.0.15-anchor-0.32.1
-      - name: Install Solana (Agave 3.0.15) + Anchor 0.32.1 (cache miss only)
+          key: solana-3.1.10-anchor-0.32.1
+      - name: Install Solana (Agave 3.1.10) + Anchor 0.32.1 (cache miss only)
         if: steps.toolchain.outputs.cache-hit != 'true'
+        # v3.1.10 = the toolchain this repo builds with (v3.0.15 in the docs is stale +
+        # 404s on the CDN). Anchor installed directly from crates.io — no avm-from-source
+        # (the historically-fragile step).
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v3.0.15/install)"
-          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
-          avm install 0.32.1
-          avm use 0.32.1
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.10/install)"
+          cargo install anchor-cli --version 0.32.1 --locked --force
       - name: PATH
         run: |
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.avm/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Cache program build
         uses: actions/cache@v4
