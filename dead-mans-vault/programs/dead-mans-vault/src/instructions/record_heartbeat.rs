@@ -5,7 +5,7 @@ use crate::util::deadline;
 
 #[derive(Accounts)]
 pub struct RecordHeartbeat<'info> {
-    /// The agent's TEE-generated keypair signs this
+    /// The agent's device-held key (Keystore/expo-secure-store) signs this
     pub agent: Signer<'info>,
 
     #[account(

@@ -1,9 +1,10 @@
 use anchor_lang::prelude::*;
 use crate::constants::MAX_ASSIGNMENTS;
 
-/// One per vault, fixed-size. Owner-defined specific bequests (SPL tokens + NFTs
-/// only in v1). Created by `set_asset_plan` (strict `init` at full size), edited
-/// by `update_asset_plan` (owner overwrite). Lives on the heap, not the stack.
+/// One per vault, fixed-size. Owner-defined specific bequests: SOL (via the
+/// zero-pubkey sentinel mint), SPL tokens, and NFTs. Created by `set_asset_plan`
+/// (strict `init` at full size), edited by `update_asset_plan` (owner overwrite).
+/// Lives on the heap, not the stack.
 #[account]
 pub struct AssetPlan {
     /// Associated vault config
@@ -21,7 +22,7 @@ pub struct AssetPlan {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy)]
 pub struct AssetAssignment {
-    /// Mint of the bequeathed asset (SPL/NFT only in v1)
+    /// Mint of the bequeathed asset (SPL/NFT); the zero-pubkey sentinel = a SOL bequest
     pub mint: Pubkey,
 
     /// Exact base units to transfer; 1 for an NFT

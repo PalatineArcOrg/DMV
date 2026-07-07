@@ -61,7 +61,6 @@ pub fn handler(ctx: Context<RotateAgent>, new_agent_pubkey: Pubkey) -> Result<()
         VaultError::AgentKeyUnchanged
     );
 
-    let old_agent = vault.agent_pubkey;
     let clock = Clock::get()?;
 
     // Rotate the agent key
@@ -71,10 +70,5 @@ pub fn handler(ctx: Context<RotateAgent>, new_agent_pubkey: Pubkey) -> Result<()
     // Reset heartbeat to force new agent to prove liveness
     heartbeat.last_heartbeat = clock.unix_timestamp;
 
-    msg!(
-        "Agent rotated. Old: {}. New: {}. Heartbeat reset.",
-        old_agent,
-        new_agent_pubkey
-    );
     Ok(())
 }

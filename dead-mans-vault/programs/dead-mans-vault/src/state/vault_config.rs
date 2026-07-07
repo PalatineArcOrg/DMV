@@ -6,7 +6,8 @@ pub struct VaultConfig {
     /// Owner wallet pubkey
     pub owner: Pubkey,
 
-    /// Agent's TEE-generated execution pubkey (heartbeats only)
+    /// Agent pubkey — device-held key (Android Keystore / expo-secure-store,
+    /// biometric-gated). Signs `record_heartbeat` ONLY; never execution.
     pub agent_pubkey: Pubkey,
 
     /// Heartbeat interval in seconds (e.g., 604800 = 7 days)
