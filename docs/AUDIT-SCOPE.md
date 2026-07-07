@@ -144,8 +144,8 @@ We can share the internal review notes + the ATA-spoof fix commit as an appendix
 
 | Item | Value |
 |---|---|
-| **Pinned commit** | Tag **`audit-2026-07-05c`** (branch `devnet`; supersedes `-05b` — folds in the audit-of-audit doc fixes, **identical program code**) — scope is frozen at that commit. The only pre-mainnet program change will be the `FEE_WALLET` **constant value** (non-logic, not security-relevant). |
-| **In-scope files** | the 31 `.rs` under `programs/dead-mans-vault/src/` (primary) + the crank's completability question (§3). |
+| **Pinned commit** | Tag **`audit-2026-07-07`** (branch `devnet`; supersedes `-05c`) — folds in the **Tier-2 program hardening** from the internal skill-driven audit: **C1** MAX heartbeat-interval/grace bounds (fixes a `deadline()` overflow self-brick; errors 6042/6043), **C2a** the new owner-only pre-grace `clear_asset_plan` instruction, **G2** explicit canonical seeds on `record_heartbeat`'s `vault_config`. 44 errors now. Scope is frozen at that commit. The only remaining pre-mainnet program change will be the `FEE_WALLET` **constant value** (non-logic, not security-relevant). |
+| **In-scope files** | the 32 `.rs` under `programs/dead-mans-vault/src/` (primary) + the crank's completability question (§3). |
 | **Out of scope** | `tasks/*.md`, TEE/agent-key device custody, mobile UX, RPC/notify infra, economics. |
 | **Build/test** | `anchor build` (prod floors) — **mainnet must NOT set the `devnet` Cargo feature** (it lowers timing floors for tests only; CI asserts this). Tests: `yarn`/`ts-mocha` via `yarn test:devnet`. Caveat: local validator gossip port collides with another service — spec §11 has the standalone-validator recipe. |
 | **Deployment** | devnet live; mainnet reuses the same program keypair (same ID); upgrade-authority per §7. |
