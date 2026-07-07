@@ -135,6 +135,21 @@ export async function crankVault(ctx, vault, cfg) {
   const hasPlan = cfg.hasAssetPlan;
   const execPda = executionPda(programId, vault);
 
+  // A1 mitigation: a mint the issuer has paused / frozen / hook-switched / made
+  // non-transferable makes its transfer_checked revert. Previously that threw out of
+  // the whole crank and stalled the distribution of every OTHER asset (and re-hit the
+  // same wall every tick). Instead, skip a stuck mint per-tick: all distributable
+  // assets still reach the heirs; only the stuck mint's residual + rent strand (the
+  // tolerable A1 outcome), pending a program-level escape hatch (external-audit scope).
+  // On-chain masks keep this idempotent — a transiently-failed mint retries next tick.
+  const skipped = [];
+  const stuckMints = new Set();
+  const markStuck = (mint, step) => {
+    stuckMints.add(mint.toBase58());
+    skipped.push({ mint: mint.toBase58(), step });
+  };
+  const isStuck = (mint) => stuckMints.has(mint.toBase58());
+
   // 1. begin_execution — snapshot the SOL residual (existence proves grace).
   let execLog = await program.account.executionLog.fetchNullable(execPda);
   if (!execLog) {
@@ -163,22 +178,24 @@ export async function crankVault(ctx, vault, cfg) {
   for (const { mint, programId: tokenPid } of mints) {
     const tdPda = tokenDistPda(programId, vault, mint);
     if (await program.account.tokenDist.fetchNullable(tdPda)) continue;
-    const vaultAta = getAssociatedTokenAddressSync(mint, vault, true, tokenPid);
-    await ensureAta(ctx, vaultAta, mint, vault, tokenPid);
-    await program.methods
-      .beginTokenDist()
-      .accountsPartial({
-        payer,
-        vaultConfig: vault,
-        executionLog: execPda,
-        mint,
-        vaultAta,
-        assetPlan: hasPlan ? assetPlanPda(programId, vault) : null,
-        tokenDist: tdPda,
-        systemProgram: SystemProgram.programId,
-      })
-      .preInstructions(cuIxs(CU.beginTokenDist, ctx.priorityFee))
-      .rpc();
+    try {
+      const vaultAta = getAssociatedTokenAddressSync(mint, vault, true, tokenPid);
+      await ensureAta(ctx, vaultAta, mint, vault, tokenPid);
+      await program.methods
+        .beginTokenDist()
+        .accountsPartial({
+          payer,
+          vaultConfig: vault,
+          executionLog: execPda,
+          mint,
+          vaultAta,
+          assetPlan: hasPlan ? assetPlanPda(programId, vault) : null,
+          tokenDist: tdPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .preInstructions(cuIxs(CU.beginTokenDist, ctx.priorityFee))
+        .rpc();
+    } catch { markStuck(mint, 'begin_token_dist'); }
   }
 
   // 3. specific bequests, ascending per mint (program-enforced order).
@@ -186,33 +203,42 @@ export async function crankVault(ctx, vault, cfg) {
     for (let j = 0; j < plan.assignments.length; j++) {
       if (bitSet(plan.paidMask, j)) continue;
       const a = plan.assignments[j];
+      const isSol = a.mint.equals(PublicKey.default);
+      // A stuck mint's earlier bequest already failed → its later ones would revert
+      // SpecificOutOfOrder anyway; skip them so the loop reaches other mints' bequests.
+      if (!isSol && isStuck(a.mint)) continue;
       const benWallet = beneficiaries[a.beneficiaryIndex].wallet;
-      if (a.mint.equals(PublicKey.default)) {
+      try {
+        if (isSol) {
+          await program.methods
+            .executeSpecificSol(j)
+            .accountsPartial({
+              payer, vaultConfig: vault, executionLog: execPda,
+              assetPlan: assetPlanPda(programId, vault), beneficiary: benWallet,
+            })
+            .preInstructions(cuIxs(CU.executeSpecificSol, ctx.priorityFee))
+            .rpc();
+          continue;
+        }
+        const mintInfo = mints.find((m) => m.mint.equals(a.mint));
+        const tokenPid = mintInfo ? mintInfo.programId : TOKEN_PROGRAM_ID;
+        const vaultAta = getAssociatedTokenAddressSync(a.mint, vault, true, tokenPid);
+        const benAta = getAssociatedTokenAddressSync(a.mint, benWallet, false, tokenPid);
+        await ensureAta(ctx, benAta, a.mint, benWallet, tokenPid);
         await program.methods
-          .executeSpecificSol(j)
+          .executeSpecificAsset(j)
           .accountsPartial({
             payer, vaultConfig: vault, executionLog: execPda,
-            assetPlan: assetPlanPda(programId, vault), beneficiary: benWallet,
+            assetPlan: assetPlanPda(programId, vault),
+            mint: a.mint, tokenDist: tokenDistPda(programId, vault, a.mint),
+            vaultAta, beneficiaryAta: benAta, tokenProgram: tokenPid,
           })
-          .preInstructions(cuIxs(CU.executeSpecificSol, ctx.priorityFee))
+          .preInstructions(cuIxs(CU.executeSpecificAsset, ctx.priorityFee))
           .rpc();
-        continue;
+      } catch {
+        if (isSol) skipped.push({ mint: 'SOL', step: 'execute_specific_sol' });
+        else markStuck(a.mint, 'execute_specific_asset');
       }
-      const mintInfo = mints.find((m) => m.mint.equals(a.mint));
-      const tokenPid = mintInfo ? mintInfo.programId : TOKEN_PROGRAM_ID;
-      const vaultAta = getAssociatedTokenAddressSync(a.mint, vault, true, tokenPid);
-      const benAta = getAssociatedTokenAddressSync(a.mint, benWallet, false, tokenPid);
-      await ensureAta(ctx, benAta, a.mint, benWallet, tokenPid);
-      await program.methods
-        .executeSpecificAsset(j)
-        .accountsPartial({
-          payer, vaultConfig: vault, executionLog: execPda,
-          assetPlan: assetPlanPda(programId, vault),
-          mint: a.mint, tokenDist: tokenDistPda(programId, vault, a.mint),
-          vaultAta, beneficiaryAta: benAta, tokenProgram: tokenPid,
-        })
-        .preInstructions(cuIxs(CU.executeSpecificAsset, ctx.priorityFee))
-        .rpc();
     }
   }
 
@@ -247,25 +273,28 @@ export async function crankVault(ctx, vault, cfg) {
 
   // 6. token residual pro-rata, batched (may run post-finalize).
   for (const { mint, programId: tokenPid } of mints) {
+    if (isStuck(mint)) continue;
     const tdPda = tokenDistPda(programId, vault, mint);
     const td = await program.account.tokenDist.fetchNullable(tdPda);
     if (!td) continue;
-    const vaultAta = getAssociatedTokenAddressSync(mint, vault, true, tokenPid);
-    const unpaid = beneficiaries.map((_, i) => i).filter((i) => !bitSet(td.paidMask, i));
-    for (const part of chunk(unpaid, BATCH)) {
-      const remaining = [];
-      for (const i of part) {
-        const benAta = getAssociatedTokenAddressSync(mint, beneficiaries[i].wallet, false, tokenPid);
-        await ensureAta(ctx, benAta, mint, beneficiaries[i].wallet, tokenPid);
-        remaining.push({ pubkey: benAta, isWritable: true, isSigner: false });
+    try {
+      const vaultAta = getAssociatedTokenAddressSync(mint, vault, true, tokenPid);
+      const unpaid = beneficiaries.map((_, i) => i).filter((i) => !bitSet(td.paidMask, i));
+      for (const part of chunk(unpaid, BATCH)) {
+        const remaining = [];
+        for (const i of part) {
+          const benAta = getAssociatedTokenAddressSync(mint, beneficiaries[i].wallet, false, tokenPid);
+          await ensureAta(ctx, benAta, mint, beneficiaries[i].wallet, tokenPid);
+          remaining.push({ pubkey: benAta, isWritable: true, isSigner: false });
+        }
+        await program.methods
+          .executeTokenShares(Buffer.from(part))
+          .accountsPartial({ payer, vaultConfig: vault, tokenDist: tdPda, mint, vaultAta, tokenProgram: tokenPid })
+          .remainingAccounts(remaining)
+          .preInstructions(cuIxs(CU.executeTokenShares, ctx.priorityFee))
+          .rpc();
       }
-      await program.methods
-        .executeTokenShares(Buffer.from(part))
-        .accountsPartial({ payer, vaultConfig: vault, tokenDist: tdPda, mint, vaultAta, tokenProgram: tokenPid })
-        .remainingAccounts(remaining)
-        .preInstructions(cuIxs(CU.executeTokenShares, ctx.priorityFee))
-        .rpc();
-    }
+    } catch { markStuck(mint, 'execute_token_shares'); }
   }
 
   // 7. close each fully-paid TokenDist (dust → largest benef; ATA rent → owner,
@@ -273,42 +302,48 @@ export async function crankVault(ctx, vault, cfg) {
   const freshCfg = await program.account.vaultConfig.fetch(vault);
   if (freshCfg.executed) {
     for (const { mint, programId: tokenPid } of mints) {
+      if (isStuck(mint)) continue;
       const tdPda = tokenDistPda(programId, vault, mint);
       const td = await program.account.tokenDist.fetchNullable(tdPda);
       if (!td) continue;
       if (bigMask(td.paidMask) !== fullMask(benCount)) continue;
-      const vaultAta = getAssociatedTokenAddressSync(mint, vault, true, tokenPid);
-      const maxWallet = beneficiaries[largestShareIndex(beneficiaries)].wallet;
-      let dust = 0n, withheld = 0n;
       try {
-        const acc = await getAccount(connection, vaultAta, 'confirmed', tokenPid);
-        dust = acc.amount;
-        withheld = getTransferFeeAmount(acc)?.withheldAmount ?? 0n;
-      } catch { /* ATA missing */ }
-      let dustAta = null;
-      if (dust > 0n) {
-        dustAta = getAssociatedTokenAddressSync(mint, maxWallet, false, tokenPid);
-        await ensureAta(ctx, dustAta, mint, maxWallet, tokenPid);
-      }
-      // Transfer-fee mints leave WITHHELD fees in the vault ATA (e.g. the deposit fee);
-      // Token-2022 refuses to CloseAccount while fees are withheld, which sticks
-      // close_token_dist and keeps open_token_dists > 0 (blocking the final close).
-      // Harvest them to the mint first (permissionless), atomically before the close.
-      const preIxs = withheld > 0n
-        ? [createHarvestWithheldTokensToMintInstruction(mint, [vaultAta], tokenPid)]
-        : [];
-      await program.methods
-        .closeTokenDist()
-        .accountsPartial({
-          payer, owner: freshCfg.owner, vaultConfig: vault, mint, vaultAta,
-          tokenDist: tdPda, largestBenefAta: dustAta, tokenProgram: tokenPid,
-        })
-        .preInstructions([...cuIxs(CU.closeTokenDist, ctx.priorityFee), ...preIxs])
-        .rpc();
+        const vaultAta = getAssociatedTokenAddressSync(mint, vault, true, tokenPid);
+        const maxWallet = beneficiaries[largestShareIndex(beneficiaries)].wallet;
+        let dust = 0n, withheld = 0n;
+        try {
+          const acc = await getAccount(connection, vaultAta, 'confirmed', tokenPid);
+          dust = acc.amount;
+          withheld = getTransferFeeAmount(acc)?.withheldAmount ?? 0n;
+        } catch { /* ATA missing */ }
+        let dustAta = null;
+        if (dust > 0n) {
+          dustAta = getAssociatedTokenAddressSync(mint, maxWallet, false, tokenPid);
+          await ensureAta(ctx, dustAta, mint, maxWallet, tokenPid);
+        }
+        // Transfer-fee mints leave WITHHELD fees in the vault ATA (e.g. the deposit fee);
+        // Token-2022 refuses to CloseAccount while fees are withheld, which sticks
+        // close_token_dist and keeps open_token_dists > 0 (blocking the final close).
+        // Harvest them to the mint first (permissionless), atomically before the close.
+        const preIxs = withheld > 0n
+          ? [createHarvestWithheldTokensToMintInstruction(mint, [vaultAta], tokenPid)]
+          : [];
+        await program.methods
+          .closeTokenDist()
+          .accountsPartial({
+            payer, owner: freshCfg.owner, vaultConfig: vault, mint, vaultAta,
+            tokenDist: tdPda, largestBenefAta: dustAta, tokenProgram: tokenPid,
+          })
+          .preInstructions([...cuIxs(CU.closeTokenDist, ctx.priorityFee), ...preIxs])
+          .rpc();
+      } catch { markStuck(mint, 'close_token_dist'); }
     }
   }
 
-  return freshCfg.executed ? 'executed' : 'cranked';
+  const base = freshCfg.executed ? 'executed' : 'cranked';
+  return skipped.length
+    ? `${base} (skipped ${skipped.length}: ${[...new Set(skipped.map((s) => s.mint.slice(0, 8)))].join(',')})`
+    : base;
 }
 
 /**

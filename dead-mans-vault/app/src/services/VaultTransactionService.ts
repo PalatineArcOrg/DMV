@@ -578,6 +578,38 @@ export class VaultTransactionService {
     }
   }
 
+  /**
+   * Bequest-time risk check (A1 mitigation). A mint the vault already holds passed
+   * checkDepositable, but a Token-2022 RWA can still carry issuer capabilities that
+   * make a *specific* bequest un-distributable LATER — after the owner's death, when
+   * nothing can be changed: a freeze authority, pausability, a transfer hook, a
+   * permanent delegate, or non-transferability. Returns a short warning string if any
+   * is present, else null. WARN, never block — the owner may knowingly accept it, and
+   * a stuck mint only strands ITS OWN bequest (the crank distributes everything else).
+   * Legacy SPL mints are not flagged (a plain freeze authority — e.g. USDC — is too
+   * common to warn on usefully); the A1-relevant risks are Token-2022 extensions.
+   */
+  async checkBequestRisk(mint: PublicKey): Promise<string | null> {
+    if (mint.equals(PublicKey.default)) return null; // SOL — no mint, no risk
+    try {
+      const tokenProgram = await this.getTokenProgramForMint(mint);
+      if (tokenProgram.equals(TOKEN_PROGRAM_ID)) return null; // legacy SPL — see doc note
+      const mintInfo = await getMint(this.connection, mint, 'confirmed', tokenProgram);
+      const risks: string[] = [];
+      if (getNonTransferable(mintInfo)) risks.push('made non-transferable');
+      if (getPausableConfig(mintInfo)) risks.push('paused');
+      if (mintInfo.freezeAuthority) risks.push('frozen');
+      const hook = getTransferHook(mintInfo);
+      if (hook && hook.programId && !hook.programId.equals(PublicKey.default)) risks.push('blocked by its transfer hook');
+      const permDelegate = getPermanentDelegate(mintInfo);
+      if (permDelegate && permDelegate.delegate && !permDelegate.delegate.equals(PublicKey.default)) risks.push('moved out by the issuer');
+      if (!risks.length) return null;
+      return `the issuer could have it ${risks.join(' / ')}. If that happens after your death this specific bequest may not reach the beneficiary (your other assets still distribute normally).`;
+    } catch {
+      return null; // best-effort — never block a bequest on a read failure
+    }
+  }
+
   async buildDepositTokenTx(owner: PublicKey, mint: PublicKey, rawAmount: number): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
     const tokenProgram = await this.getTokenProgramForMint(mint);

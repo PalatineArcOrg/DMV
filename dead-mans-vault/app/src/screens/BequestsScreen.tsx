@@ -43,6 +43,7 @@ interface VaultAsset {
   decimals: number;
   amount: number; // ui amount held by the vault (distributable SOL, or token balance)
   image?: string; // NFT thumbnail (resolved from metadata)
+  risk?: string | null; // A1: issuer could make this mint un-distributable later (warn)
 }
 
 export function BequestsScreen() {
@@ -95,20 +96,24 @@ export function BequestsScreen() {
       } catch {
         // fall back to symbol-only below
       }
-      const tokenAssets: VaultAsset[] = tokens.map((t) => {
+      const tokenAssets: VaultAsset[] = await Promise.all(tokens.map(async (t) => {
         const m = meta.get(t.mint.toBase58());
         // Known tokenized stocks (Token-2022 RWAs) have no Metaplex PDA and may no
         // longer be in the wallet once deposited — resolve their label from the registry.
         const sMeta = PortfolioScanner.stockMeta(t.mint.toBase58());
         const known = balances.find((b: any) => b.mint?.toBase58?.() === t.mint.toBase58());
+        // A1 mitigation #3: flag a mint whose issuer could freeze / pause / seize / hook
+        // it, so the owner sees the risk before assigning a specific bequest. Best-effort.
+        const risk = await txService.checkBequestRisk(t.mint).catch(() => null);
         return {
           mint: t.mint,
           symbol: sMeta?.symbol || m?.name || m?.symbol || known?.symbol || `${t.mint.toBase58().slice(0, 4)}…`,
           decimals: t.decimals,
           amount: t.uiAmount,
           image: m?.image ?? (known as any)?.image ?? undefined,
+          risk,
         };
-      });
+      }));
       const result: VaultAsset[] = [{ mint: PublicKey.default, symbol: 'SOL', decimals: 9, amount: solAmount }, ...tokenAssets];
       setVaultAssets(result);
       return result;
@@ -268,6 +273,23 @@ export function BequestsScreen() {
     return warnings;
   }, [drafts]);
 
+  const riskWarnings = useMemo(() => {
+    // A1 mitigation #3: warn for any assigned mint the issuer could later make
+    // un-distributable (freeze/pause/seize/hook). Deduped per mint; non-blocking.
+    const riskByMint = new Map<string, string>();
+    for (const a of vaultAssets) if (a.risk) riskByMint.set(a.mint.toBase58(), a.risk);
+    const seen = new Set<string>();
+    const warnings: string[] = [];
+    for (const d of drafts) {
+      const r = riskByMint.get(d.mint);
+      if (r && !seen.has(d.mint)) {
+        seen.add(d.mint);
+        warnings.push(`${d.symbol}: ${r}`);
+      }
+    }
+    return warnings;
+  }, [drafts, vaultAssets]);
+
   const onSave = async () => {
     if (!publicKey) return;
     const err = validate();
@@ -404,7 +426,10 @@ export function BequestsScreen() {
         </Text>
 
         {overAllocatedWarnings.map((w, i) => (
-          <Text key={i} style={styles.warning}>⚠ {w}</Text>
+          <Text key={`o${i}`} style={styles.warning}>⚠ {w}</Text>
+        ))}
+        {riskWarnings.map((w, i) => (
+          <Text key={`r${i}`} style={styles.warning}>⚠ {w}</Text>
         ))}
       </ScrollView>
 
