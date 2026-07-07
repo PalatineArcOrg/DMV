@@ -78,6 +78,33 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
+## Balance monitor (optional)
+
+A keeper only works while its wallet is funded — a drained keeper silently stops
+cranking. `balance-monitor.mjs` is a tiny, dependency-light alarm: it reads one or
+more wallet balances against a floor, prints a line each, **exits non-zero** when
+any is low or unreachable, and (if a webhook is set) POSTs an alert. Run it on a
+timer; ready-made `dmv-balance-monitor.{service,timer}` templates ship in this dir
+(oneshot every 15 min).
+
+```bash
+MONITOR_WALLETS=keeper:<PUBKEY> \
+MONITOR_FLOOR_SOL=0.05 \
+MONITOR_RPC_URL=https://api.devnet.solana.com \
+ALERT_WEBHOOK=https://discord.com/api/webhooks/... \
+node balance-monitor.mjs
+```
+
+| Var | Default | Notes |
+|---|---|---|
+| `MONITOR_WALLETS` | the DMV devnet crankers | comma-separated `name:pubkey` pairs to watch |
+| `MONITOR_FLOOR_SOL` | `0.05` | alert when a balance drops below this |
+| `MONITOR_RPC_URL` | `RPC_URL`, else public devnet | one light `getBalance` per wallet |
+| `ALERT_WEBHOOK` | — | Discord (`{content}`) or Slack (`{text}`) incoming webhook; unset = log only |
+
+The webhook is a **secret** — set it via the environment (systemd `Environment=` in
+a mode-600 unit, or an `EnvironmentFile`), never commit it to source.
+
 ## What one tick does
 
 1. `program.account.vaultConfig.all()` — discriminator-filtered scan of every vault.
