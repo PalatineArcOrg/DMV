@@ -14,7 +14,8 @@
     "solana-dev": {
       "source": "solana-foundation/solana-dev-skill",
       "sourceType": "github",
-      "computedHash": "1b0e78101e17989da8836d428c0f1356c55374b4c803276f7868098adf51f2bd"
+      "skillPath": "skill/SKILL.md",
+      "computedHash": "51ba37080e2377cd57f278db8702dc9cfcd1f7520a42cbcca8f83924d59b0560"
     },
     "solana-kit": {
       "source": "sendaifun/skills",

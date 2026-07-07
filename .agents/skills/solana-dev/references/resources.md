@@ -1,3 +1,8 @@
+---
+title: Curated Resources
+description: Authoritative Solana learning platforms, documentation, tooling references, and community resources.
+---
+
 # Curated Resources (Source-of-Truth First)
 
 ## Learning Platforms
@@ -69,7 +74,6 @@
 
 ## Security
 - [Blueshift Program Security Course](https://learn.blueshift.gg/en/courses/program-security)
-- [Solana Security Best Practices](https://solana.com/docs/programs/security)
 
 ## Performance and Optimization
 - [Solana Optimized Programs](https://github.com/Laugharne/solana_optimized_programs)
