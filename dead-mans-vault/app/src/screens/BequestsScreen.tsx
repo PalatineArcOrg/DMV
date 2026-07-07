@@ -343,6 +343,52 @@ export function BequestsScreen() {
     }
   };
 
+  // Clear the whole AssetPlan (owner-signed, pre-grace). Removes every specific
+  // bequest so the owner can edit their beneficiary set — which update_vault locks
+  // while a plan exists — then re-add bequests. Assets stay in the vault and split
+  // pro-rata by share until a new plan is set.
+  const onClearPlan = () => {
+    if (!publicKey) return;
+    Alert.alert(
+      'Clear all bequests?',
+      'This removes every specific bequest so you can edit your beneficiaries. Your assets stay in the vault and will distribute pro-rata by share until you set new bequests.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear bequests',
+          style: 'destructive',
+          onPress: async () => {
+            setSubmitting(true);
+            try {
+              const txService = new VaultTransactionService();
+              const connection = txService.getConnection();
+              const tx = await txService.buildClearAssetPlanTx(publicKey);
+              tx.feePayer = publicKey;
+              const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+              tx.recentBlockhash = blockhash;
+              const signed = await signTransaction(tx);
+              const sig = await connection.sendRawTransaction(signed.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+              });
+              await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+
+              const fresh = await txService.fetchVaultConfig(publicKey);
+              if (fresh) useVaultStore.getState().setVaultConfig(fresh);
+              await loadPlan(await loadVaultAssets());
+
+              Alert.alert('Bequests cleared', 'All specific bequests were removed. You can now edit your beneficiaries, then set new bequests.');
+            } catch (e: any) {
+              Alert.alert('Could not clear bequests', e?.message ?? 'Transaction failed.');
+            } finally {
+              setSubmitting(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   if (!isActiveVault) {
     return (
       <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -444,6 +490,16 @@ export function BequestsScreen() {
           <Text style={styles.saveBtnText}>{hasAssetPlan ? 'Update bequests' : 'Save bequests'}</Text>
         )}
       </TouchableOpacity>
+
+      {hasAssetPlan && (
+        <TouchableOpacity
+          style={[styles.clearBtn, submitting && styles.saveBtnDisabled]}
+          onPress={onClearPlan}
+          disabled={submitting}
+        >
+          <Text style={styles.clearBtnText}>Clear all bequests</Text>
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 }
@@ -520,6 +576,16 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { opacity: 0.4 },
   saveBtnText: { color: COLORS.bg, fontSize: 15, fontFamily: FONTS.primaryMedium },
+  clearBtn: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.critical,
+  },
+  clearBtnText: { color: COLORS.critical, fontSize: 14, fontFamily: FONTS.primaryMedium },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
   emptyTitle: { color: '#FFFFFF', fontSize: 18, fontFamily: FONTS.primaryMedium, marginBottom: 10 },
   emptyText: { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontFamily: FONTS.primary, textAlign: 'center', lineHeight: 20 },
