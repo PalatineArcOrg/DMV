@@ -32,6 +32,8 @@ Assumption to state explicitly and have the auditor weigh: **availability of the
 | State PDAs | **5**: `VaultConfig`, `HeartbeatRecord`, `ExecutionLog`, `AssetPlan`, `TokenDist` |
 | Error codes | **42** (`errors.rs`) |
 | Tests | **29** integration tests (~1,450 LOC, ts-mocha), pass **locally** via `yarn test:devnet`. **CI runs only** the host-only prod-floor guard (`cargo test --lib`, asserts the timing minimums per build profile) — the full suite is **not** CI-gated. |
+| Fuzzing | **9-property litesvm + fast-check suite** (`dead-mans-vault/tests/fuzz/`, `yarn test:fuzz`) covering the §6 invariants — conservation, idempotency, specific-bequest carve-out, a theft-must-revert battery (exact error codes), post-deadline freeze, Token-2022 transfer-fee close, NFT bequests + residual dust-at-scale, and a **stateful instruction-sequence fuzzer** (random orderings vs 7 global invariants). Runs against the **real production floors** via clock-warp. Found no program bug. See `FUZZ-HARNESS-PLAN.md`. |
+| Crank stress | Local-validator + fault-injecting-RPC-proxy harness (`keeper-bot/stress/`) exercising the crank under 429s/timeouts/concurrent races — RPC failure & racing are correctness-safe. See `STRESS-TESTING-PLAN.md`. |
 | Token support | SPL Token **and** Token-2022 (`token_interface` / `InterfaceAccount` / `transfer_checked`) |
 | Deployed | devnet `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`; mainnet reuses the same program keypair (same ID) |
 
@@ -96,6 +98,9 @@ Repo: `https://github.com/Romulus-Sol/DMV`, license MIT (repo root `LICENSE`).
 ---
 
 ## 6. Invariants to verify (quick list)
+
+> **Fuzz coverage:** invariants 1–6 (conservation, no-misdirection, idempotency/racing, freeze, and the mask/close gates) are exercised by the property-fuzz suite (`tests/fuzz/`, see `FUZZ-HARNESS-PLAN.md`) and held under randomized inputs **and** random instruction orderings. Fuzzing shows the *presence* of a bug, not its absence — so please still verify these by reading, and direct fresh eyes especially at what fuzzing can't fully cover here: **completability under CU/tx/account limits (#4)**, the **non-local rent-exemption reasoning (#7)**, the **economic/incentive** questions (#5 forged-heartbeat DoS, #8 bounty free-riding), and the **upgrade model (§7)**.
+
 1. **Conservation:** Σ payouts ≤ the frozen per-asset snapshot; no over-distribution.
 2. **No misdirection:** every recipient == `beneficiaries[i].wallet` (index-equality, never `.iter().any()`); vault ATAs pinned to the canonical address from the mint's true owner program; **every raw-deserialized token account is address-pinned or CPI-validated** (raw `try_deserialize` does no owner-program check — generalize the ATA-spoof fix beyond the vault ATA to the `remaining_accounts` beneficiary ATAs); dust can't be redirected.
 3. **Idempotency / resumability:** bitmasks make every payout occur once; re-runs no-op; order-independent; safe under racing cranks (first writer wins).

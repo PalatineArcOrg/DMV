@@ -202,17 +202,25 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 ### Error Codes
 
-41 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), specific-bequest shape including SOL bequests (`InvalidSolBequest`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, the owner-exclusive close window (`CloseDelayNotElapsed`), and vault lifecycle.
+42 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), specific-bequest shape including SOL bequests (`InvalidSolBequest`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, the owner-exclusive close window (`CloseDelayNotElapsed`), and vault lifecycle.
 
 ### Security
 
 The permissionless design was hardened by a multi-agent security review — including a **CRITICAL** fund-misdirection bug (a caller-supplied token-program could spoof a mint's residual snapshot to zero) found and fixed before deploy.
 
-A second **pre-mainnet** review across the program, the keyless watcher, and the app's key storage produced further fixes (see the CHANGELOG "Security hardening" entry): the canonical-ATA anti-spoof was extended to `execute_specific_asset` (a specific bequest could otherwise be misdirected), the production heartbeat/grace minimums (1 day / 7 days) are the default build (demo floors gated behind a `devnet` feature), the keeper bounty is capped on-chain, and checks-effects-interactions ordering blocks transfer-hook reentrancy. The watcher is fail-closed on auth, ownership-proofs registrations on-chain, rate-limits public reads, and bounds cranker spend; the app's agent key is biometric-gated and backup-excluded. A program **redeploy + IDL upgrade** and a **new APK build** apply the program/app fixes; the watcher fixes are deployed.
+A second **pre-mainnet** review across the program, the keyless watcher, and the app's key storage produced further fixes (see the CHANGELOG "Security hardening" entry): the canonical-ATA anti-spoof was extended to `execute_specific_asset` (a specific bequest could otherwise be misdirected), the production heartbeat/grace minimums (1 day / 7 days) are the default build (demo floors gated behind a `devnet` feature), the keeper bounty is capped on-chain, and checks-effects-interactions ordering blocks transfer-hook reentrancy. The watcher is fail-closed on auth, ownership-proofs registrations on-chain, rate-limits public reads, and bounds cranker spend; the app's agent key is biometric-gated and backup-excluded. All of these fixes are in the deployed program and the current app.
+
+Beyond the reviews, the program's money-math and state machine are **property-fuzzed** (`yarn test:fuzz`, see [Tests](#tests)) and the crank clients are **RPC-failure/race stress-tested** — both found no program bug. The protocol is **community-reviewed and fuzz-tested, not professionally audited**: the trust model, invariants, and audit scope are in [`docs/AUDIT-SCOPE.md`](docs/AUDIT-SCOPE.md), and the vulnerability-reporting process + bug bounty are in [`docs/SECURITY.md`](docs/SECURITY.md). Independent review is welcome — please report findings per that policy rather than opening a public issue.
 
 ### Tests
 
-29/29 tests passing -- a *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof, wrong fee recipient), owner Token-2022 withdrawal, idempotency/resume, the post-grace freeze, the permissionless close (blocked inside the owner window; rents → cranker + dust → largest beneficiary after it), and all setup/owner paths.
+Three complementary layers, all green — and the fuzzing + stress harnesses found **no program bug**.
+
+**Integration suite (29/29).** A *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof, wrong fee recipient), owner Token-2022 withdrawal, idempotency/resume, the post-grace freeze, the permissionless close (blocked inside the owner window; rents → cranker + dust → largest beneficiary after it), and all setup/owner paths. Run: `anchor test` (or `yarn test:devnet`).
+
+**Property-based fuzzing (`yarn test:fuzz`).** A [litesvm](https://github.com/LiteSVM/litesvm) + [fast-check](https://fast-check.dev/) suite (in-process, no validator; clock-warped so it exercises the **real production floors**, not demo timings) throws randomized inputs and instruction orderings at the program and asserts the invariants after every step. 9 properties: SOL conservation, idempotency, specific-bequest carve-out, a **theft-must-revert battery** (wrong beneficiary wallet/ATA, spoofed non-canonical vault ATA, out-of-order bequest, double-pay — each asserting the exact error code), the post-deadline **freeze** (every owner mutation reverts), a **Token-2022 transfer-fee sticky-close** regression (proving the harvest-before-close fix), whole-NFT bequest + 0-residual close, residual dust-at-scale (up to 20 beneficiaries), and a **stateful instruction-sequence fuzzer** (random orderings by random signers vs 7 global invariants). See [`docs/FUZZ-HARNESS-PLAN.md`](docs/FUZZ-HARNESS-PLAN.md).
+
+**Crank resilience (`keeper-bot/stress/`).** A local validator + fault-injecting RPC proxy drives the real keeper crank under injected 429s / timeouts / concurrent races — confirming the on-chain masks + idempotent re-crank make RPC failure and racing correctness-safe (a delayed retry at worst, never loss, double-pay, or misdirection). See [`docs/STRESS-TESTING-PLAN.md`](docs/STRESS-TESTING-PLAN.md).
 
 #### Building & testing (the `devnet` feature)
 
@@ -301,9 +309,9 @@ dead-mans-vault/
 +-- programs/dead-mans-vault/src/    # Anchor program (Rust)
 |   +-- instructions/                # 20 instruction handlers
 |   +-- state/                       # Account definitions (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist)
-|   +-- errors.rs                    # 41 error codes
+|   +-- errors.rs                    # 42 error codes
 |   +-- constants.rs                 # On-chain constants (FEE_WALLET, VAULT_CREATION_FEE_LAMPORTS) + mask helpers
-+-- tests/                           # Anchor program tests (29/29 passing)
++-- tests/                           # dead-mans-vault.ts (29/29) + fuzz/ (litesvm + fast-check property suite)
 +-- app/                             # React Native mobile app (Expo SDK 52)
     +-- src/
         +-- services/                # HeartbeatService, EscalationService, ExecutionService, etc.
@@ -368,6 +376,22 @@ APK output: `android/app/build/outputs/apk/release/app-release.apk`
 ## Network
 
 Currently deployed to **Solana Devnet**. All endpoints auto-derive their network prefix from the active RPC URL (via `rpcConfig`) for future mainnet migration, and the RPC URL can be overridden at runtime in Settings → Network.
+
+---
+
+## Documentation
+
+Reviewer- and contributor-facing docs live in [`docs/`](docs/):
+
+| Doc | What |
+|-----|------|
+| [`SECURITY.md`](docs/SECURITY.md) | Vulnerability reporting + bug bounty |
+| [`AUDIT-SCOPE.md`](docs/AUDIT-SCOPE.md) | Trust model, invariants, and audit scope |
+| [`BUILD-SPEC-permissionless-execution.md`](docs/BUILD-SPEC-permissionless-execution.md) | Design of the permissionless execution model |
+| [`FUZZ-HARNESS-PLAN.md`](docs/FUZZ-HARNESS-PLAN.md) | The property-fuzz suite (invariants → properties) |
+| [`STRESS-TESTING-PLAN.md`](docs/STRESS-TESTING-PLAN.md) | Full stress-testing roadmap + results |
+
+Full version history is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

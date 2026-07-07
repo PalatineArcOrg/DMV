@@ -269,6 +269,9 @@ anchor build
 # Run program tests (29/29 passing; execution tests use real ~40s grace waits)
 anchor test
 
+# Run the property-fuzz suite (litesvm + fast-check; production floors via clock-warp)
+yarn test:fuzz
+
 # Deploy to devnet
 anchor deploy --provider.cluster devnet
 ```
@@ -283,8 +286,8 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **App version** | 1.13.8 (versionCode 94) |
-| **Tests** | 29/29 passing |
+| **App version** | 1.13.13 (versionCode 99) |
+| **Tests** | 29/29 integration + property-fuzz suite (`yarn test:fuzz`) |
 
 ---
 
@@ -292,10 +295,10 @@ anchor deploy --provider.cluster devnet
 
 | Metric | Value |
 |--------|-------|
-| Program instructions | 19 |
+| Program instructions | 20 |
 | Program accounts (PDAs) | 5 (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist) |
-| Program error codes | 39 |
-| Program tests | 29/29 passing |
+| Program error codes | 42 |
+| Program tests | 29/29 integration + 9-property fuzz suite |
 | App screens | 14 |
 | App services | 10 |
 | Zustand stores | 6 |

@@ -9,10 +9,16 @@ is the top priority, and independent scrutiny is genuinely welcome.
 ## Audit status — please read
 
 DMV has had an internal multi-agent adversarial review (which caught and fixed a
-Critical) plus property-based fuzzing of the execution money-math (see
-[`FUZZ-HARNESS-PLAN.md`](./FUZZ-HARNESS-PLAN.md)), **but it has NOT had a paid
-professional audit.** Treat it as community-reviewed, not audited. Do not entrust
-more than you can afford to lose, and prefer small vaults while the protocol is young.
+Critical), and its money-math + state machine are now covered by an extensive
+**property-fuzz suite** — 9 properties over conservation, idempotency, specific
+bequests, a theft-must-revert battery, the post-deadline freeze, Token-2022
+transfer-fee close, NFT bequests, and a stateful instruction-sequence fuzzer (see
+[`FUZZ-HARNESS-PLAN.md`](./FUZZ-HARNESS-PLAN.md)) — plus an RPC-failure/race stress
+harness for the crank clients ([`STRESS-TESTING-PLAN.md`](./STRESS-TESTING-PLAN.md)).
+That fuzzing + stress testing found **no program bug**. **But it has NOT had a paid
+professional audit.** Treat it as community-reviewed and fuzz-tested, not audited. Do
+not entrust more than you can afford to lose, and prefer small vaults while the
+protocol is young.
 
 The trust model, invariants, and the exact surface we want eyes on are documented in
 [`AUDIT-SCOPE.md`](./AUDIT-SCOPE.md) — start there. The design of the permissionless

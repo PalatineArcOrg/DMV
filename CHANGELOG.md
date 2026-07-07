@@ -5,6 +5,31 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [Unreleased] — Testing, security docs & ops
+
+No app or on-chain program change — these are test, documentation, and ops additions,
+so there is no new release/APK. App remains **v1.13.13**; the program is unchanged.
+
+### Testing
+- **Property-fuzz suite** (`dead-mans-vault/tests/fuzz/`, `yarn test:fuzz`) — litesvm +
+  fast-check, 9 properties over conservation, idempotency, specific bequests, a
+  theft-must-revert battery (exact error codes), the post-deadline freeze, Token-2022
+  transfer-fee close, NFT bequests, residual dust-at-scale (n≤20), and a **stateful
+  instruction-sequence fuzzer** (random orderings vs 7 global invariants). Runs against
+  the real production floors via clock-warp. **Found no program bug.**
+- **Crank RPC-failure / race stress** (`keeper-bot/stress/`) — a local validator +
+  fault-injecting RPC proxy drives the real keeper crank under 429s / timeouts /
+  concurrent races; confirms RPC failure and racing are correctness-safe (delayed retry
+  at worst, never loss / double-pay / misdirection).
+
+### Docs & ops
+- Public reviewer docs reorganized into repo-root `docs/` — added `SECURITY.md` (vuln
+  reporting + bug bounty), `STRESS-TESTING-PLAN.md`, `FUZZ-HARNESS-PLAN.md`, plus the
+  audit scope and design spec. The old hackathon `pitch-deck/` and `docs/`(pptx) folders
+  were removed.
+- Cranker balance monitor (`keeper-bot/balance-monitor.mjs`) with a systemd timer and
+  Discord low-balance alerting.
+
 ## [1.13.9–1.13.13] — 2026-07-05 — Tokenized stocks (RWA) + transfer-fee close + setup fixes
 
 Adds a first-class **Stocks** section for Token-2022 tokenized equities (xStocks /
