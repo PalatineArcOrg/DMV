@@ -197,6 +197,19 @@ export function send(
   return res;
 }
 
+/** Like send(), but returns the succeeded tx's compute-units-consumed (bigint) read
+ *  off LiteSVM's success TransactionMetadata. Throws TxError on failure, same as send.
+ *  Used by the D4 CU-budget test to measure a real batch-of-8 at max beneficiaries. */
+export function sendCU(
+  svm: LiteSVM,
+  tx: Transaction,
+  feePayer: Keypair,
+  signers: Keypair[] = []
+): bigint {
+  const res: any = send(svm, tx, feePayer, signers);
+  return BigInt(res.computeUnitsConsumed());
+}
+
 /** Assert an ix throws an anchor error whose name/number `needle` appears in the
  *  failed-tx logs or message. */
 export async function expectTxError(fn: () => any, needle: string) {

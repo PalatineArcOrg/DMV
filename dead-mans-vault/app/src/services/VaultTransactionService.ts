@@ -32,6 +32,7 @@ import { idl, DeadMansVault } from '../utils/idl';
 import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS, FEE_WALLET } from '../utils/constants';
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
+import { range, chunk, unpaidIndices, fullU32Mask } from '../utils/crankMath';
 import type { PriorityFeeEstimateResult } from '../types/api';
 import type { AssetAssignment } from '../types/vault';
 
@@ -1100,13 +1101,8 @@ export class VaultTransactionService {
     }
     const mints = [...mintMap.values()];
 
-    const range = (k: number) => Array.from({ length: k }, (_, i) => i);
-    const unpaid = (mask: number) => range(n).filter((i) => ((mask >>> i) & 1) === 0);
-    const chunk8 = (a: number[]) => {
-      const o: number[][] = [];
-      for (let i = 0; i < a.length; i += 8) o.push(a.slice(i, i + 8));
-      return o;
-    };
+    // range / unpaidIndices / chunk / fullU32Mask now live in ../utils/crankMath
+    // (extracted so the index/batch math is unit-tested — finding D5).
     const wrap = async (ixs: TransactionInstruction[], keys: PublicKey[], cu: number) => {
       const raw = new Transaction();
       for (const ix of ixs) raw.add(ix);
@@ -1195,7 +1191,7 @@ export class VaultTransactionService {
       }
     }
 
-    for (const batch of chunk8(unpaid(execLog ? execLog.solPaidMask : 0))) {
+    for (const batch of chunk(unpaidIndices(execLog ? execLog.solPaidMask : 0, n), 8)) {
       const ix = await program.methods
         .executeSolShares(Buffer.from(batch))
         .accountsPartial({ payer: heir, vaultConfig: vaultPda, executionLog: executionPda })
@@ -1218,7 +1214,7 @@ export class VaultTransactionService {
       const tokenProgram = await this.getTokenProgramForMint(mint);
       const vaultAta = this.ataFor(mint, vaultPda, true, tokenProgram);
       const [tokenDistPda] = this.getTokenDistPDA(vaultPda, mint);
-      for (const batch of chunk8(unpaid(td.paidMask))) {
+      for (const batch of chunk(unpaidIndices(td.paidMask, n), 8)) {
         const ixs: TransactionInstruction[] = [];
         const atas: PublicKey[] = [];
         for (const i of batch) {
@@ -1258,7 +1254,7 @@ export class VaultTransactionService {
     const shareInfos = config.beneficiaries.map((b: any) => ({ wallet: new PublicKey(b.wallet), shareBps: b.shareBps as number }));
     const n = shareInfos.length;
     const largestBenef = VaultTransactionService.largestShareWallet(shareInfos);
-    const fullMask = n >= 32 ? 0xffffffff : (((1 << n) - 1) >>> 0);
+    const fullMask = fullU32Mask(n);
 
     const [vaultPda] = this.getVaultPDA(owner);
     const program = this.programAs(heir);

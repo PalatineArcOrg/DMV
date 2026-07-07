@@ -82,6 +82,23 @@ const tokenDistPda = (vault, mint) =>
 const bigMask = (m) => (typeof m === 'number' ? BigInt(m) : BigInt(m.toString()));
 const bitSet = (mask, i) => ((bigMask(mask) >> BigInt(i)) & 1n) === 1n;
 const fullMask = (n) => (1n << BigInt(n)) - 1n;
+
+/**
+ * Finalize-gate decision (v1.13.3 regression guard). MUST be evaluated on FRESH
+ * on-chain masks: if this same run just paid the LAST specific bequest, an in-memory
+ * `plan.paidMask` still holds the PRE-payment value — feeding that stale mask here
+ * makes planFull false, wrongly skips finalize, aborts one step from done, and then
+ * trips close_token_dist with VaultNotExecuted. The caller re-fetches execLog + plan
+ * immediately before calling this; the helper is pure + exported so that contract is
+ * unit-tested (test/finalizeGate.test.js).
+ */
+export function shouldFinalize({ completed, solPaidMask, planPaidMask, benCount, hasPlan, assignmentCount }) {
+  if (completed) return false;
+  const solFull = bigMask(solPaidMask) === fullMask(benCount);
+  const planFull = !hasPlan || bigMask(planPaidMask) === fullMask(assignmentCount);
+  return solFull && planFull;
+}
+
 const chunk = (arr, n) => {
   const out = [];
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
@@ -386,9 +403,14 @@ async function runExecutorInner(ctx, vaultStr) {
   // then trip `close_token_dist` with VaultNotExecuted.
   execLog = await program.account.executionLog.fetch(execPda);
   if (hasPlan) plan = await program.account.assetPlan.fetch(assetPlanPda(vault));
-  const solFull = bigMask(execLog.solPaidMask) === fullMask(benCount);
-  const planFull = !hasPlan || bigMask(plan.paidMask) === fullMask(plan.assignments.length);
-  if (!execLog.completed && solFull && planFull) {
+  if (shouldFinalize({
+    completed: execLog.completed,
+    solPaidMask: execLog.solPaidMask,
+    planPaidMask: hasPlan ? plan.paidMask : 0,
+    benCount,
+    hasPlan,
+    assignmentCount: hasPlan ? plan.assignments.length : 0,
+  })) {
     await program.methods
       .finalizeExecution()
       .accountsPartial({

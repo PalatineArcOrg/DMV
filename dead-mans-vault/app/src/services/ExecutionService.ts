@@ -14,27 +14,15 @@ import { ExecutionStep, ExecutionStepType } from '../types/execution';
 import { Beneficiary } from '../types/vault';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { useVaultStore } from '../store/useVaultStore';
+import { chunk, unpaidIndices, fullU32Mask, fullU64Mask } from '../utils/crankMath';
 
 // Module-level guard prevents concurrent execution across multiple instances.
 let globalExecutionInProgress = false;
 
 const MAX_BATCH = 8; // payouts per tx (CU / 1232-byte tx-size headroom)
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-/** Full u32 beneficiary mask for `n` beneficiaries (n <= 20 in practice). */
-function fullU32Mask(n: number): number {
-  return n >= 32 ? 0xffffffff : (((1 << n) - 1) >>> 0);
-}
-
-/** Full u64 assignment mask for `n` assignments. */
-function fullU64Mask(n: number): bigint {
-  return n >= 64 ? (2n ** 64n - 1n) : ((1n << BigInt(n)) - 1n);
-}
+// chunk / unpaidIndices / fullU32Mask / fullU64Mask now live in ../utils/crankMath
+// (extracted so the index/batch math is unit-tested — finding D5).
 
 /**
  * Drives the on-chain permissionless execution crank. Idempotent and resumable:
@@ -154,7 +142,7 @@ export class ExecutionService {
 
       // 5. SOL pro-rata for unpaid indices, batched.
       execLog = await this.txService.fetchExecutionLog(owner);
-      const unpaidSol = this.unpaidIndices(execLog ? execLog.solPaidMask : 0, n);
+      const unpaidSol = unpaidIndices(execLog ? execLog.solPaidMask : 0, n);
       for (const idxs of chunk(unpaidSol, MAX_BATCH)) {
         await this.runBatch(ownerWallet, idxs.map((i) => `sol_${i}`), () =>
           this.txService.crankExecuteSolShares(agent, owner, idxs, idxs.map((i) => benefWallets[i])),
@@ -180,7 +168,7 @@ export class ExecutionService {
       for (const mint of mints) {
         const td = await this.txService.fetchTokenDist(owner, mint);
         if (!td) continue;
-        const unpaid = this.unpaidIndices(td.paidMask, n);
+        const unpaid = unpaidIndices(td.paidMask, n);
         for (const idxs of chunk(unpaid, MAX_BATCH)) {
           await this.runBatch(ownerWallet, idxs.map((i) => `tok_${mint.toString()}_${i}`), () =>
             this.txService.crankExecuteTokenShares(agent, owner, mint, idxs, idxs.map((i) => benefWallets[i])),
@@ -218,16 +206,6 @@ export class ExecutionService {
     } finally {
       globalExecutionInProgress = false;
     }
-  }
-
-  // ─── crank helpers ───
-
-  private unpaidIndices(mask: number, n: number): number[] {
-    const out: number[] = [];
-    for (let i = 0; i < n; i++) {
-      if (((mask >>> i) & 1) === 0) out.push(i);
-    }
-    return out;
   }
 
   private async runStep(ownerWallet: string, id: string, fn: () => Promise<string>): Promise<void> {
