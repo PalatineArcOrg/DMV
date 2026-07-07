@@ -38,7 +38,7 @@ const keeper = Keypair.fromSecretKey(
 const connection = new Connection(RPC_URL, 'confirmed');
 const provider = new AnchorProvider(connection, new Wallet(keeper), { commitment: 'confirmed' });
 const program = new Program(idl, provider);
-const ctx = { connection, provider, program, keeper };
+const ctx = { connection, provider, program, keeper, rpcUrl: RPC_URL };
 
 const short = (pk) => pk.toBase58().slice(0, 8);
 

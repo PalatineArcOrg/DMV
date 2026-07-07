@@ -24,6 +24,7 @@ import {
   createHarvestWithheldTokensToMintInstruction,
 } from '@solana/spl-token';
 import { config } from './config.js';
+import { CU, cuIxs, getPriorityFee } from './computeBudget.js';
 
 const idl = JSON.parse(
   readFileSync(new URL('../idl/dead_mans_vault.json', import.meta.url), 'utf8'),
@@ -56,7 +57,7 @@ function getCtx() {
     commitment: 'confirmed',
   });
   const program = new Program(idl, provider);
-  cached = { connection, provider, program, cranker };
+  cached = { connection, provider, program, cranker, rpcUrl: config.rpcUrl };
   return cached;
 }
 
@@ -109,6 +110,19 @@ function largestShareIndex(beneficiaries) {
  *  - Non-plan held mints beyond MAX_AUTO_MINTS (highest balance first) are
  *    deferred, bounding the cranker's rent spend against a dust-mint drain.
  */
+/** Bounded retry for a mint-owner lookup (B2): a transient null/429 must not drop
+ *  a plan mint from the map, which would skip its begin_token_dist for the tick. */
+async function getAccountInfoRetry(connection, pubkey, tries = 4) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const acc = await connection.getAccountInfo(pubkey);
+      if (acc) return acc;
+    } catch { /* transient RPC error — retry */ }
+    if (i < tries - 1) await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+  }
+  return null;
+}
+
 async function collectMints(connection, vault, plan) {
   const info = new Map(); // mintBase58 -> { programId, amount: bigint, inPlan: bool }
 
@@ -137,7 +151,7 @@ async function collectMints(connection, vault, plan) {
         prev.inPlan = true;
         continue;
       }
-      const acc = await connection.getAccountInfo(a.mint);
+      const acc = await getAccountInfoRetry(connection, a.mint);
       if (acc) info.set(key, { programId: acc.owner, amount: 0n, inPlan: true });
     }
   }
@@ -177,7 +191,9 @@ async function ensureAta(ctx, ata, mint, owner, programId) {
     mint,
     programId,
   );
-  await ctx.provider.sendAndConfirm(new Transaction().add(ix));
+  await ctx.provider.sendAndConfirm(
+    new Transaction().add(...cuIxs(CU.ensureAta, ctx.priorityFee), ix),
+  );
 }
 
 /**
@@ -203,6 +219,9 @@ export async function runExecutor(vaultStr) {
 
 async function runExecutorInner(ctx, vaultStr) {
   const { connection, program, cranker } = ctx;
+  // Best-effort priority fee, fetched once per crank; every tx below prepends a
+  // ComputeBudget CU-limit + price so it lands under mainnet congestion.
+  ctx.priorityFee = await getPriorityFee(connection, ctx.rpcUrl);
   const vault = new PublicKey(vaultStr);
   const payer = cranker.publicKey;
 
@@ -239,6 +258,7 @@ async function runExecutorInner(ctx, vaultStr) {
         assetPlan: hasPlan ? assetPlanPda(vault) : null,
         systemProgram: SystemProgram.programId,
       })
+      .preInstructions(cuIxs(CU.beginExecution, ctx.priorityFee))
       .rpc();
     execLog = await program.account.executionLog.fetch(execPda);
   }
@@ -269,6 +289,7 @@ async function runExecutorInner(ctx, vaultStr) {
         tokenDist: tdPda,
         systemProgram: SystemProgram.programId,
       })
+      .preInstructions(cuIxs(CU.beginTokenDist, ctx.priorityFee))
       .rpc();
   }
 
@@ -290,6 +311,7 @@ async function runExecutorInner(ctx, vaultStr) {
             assetPlan: assetPlanPda(vault),
             beneficiary: benWallet,
           })
+          .preInstructions(cuIxs(CU.executeSpecificSol, ctx.priorityFee))
           .rpc();
         continue;
       }
@@ -312,6 +334,7 @@ async function runExecutorInner(ctx, vaultStr) {
           beneficiaryAta: benAta,
           tokenProgram: programId,
         })
+        .preInstructions(cuIxs(CU.executeSpecificAsset, ctx.priorityFee))
         .rpc();
     }
   }
@@ -328,6 +351,7 @@ async function runExecutorInner(ctx, vaultStr) {
       .remainingAccounts(
         part.map((i) => ({ pubkey: beneficiaries[i].wallet, isWritable: true, isSigner: false })),
       )
+      .preInstructions(cuIxs(CU.executeSolShares, ctx.priorityFee))
       .rpc();
   }
 
@@ -348,6 +372,7 @@ async function runExecutorInner(ctx, vaultStr) {
         executionLog: execPda,
         assetPlan: hasPlan ? assetPlanPda(vault) : null,
       })
+      .preInstructions(cuIxs(CU.finalize, ctx.priorityFee))
       .rpc();
   }
 
@@ -369,6 +394,7 @@ async function runExecutorInner(ctx, vaultStr) {
         .executeTokenShares(Buffer.from(part))
         .accountsPartial({ payer, vaultConfig: vault, tokenDist: tdPda, mint, vaultAta, tokenProgram: programId })
         .remainingAccounts(remaining)
+        .preInstructions(cuIxs(CU.executeTokenShares, ctx.priorityFee))
         .rpc();
     }
   }
@@ -419,7 +445,7 @@ async function runExecutorInner(ctx, vaultStr) {
         largestBenefAta: dustAta,
         tokenProgram: programId,
       })
-      .preInstructions(preIxs)
+      .preInstructions([...cuIxs(CU.closeTokenDist, ctx.priorityFee), ...preIxs])
       .rpc();
   }
 

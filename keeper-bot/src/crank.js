@@ -24,6 +24,7 @@ import {
   getTransferFeeAmount,
   createHarvestWithheldTokensToMintInstruction,
 } from '@solana/spl-token';
+import { CU, cuIxs, getPriorityFee } from './computeBudget.js';
 
 const BATCH = 8; // payout indices per tx (CU + tx-size budget)
 // Cap on non-plan token mints auto-distributed per vault — bounds the rent this
@@ -58,6 +59,19 @@ const largestShareIndex = (beneficiaries) => {
   return best;
 };
 
+/** Bounded retry for a mint-owner lookup (B2): a transient null/429 must not drop
+ *  a plan mint from the map, which would skip its begin_token_dist for the tick. */
+async function getAccountInfoRetry(connection, pubkey, tries = 4) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const acc = await connection.getAccountInfo(pubkey);
+      if (acc) return acc;
+    } catch { /* transient RPC error — retry */ }
+    if (i < tries - 1) await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+  }
+  return null;
+}
+
 /** Held mints (non-zero balance) ∪ plan mints, capped for non-plan dust. */
 async function collectMints(connection, vault, plan) {
   const info = new Map();
@@ -81,7 +95,7 @@ async function collectMints(connection, vault, plan) {
       const key = a.mint.toBase58();
       const prev = info.get(key);
       if (prev) { prev.inPlan = true; continue; }
-      const acc = await connection.getAccountInfo(a.mint);
+      const acc = await getAccountInfoRetry(connection, a.mint);
       if (acc) info.set(key, { programId: acc.owner, amount: 0n, inPlan: true });
     }
   }
@@ -100,7 +114,9 @@ async function ensureAta(ctx, ata, mint, owner, programId) {
   const ix = createAssociatedTokenAccountIdempotentInstruction(
     ctx.keeper.publicKey, ata, owner, mint, programId,
   );
-  await ctx.provider.sendAndConfirm(new Transaction().add(ix));
+  await ctx.provider.sendAndConfirm(
+    new Transaction().add(...cuIxs(CU.ensureAta, ctx.priorityFee), ix),
+  );
 }
 
 /**
@@ -109,6 +125,9 @@ async function ensureAta(ctx, ata, mint, owner, programId) {
  */
 export async function crankVault(ctx, vault, cfg) {
   const { connection, program, keeper } = ctx;
+  // Best-effort priority fee, fetched once per crank; every tx below prepends a
+  // ComputeBudget CU-limit + price so it lands under mainnet congestion.
+  ctx.priorityFee = await getPriorityFee(connection, ctx.rpcUrl);
   const programId = program.programId;
   const payer = keeper.publicKey;
   const beneficiaries = cfg.beneficiaries;
@@ -131,6 +150,7 @@ export async function crankVault(ctx, vault, cfg) {
         assetPlan: hasPlan ? assetPlanPda(programId, vault) : null,
         systemProgram: SystemProgram.programId,
       })
+      .preInstructions(cuIxs(CU.beginExecution, ctx.priorityFee))
       .rpc();
     execLog = await program.account.executionLog.fetch(execPda);
   }
@@ -157,6 +177,7 @@ export async function crankVault(ctx, vault, cfg) {
         tokenDist: tdPda,
         systemProgram: SystemProgram.programId,
       })
+      .preInstructions(cuIxs(CU.beginTokenDist, ctx.priorityFee))
       .rpc();
   }
 
@@ -173,6 +194,7 @@ export async function crankVault(ctx, vault, cfg) {
             payer, vaultConfig: vault, executionLog: execPda,
             assetPlan: assetPlanPda(programId, vault), beneficiary: benWallet,
           })
+          .preInstructions(cuIxs(CU.executeSpecificSol, ctx.priorityFee))
           .rpc();
         continue;
       }
@@ -189,6 +211,7 @@ export async function crankVault(ctx, vault, cfg) {
           mint: a.mint, tokenDist: tokenDistPda(programId, vault, a.mint),
           vaultAta, beneficiaryAta: benAta, tokenProgram: tokenPid,
         })
+        .preInstructions(cuIxs(CU.executeSpecificAsset, ctx.priorityFee))
         .rpc();
     }
   }
@@ -201,6 +224,7 @@ export async function crankVault(ctx, vault, cfg) {
       .executeSolShares(Buffer.from(part))
       .accountsPartial({ payer, vaultConfig: vault, executionLog: execPda })
       .remainingAccounts(part.map((i) => ({ pubkey: beneficiaries[i].wallet, isWritable: true, isSigner: false })))
+      .preInstructions(cuIxs(CU.executeSolShares, ctx.priorityFee))
       .rpc();
   }
 
@@ -217,6 +241,7 @@ export async function crankVault(ctx, vault, cfg) {
         payer, vaultConfig: vault, executionLog: execPda,
         assetPlan: hasPlan ? assetPlanPda(programId, vault) : null,
       })
+      .preInstructions(cuIxs(CU.finalize, ctx.priorityFee))
       .rpc();
   }
 
@@ -238,6 +263,7 @@ export async function crankVault(ctx, vault, cfg) {
         .executeTokenShares(Buffer.from(part))
         .accountsPartial({ payer, vaultConfig: vault, tokenDist: tdPda, mint, vaultAta, tokenProgram: tokenPid })
         .remainingAccounts(remaining)
+        .preInstructions(cuIxs(CU.executeTokenShares, ctx.priorityFee))
         .rpc();
     }
   }
@@ -277,7 +303,7 @@ export async function crankVault(ctx, vault, cfg) {
           payer, owner: freshCfg.owner, vaultConfig: vault, mint, vaultAta,
           tokenDist: tdPda, largestBenefAta: dustAta, tokenProgram: tokenPid,
         })
-        .preInstructions(preIxs)
+        .preInstructions([...cuIxs(CU.closeTokenDist, ctx.priorityFee), ...preIxs])
         .rpc();
     }
   }
@@ -294,6 +320,7 @@ export async function crankVault(ctx, vault, cfg) {
  */
 export async function cleanupExecutedVault(ctx, vault, cfg) {
   const { program } = ctx;
+  ctx.priorityFee = await getPriorityFee(ctx.connection, ctx.rpcUrl);
   const programId = program.programId;
   const execPda = executionPda(programId, vault);
   const execLog = await program.account.executionLog.fetchNullable(execPda);
@@ -319,6 +346,7 @@ export async function cleanupExecutedVault(ctx, vault, cfg) {
         assetPlan: cfg.hasAssetPlan ? assetPlanPda(programId, vault) : null,
         largestBenef: maxWallet, // required only when dust remains; passing it is always safe
       })
+      .preInstructions(cuIxs(CU.closeExecutedVault, ctx.priorityFee))
       .rpc();
     return 'closed';
   } catch (e) {
