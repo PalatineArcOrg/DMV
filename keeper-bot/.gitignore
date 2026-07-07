@@ -2,3 +2,5 @@ node_modules/
 keeper.json
 *.keypair.json
 .env
+# cached devnet-floor build for the stress harness (build artifact, rebuilt on demand)
+stress/dmv_devnet.so

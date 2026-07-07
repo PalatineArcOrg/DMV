@@ -19,7 +19,7 @@ substitutes for the "did the edge case get missed" part of a paid audit.
 | 3b | Token-2022 transfer-fee residual close (I8) — `transfer_fee.fuzz.ts` P6 | ✅ green |
 | 3c | NFT specifics + token-residual at scale — `nft.fuzz.ts` P7, `residual_scale.fuzz.ts` P8 | ✅ green |
 | 4 | Instruction-SEQUENCE / state-machine fuzzing — `sequence.fuzz.ts` P9 (TS stateful fuzzer) | ✅ green |
-| 5 | Crank-client + RPC-failure stress (notify-server / keeper-bot) | ⏳ |
+| 5 | Crank-client + RPC-failure + race stress (keeper `crankVault`) — `keeper-bot/stress/rpc-stress.mjs` | ✅ green |
 | 6 | Mainnet-fork fidelity (surfpool) | ⏳ |
 
 Harness conventions (Phases 1–4) are fixed by Phase 2 — see `FUZZ-HARNESS-PLAN.md`:
@@ -105,18 +105,27 @@ mutation past the deadline, resume after a partial crank.
 
 ---
 
-## Phase 5 — Crank-client + RPC-failure stress (off-chain autonomy)
-The program is half the system; `notify-server` + `keeper-bot` are the autonomy layer.
-A confused/drained cranker = no inheritance.
-- **Concurrent crank racing** — app + notify + keeper on the same vault. On-chain masks
-  make it *provably* race-safe (P2); test the clients' resume/retry logic under races
-  (no crash, no wasted double-submits beyond harmless no-ops).
-- **RPC failure injection** — 429 / timeout / partial-confirmation. Memory flags
-  "rate-limited RPC lies" (429→null→0 reads as false "paid 0"): assert the cranker
-  resumes from on-chain masks, never mis-reads a rate-limited 0 as done.
-- **Load** — many vaults; poller throughput + bounded concurrency + watchdog hold.
-- **Approach:** integration harness driving the executors against litesvm / a local
-  validator with a fault-injecting RPC shim.
+## Phase 5 — Crank-client + RPC-failure + race stress — ✅ done (`keeper-bot/stress/rpc-stress.mjs`)
+The program is half the system; `keeper-bot` (and `notify-server`) are the autonomy layer —
+a confused/drained cranker = no inheritance. This harness spins up a **local** solana-test-validator
+(custom ports, throwaway ledger — never touches devnet/mainnet or the live service), deploys the
+program, creates matured-able vaults, and drives the REAL keeper `crankVault` through a
+**fault-injecting HTTP proxy**. The on-chain masks/guards (Phases 1–4) are the backstop; this proves
+the *client* never turns an RPC failure into a misdistribution. Full write-up: `keeper-bot/stress/README.md`.
+- **S1 — transient failures:** 35% of all RPC calls 429'd mid-crank → the crank throws but a healed
+  retry (next tick) completes it; vault `executed`, SOL mask full, both beneficiaries paid **exactly
+  once**, no funds stranded.
+- **S2 — "rate-limited-RPC-lies":** a forced 429 on the close-path account read (`crank.js:258`) makes
+  the client see a false "0 dust" → the `close_token_dist` **reverts on-chain** (the Option/withheld
+  guards fire), and a healthy retry closes it — **all token units reach beneficiaries, none lost.**
+- **S3 — concurrent racing:** two keepers crank one vault at once → executed **exactly once**, no
+  double-pay, `total_sol_distributed ≤ deposit`; the loser's txs no-op/revert harmlessly.
+- **Result:** green (9/9 checks). **No correctness bug** — no RPC-failure ordering or race produced a
+  misdistribution/double-pay/lost asset. The design (idempotent re-crank + on-chain guards) is sound.
+  One **optional** hardening noted (not applied — this phase only TESTS): `crank.js:258` swallows *any*
+  read error as "ATA missing→0"; distinguishing a 429 from a genuine not-found would avoid a doomed,
+  reverting close attempt (efficiency, not safety). `notify-server`'s executor shares the same crank
+  shape + poll-loop resilience; the keeper is the representative target.
 
 ---
 
