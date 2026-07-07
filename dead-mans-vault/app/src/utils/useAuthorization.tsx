@@ -18,12 +18,13 @@ import { isDevnet } from "./rpcConfig";
 
 const CHAIN = "solana";
 // Cluster follows the active RPC URL (devnet today, mainnet on a mainnet build)
-// so MWA authorizes wallets on the correct cluster. NB the wallet-standard chain
-// id is "solana:mainnet" (NOT "mainnet-beta") — the MWA proxy maps that string to
-// the mainnet-beta cluster; anything else falls through to the devnet default.
-// Computed at call time,
-// not module load, because isDevnet() reads the runtime RPC override that App.tsx
-// hydrates during bootstrap — before any authorize() call, after module eval.
+// so MWA authorizes wallets on the correct cluster. Emit the wallet-standard id
+// "solana:mainnet" (NOT "mainnet-beta"): it is the only value correct under BOTH MWA
+// protocol versions — the legacy proxy maps "solana:mainnet" → the mainnet-beta
+// cluster and leaves any other value unhandled (default → undefined cluster), while
+// the current proxy passes "solana:mainnet" through unchanged. (Bare "mainnet-beta"
+// works only under the current protocol.) Computed at call time, not module load,
+// because isDevnet() reads the runtime RPC override App.tsx hydrates during bootstrap.
 function getChainIdentifier(): Chain {
   return `${CHAIN}:${isDevnet() ? "devnet" : "mainnet"}`;
 }
