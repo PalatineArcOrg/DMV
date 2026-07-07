@@ -11,7 +11,6 @@ import {
   getAssociatedTokenAddress,
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
-  createTransferInstruction,
   createTransferCheckedInstruction,
   getMint,
   getNonTransferable,
@@ -19,6 +18,7 @@ import {
   getTransferHook,
   getPausableConfig,
   getTransferFeeConfig,
+  getPermanentDelegate,
   getTransferFeeAmount,
   createHarvestWithheldTokensToMintInstruction,
   AccountState,
@@ -523,6 +523,19 @@ export class VaultTransactionService {
       const pausable = getPausableConfig(mintInfo);
       if (pausable && pausable.paused) {
         return { ok: false, reason: 'This token is currently paused by the issuer' };
+      }
+      // Permanent-delegate mints ARE depositable (real RWAs use it for compliance
+      // clawback), but the issuer can move the token out of the vault at any time —
+      // which would defeat the bequest. Warn, don't block. (An unset delegate is the
+      // zero pubkey; only warn on a live one.) NB: single-warning function — if a mint
+      // ALSO charges a transfer fee, this more-severe warning takes precedence.
+      const permDelegate = getPermanentDelegate(mintInfo);
+      if (permDelegate && permDelegate.delegate && !permDelegate.delegate.equals(PublicKey.default)) {
+        return {
+          ok: true,
+          warning:
+            "This token has a permanent delegate — the issuer can move it out of the vault at any time, which would defeat the bequest. Only deposit if you trust the issuer.",
+        };
       }
       // Transfer-fee mints ARE depositable, but taxed on every hop — warn, don't block.
       const fee = getTransferFeeConfig(mintInfo);
@@ -1438,22 +1451,25 @@ export class VaultTransactionService {
   /** All token balances held by the vault PDA (across Token + Token-2022). */
   async getVaultTokenBalances(vaultPda: PublicKey): Promise<{
     mint: PublicKey;
-    amount: number;
+    amount: bigint;
     decimals: number;
     uiAmount: number;
   }[]> {
+    // NB `amount` is the RAW base-unit balance and is used ONLY by
+    // buildWithdrawAllInstructions to drive a transfer — it MUST stay exact, so it's a
+    // bigint (a Number loses precision above 2^53). Every display path uses `uiAmount`.
     const programs = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
-    const results: { mint: PublicKey; amount: number; decimals: number; uiAmount: number }[] = [];
+    const results: { mint: PublicKey; amount: bigint; decimals: number; uiAmount: number }[] = [];
     for (const programIdToken of programs) {
       const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(vaultPda, { programId: programIdToken });
       for (const { account } of tokenAccounts.value) {
         const parsed = account.data.parsed?.info;
         if (!parsed) continue;
         const tokenAmount = parsed.tokenAmount;
-        if (Number(tokenAmount.amount) <= 0) continue;
+        if (BigInt(tokenAmount.amount) <= 0n) continue;
         results.push({
           mint: new PublicKey(parsed.mint),
-          amount: Number(tokenAmount.amount),
+          amount: BigInt(tokenAmount.amount),
           decimals: tokenAmount.decimals,
           uiAmount: Number(tokenAmount.uiAmountString),
         });
@@ -1494,7 +1510,7 @@ export class VaultTransactionService {
       }
 
       const ix = await program.methods
-        .withdrawFromVault(new BN(token.amount))
+        .withdrawFromVault(new BN(token.amount.toString()))
         .accountsPartial({
           owner,
           vaultConfig: vaultPda,

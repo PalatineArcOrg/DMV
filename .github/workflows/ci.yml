@@ -52,10 +52,10 @@ jobs:
 
   # ---- Anchor program: prod-safe build + devnet tests ----
   # Deterministic, host-only program checks (no Solana/Anchor toolchain needed).
-  # The prod-floor guard is the load-bearing mainnet-safety gate. The full Anchor
-  # build + ts-mocha suite (incl. canonical-ATA regression tests) runs locally via
-  # `yarn test:devnet` — not yet in CI because a reliable Agave + avm runner recipe
-  # is still needed (the from-source avm install is toolchain-fragile).
+  # The prod-floor guard is the load-bearing mainnet-safety gate. The 9-property
+  # money-math fuzz suite runs in the separate `fuzz` job below. The full ts-mocha
+  # suite (`yarn test:devnet`) still runs locally only — it needs a localnet validator
+  # on top of the Anchor build, which the fuzz job (in-process litesvm) does not.
   program:
     runs-on: ubuntu-latest
     defaults:
@@ -75,3 +75,56 @@ jobs:
         run: |
           cargo install cargo-audit --locked || true
           cargo audit || true
+
+  # ---- Property-fuzz suite (litesvm + fast-check) ----
+  # Runs the 9 money-math fuzz properties (`yarn test:fuzz`) so a program or
+  # crank-builder refactor can't silently regress them. Needs `anchor build` (plain =
+  # PROD floors) to produce the .so / IDL / types the in-process litesvm harness loads
+  # (the suite exercises the real production floors via clock-warp; NO validator).
+  # Toolchain + build are cached, so only the first/changed run pays the (historically
+  # avm-fragile) install. Separate job → a red run here can't block the others.
+  # NOTE: this job is CI-only and unverifiable locally; watch the first run and tune
+  # the toolchain step if the avm/Agave install drifts.
+  fuzz:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dead-mans-vault
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Cache Solana + Anchor toolchain
+        id: toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.avm
+            ~/.cargo/bin/avm
+            ~/.cargo/bin/anchor
+          key: solana-3.0.15-anchor-0.32.1
+      - name: Install Solana (Agave 3.0.15) + Anchor 0.32.1 (cache miss only)
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.0.15/install)"
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+          avm install 0.32.1
+          avm use 0.32.1
+      - name: PATH
+        run: |
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.avm/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Cache program build
+        uses: actions/cache@v4
+        with:
+          path: dead-mans-vault/target
+          key: sbf-target-${{ hashFiles('dead-mans-vault/programs/**', 'dead-mans-vault/Cargo.lock', 'dead-mans-vault/Anchor.toml') }}
+      - name: Build program (PROD floors) → .so + IDL + types
+        run: anchor build
+      - run: yarn install --frozen-lockfile
+      - name: Property-fuzz suite (litesvm + fast-check, prod floors via clock-warp)
+        run: yarn test:fuzz
