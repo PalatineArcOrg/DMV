@@ -227,6 +227,21 @@ export async function expectTxError(fn: () => any, needle: string) {
 
 export const SENTINEL_MINT = PublicKey.default; // zero-pubkey → specific-SOL bequest
 
+// Distinct non-sentinel bequest mints as read-only remaining accounts — set/update
+// _asset_plan now validate each is a real Mint (rejects a garbage-mint plan).
+export function planMintMetas(assignments: { mint: PublicKey }[]) {
+  const seen = new Set<string>();
+  const metas: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [];
+  for (const a of assignments) {
+    if (a.mint.equals(PublicKey.default)) continue; // SOL sentinel — not a mint
+    const k = a.mint.toBase58();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    metas.push({ pubkey: a.mint, isSigner: false, isWritable: false });
+  }
+  return metas;
+}
+
 export function assetPlanPda(vault: PublicKey) {
   const [pk] = PublicKey.findProgramAddressSync(
     [Buffer.from("asset_plan"), vault.toBuffer()],

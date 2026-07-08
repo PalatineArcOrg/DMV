@@ -53,6 +53,7 @@ import {
   isClosed,
   tokenBal,
   SENTINEL_MINT,
+  planMintMetas,
   tokenDistPda,
   createAtaIx,
 } from "./harness";
@@ -201,6 +202,7 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
                 }))
               )
               .accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+              .remainingAccounts(planMintMetas(asg.map((a) => ({ mint: a.sentinel ? SENTINEL_MINT : (token as any).mint }))))
               .transaction(),
             owner
           );
@@ -440,7 +442,7 @@ describe("fuzz — instruction-sequence state machine (LiteSVM + fast-check)", (
               ok = await attempt(
                 program.methods.updateAssetPlan(
                   asg.map((a) => ({ mint: a.sentinel ? SENTINEL_MINT : (token as any).mint, amount: new BN(a.amount.toString()), beneficiaryIndex: a.benefIdx, isNft: false }))
-                ).accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan }).transaction(),
+                ).accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan }).remainingAccounts(planMintMetas(asg.map((a) => ({ mint: a.sentinel ? SENTINEL_MINT : (token as any).mint })))).transaction(),
                 owner
               );
               break;

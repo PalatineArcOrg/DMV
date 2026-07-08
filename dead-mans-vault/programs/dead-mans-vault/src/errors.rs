@@ -135,4 +135,7 @@ pub enum VaultError {
 
     #[msg("Grace period exceeds the maximum allowed (2 years)")]
     GracePeriodTooLong,
+
+    #[msg("A bequeathed mint is not a valid token mint account")]
+    InvalidPlanMint,
 }

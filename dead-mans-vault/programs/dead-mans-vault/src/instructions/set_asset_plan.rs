@@ -1,8 +1,45 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token_2022::spl_token_2022::{extension::StateWithExtensions, state::Mint};
 use crate::state::{VaultConfig, HeartbeatRecord, AssetPlan, AssetAssignment};
 use crate::errors::VaultError;
 use crate::constants::MAX_ASSIGNMENTS;
 use crate::util::deadline;
+
+/// Reject a plan that bequeaths a mint which is not a real token mint account.
+/// An assignment whose `mint` never loads as an `InterfaceAccount<Mint>` (garbage
+/// pubkey, wrong network, non-mint address) can never have its paid bit set —
+/// `begin_token_dist` and `execute_specific_asset` both require the mint to load —
+/// so it would permanently brick `finalize` (which needs the full plan mask) with
+/// no post-deadline recovery. We validate at plan-set: every distinct non-sentinel
+/// assignment mint must be passed in `remaining_accounts` and load as a
+/// token-program-owned Mint. Matched by key against the real on-chain account, so
+/// the owner cannot substitute a fake. The SOL sentinel (`Pubkey::default()`) is
+/// not a mint and is skipped. NOTE: this is a *set-time* guard — a mint valid here
+/// but closed later (Token-2022 CloseMint) is an execution-time concern (A1), not
+/// reachable by this check.
+pub fn validate_plan_mints(
+    assignments: &[AssetAssignment],
+    remaining: &[AccountInfo],
+) -> Result<()> {
+    for a in assignments {
+        if a.mint == Pubkey::default() {
+            continue; // SOL sentinel — not a mint account
+        }
+        let ai = remaining
+            .iter()
+            .find(|ai| ai.key() == a.mint)
+            .ok_or(error!(VaultError::InvalidPlanMint))?;
+        // Must be owned by a token program AND unpack as a Mint (StateWithExtensions
+        // handles both legacy SPL and Token-2022; a legacy mint has no extension TLV).
+        require!(
+            *ai.owner == anchor_spl::token::ID || *ai.owner == anchor_spl::token_2022::ID,
+            VaultError::InvalidPlanMint
+        );
+        let data = ai.try_borrow_data()?;
+        StateWithExtensions::<Mint>::unpack(&data).map_err(|_| error!(VaultError::InvalidPlanMint))?;
+    }
+    Ok(())
+}
 
 /// Validate an assignment list. Per B4, NFT *shape* (decimals 0 / supply 1) is
 /// validated client-side (a mis-flagged NFT only harms the owner's own vault).
@@ -90,6 +127,7 @@ pub fn handler(ctx: Context<SetAssetPlan>, assignments: Vec<AssetAssignment>) ->
     require!(now < dl, VaultError::AssetPlanImmutable);
 
     validate_assignments(&assignments, vault.beneficiaries.len())?;
+    validate_plan_mints(&assignments, ctx.remaining_accounts)?;
 
     let plan = &mut ctx.accounts.asset_plan;
     plan.vault = vault.key();

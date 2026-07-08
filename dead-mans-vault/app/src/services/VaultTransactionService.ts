@@ -724,6 +724,7 @@ export class VaultTransactionService {
     const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
     const program = this.programAs(owner);
 
+    VaultTransactionService.assertPlanFits(assignments);
     const tx = await program.methods
       .setAssetPlan(assignments.map(VaultTransactionService.toOnChainAssignment))
       .accountsPartial({
@@ -733,6 +734,7 @@ export class VaultTransactionService {
         assetPlan: assetPlanPda,
         systemProgram: SystemProgram.programId,
       })
+      .remainingAccounts(VaultTransactionService.planMintRemaining(assignments))
       .transaction();
 
     return this.addPriorityFee(tx, [owner, vaultPda, assetPlanPda], 250_000);
@@ -744,6 +746,7 @@ export class VaultTransactionService {
     const [assetPlanPda] = this.getAssetPlanPDA(vaultPda);
     const program = this.programAs(owner);
 
+    VaultTransactionService.assertPlanFits(assignments);
     const tx = await program.methods
       .updateAssetPlan(assignments.map(VaultTransactionService.toOnChainAssignment))
       .accountsPartial({
@@ -752,6 +755,7 @@ export class VaultTransactionService {
         heartbeatRecord: heartbeatPda,
         assetPlan: assetPlanPda,
       })
+      .remainingAccounts(VaultTransactionService.planMintRemaining(assignments))
       .transaction();
 
     return this.addPriorityFee(tx, [owner, vaultPda, assetPlanPda], 250_000);
@@ -764,6 +768,38 @@ export class VaultTransactionService {
       beneficiaryIndex: a.beneficiaryIndex,
       isNft: a.isNft,
     };
+  }
+
+  /** Distinct non-sentinel bequest mints, passed as read-only remaining accounts so
+   *  the program can validate each is a real Mint (rejects a garbage/closed-mint plan
+   *  that would otherwise permanently brick finalize). SOL sentinel is excluded. */
+  private static planMintRemaining(assignments: AssetAssignment[]) {
+    const seen = new Set<string>();
+    const metas: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [];
+    for (const a of assignments) {
+      if (a.mint.equals(PublicKey.default)) continue; // SOL sentinel — not a mint
+      const k = a.mint.toBase58();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      metas.push({ pubkey: a.mint, isSigner: false, isWritable: false });
+    }
+    return metas;
+  }
+
+  /** Guard the 1232-byte tx limit: bequest mints ride in the account-keys array
+   *  (~33B each), assignments are ~42B of ix data. The distinct-mint accounts (added
+   *  for plan-mint validation) tighten the budget, so an all-NFT plan caps lower than
+   *  an all-SOL one. Throw a clear error rather than let the signed tx fail at submit. */
+  private static assertPlanFits(assignments: AssetAssignment[]) {
+    const distinct = new Set(
+      assignments.filter((a) => !a.mint.equals(PublicKey.default)).map((a) => a.mint.toBase58())
+    ).size;
+    const estBytes = 335 + 33 * distinct + 42 * assignments.length;
+    if (estBytes > 1180) {
+      throw new Error(
+        `This bequest plan is too large to fit in one transaction (${assignments.length} bequests across ${distinct} tokens). Remove a bequest, or use fewer distinct tokens.`
+      );
+    }
   }
 
   // ─── Permissionless execution crank (build + send with a payer keypair) ───

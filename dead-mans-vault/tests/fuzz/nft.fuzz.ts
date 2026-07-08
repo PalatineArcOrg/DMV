@@ -28,6 +28,7 @@ import {
   gcAfter,
   expectBadTx,
   TOKEN_PROGRAM_ID,
+  planMintMetas,
 } from "./harness";
 import {
   INTERVAL,
@@ -65,6 +66,7 @@ describe("fuzz — whole-NFT specific bequest (LiteSVM + fast-check)", () => {
             svm,
             await program.methods
               .setAssetPlan([{ mint, amount: new BN(1), beneficiaryIndex: c.nftBenef, isNft: true }])
+              .remainingAccounts(planMintMetas([{ mint }]))
               .accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan, systemProgram: SystemProgram.programId })
               .transaction(),
             owner
@@ -188,6 +190,7 @@ describe("fuzz — whole-NFT specific bequest (LiteSVM + fast-check)", () => {
           { mint, amount: new BN(1), beneficiaryIndex: 1, isNft: true },
         ])
         .accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+        .remainingAccounts(planMintMetas([{ mint }]))
         .transaction(),
       owner,
       [],

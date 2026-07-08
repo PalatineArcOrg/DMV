@@ -24,6 +24,7 @@ import {
   expectBadTx,
   gcAfter,
   SENTINEL_MINT,
+  planMintMetas,
   TOKEN_PROGRAM_ID,
 } from "./harness";
 import { INTERVAL, GRACE, makeVault, fundVaultToken, makeBeneAtas } from "./setup";
@@ -40,6 +41,7 @@ async function tokenPlanState(assignments: any[], bal = 1000n, deposit = 1_000_0
     await program.methods
       .setAssetPlan(asg.map((a) => ({ mint: a.mint, amount: new BN(a.amount.toString()), beneficiaryIndex: a.beneficiaryIndex, isNft: !!a.isNft })))
       .accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+      .remainingAccounts(planMintMetas(asg))
       .transaction(),
     owner
   );

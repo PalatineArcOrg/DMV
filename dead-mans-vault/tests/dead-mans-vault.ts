@@ -37,6 +37,21 @@ const GRACE_WAIT_MS = (INTERVAL + GRACE + 3) * 1000;
 // Must match the on-chain FEE_WALLET (constants.rs) — passed explicitly, not auto-resolved.
 const FEE_WALLET = new PublicKey('98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp');
 
+// Distinct non-sentinel bequest mints as read-only remaining accounts — set/update
+// _asset_plan validate each is a real Mint (InvalidPlanMint otherwise).
+const planMints = (...mints: anchor.web3.PublicKey[]) => {
+  const seen = new Set<string>();
+  const metas: { pubkey: anchor.web3.PublicKey; isSigner: boolean; isWritable: boolean }[] = [];
+  for (const m of mints) {
+    if (m.equals(PublicKey.default)) continue;
+    const k = m.toBase58();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    metas.push({ pubkey: m, isSigner: false, isWritable: false });
+  }
+  return metas;
+};
+
 describe("dead-mans-vault — permissionless execution", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
@@ -467,7 +482,7 @@ describe("dead-mans-vault — permissionless execution", () => {
         agent: agent.publicKey,
         beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
       });
-      const m = Keypair.generate().publicKey;
+      const m = await makeMint(o, 6);
       const mk = (n: number) =>
         Array.from({ length: n }, () => ({
           mint: m,
@@ -484,6 +499,7 @@ describe("dead-mans-vault — permissionless execution", () => {
       await program.methods
         .setAssetPlan(mk(18))
         .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+        .remainingAccounts(planMints(m))
         .signers([o])
         .rpc();
       const plan = await program.account.assetPlan.fetch(assetPlan);
@@ -552,7 +568,7 @@ describe("dead-mans-vault — permissionless execution", () => {
         beneficiaries: [{ wallet: b1.publicKey, shareBps: 10000 }],
       });
       await program.methods
-        .setAssetPlan([{ mint: Keypair.generate().publicKey, amount: new BN(1), beneficiaryIndex: 0, isNft: false }])
+        .setAssetPlan([{ mint: PublicKey.default, amount: new BN(1000), beneficiaryIndex: 0, isNft: false }])
         .accountsPartial({ owner: o.publicKey, vaultConfig: vault, heartbeatRecord: heartbeat, assetPlan, systemProgram: SystemProgram.programId })
         .signers([o])
         .rpc();
@@ -877,6 +893,7 @@ describe("dead-mans-vault — permissionless execution", () => {
             { mint: nftMint, amount: new BN(1), beneficiaryIndex: 0, isNft: true },
           ])
           .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, assetPlan: p.assetPlan, systemProgram: SystemProgram.programId })
+          .remainingAccounts(planMints(tokenMint, nftMint))
           .signers([owner])
           .rpc();
         S.spec = { owner, b: [b1, b2], tokenMint, nftMint, ...p };
@@ -904,6 +921,7 @@ describe("dead-mans-vault — permissionless execution", () => {
             { mint: tokenMint, amount: new BN(200), beneficiaryIndex: 1, isNft: false },
           ])
           .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, assetPlan: p.assetPlan, systemProgram: SystemProgram.programId })
+          .remainingAccounts(planMints(tokenMint))
           .signers([owner])
           .rpc();
         S.theft = { owner, b: [b1, b2], tokenMint, ...p };
@@ -976,6 +994,7 @@ describe("dead-mans-vault — permissionless execution", () => {
             { mint: unheldMint, amount: new BN(5), beneficiaryIndex: 0, isNft: false }, // unheld
           ])
           .accountsPartial({ owner: owner.publicKey, vaultConfig: p.vault, heartbeatRecord: p.heartbeat, assetPlan: p.assetPlan, systemProgram: SystemProgram.programId })
+          .remainingAccounts(planMints(heldMint, unheldMint))
           .signers([owner])
           .rpc();
         S.edge = { owner, b: [b1], heldMint, unheldMint, ...p };

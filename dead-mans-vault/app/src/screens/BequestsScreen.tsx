@@ -23,7 +23,16 @@ import { PortfolioScanner } from '../services/PortfolioScanner';
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import type { AssetAssignment } from '../types/vault';
 
-const MAX_ASSIGNMENTS_PER_TX = 18; // single-tx cap (1232-byte limit; 64 is storage)
+// Single set/update_asset_plan tx must fit the 1232-byte limit. Distinct bequest
+// mints ride in the account-keys array (~33B each, passed for on-chain mint
+// validation); assignments are ~42B of ix data. So an all-NFT plan (every mint
+// distinct) caps lower (~11) than an all-SOL one (~21). Mirror of
+// VaultTransactionService.assertPlanFits. SOL-sentinel bequests use no mint account.
+const SOL_SENTINEL = PublicKey.default.toBase58();
+const planFits = (list: { mint: string }[]): boolean => {
+  const distinct = new Set(list.map((d) => d.mint).filter((m) => m !== SOL_SENTINEL)).size;
+  return 335 + 33 * distinct + 42 * list.length <= 1180;
+};
 
 interface DraftAssignment {
   mint: string;
@@ -186,28 +195,26 @@ export function BequestsScreen() {
   );
 
   const addDraft = () => {
-    if (drafts.length >= MAX_ASSIGNMENTS_PER_TX) {
-      Alert.alert('Limit reached', `A vault can hold up to ${MAX_ASSIGNMENTS_PER_TX} specific bequests in a single update.`);
-      return;
-    }
     if (assets.length === 0 || beneficiaries.length === 0) {
       Alert.alert('Nothing to assign', 'You need at least one held token/NFT and one beneficiary.');
       return;
     }
     const first = assets[0];
-    setDrafts((d) => [
-      ...d,
-      {
-        mint: first.mint.toBase58(),
-        symbol: first.symbol,
-        decimals: first.decimals,
-        isNft: first.decimals === 0 && first.amount === 1,
-        uiAmount: first.decimals === 0 && first.amount === 1 ? '1' : '',
-        beneficiaryIndex: beneficiaries[0].index,
-        holding: first.amount,
-        image: first.image,
-      },
-    ]);
+    const next = {
+      mint: first.mint.toBase58(),
+      symbol: first.symbol,
+      decimals: first.decimals,
+      isNft: first.decimals === 0 && first.amount === 1,
+      uiAmount: first.decimals === 0 && first.amount === 1 ? '1' : '',
+      beneficiaryIndex: beneficiaries[0].index,
+      holding: first.amount,
+      image: first.image,
+    };
+    if (!planFits([...drafts, next])) {
+      Alert.alert('Plan full', 'This bequest plan is as large as a single transaction allows. Remove a bequest, or use fewer distinct tokens.');
+      return;
+    }
+    setDrafts((d) => [...d, next]);
   };
 
   const updateDraft = (i: number, patch: Partial<DraftAssignment>) => {
@@ -241,7 +248,7 @@ export function BequestsScreen() {
 
   const validate = (): string | null => {
     if (drafts.length === 0) return 'Add at least one bequest.';
-    if (drafts.length > MAX_ASSIGNMENTS_PER_TX) return `Max ${MAX_ASSIGNMENTS_PER_TX} bequests per update.`;
+    if (!planFits(drafts)) return 'Too many bequests to fit one transaction — remove one, or use fewer distinct tokens.';
     const nftMints = new Set<string>();
     for (const d of drafts) {
       if (d.isNft) {
@@ -468,7 +475,7 @@ export function BequestsScreen() {
         </TouchableOpacity>
 
         <Text style={styles.counter}>
-          {drafts.length} / {MAX_ASSIGNMENTS_PER_TX} bequests
+          {drafts.length} {drafts.length === 1 ? 'bequest' : 'bequests'}
         </Text>
 
         {overAllocatedWarnings.map((w, i) => (

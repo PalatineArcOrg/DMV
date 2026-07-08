@@ -31,6 +31,7 @@ import {
   isClosed,
   gcAfter,
   SENTINEL_MINT,
+  planMintMetas,
   TOKEN_PROGRAM_ID,
 } from "./harness";
 import {
@@ -87,6 +88,7 @@ describe("fuzz — specific bequests conservation (LiteSVM + fast-check)", () =>
           await program.methods
             .setAssetPlan(assignments)
             .accountsPartial({ owner: owner.publicKey, vaultConfig: pdas.vault, heartbeatRecord: pdas.heartbeat, assetPlan, systemProgram: SystemProgram.programId })
+            .remainingAccounts(planMintMetas(assignments))
             .transaction(),
           owner
         );

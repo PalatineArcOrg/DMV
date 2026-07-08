@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use crate::state::{VaultConfig, HeartbeatRecord, AssetPlan, AssetAssignment};
 use crate::errors::VaultError;
 use crate::util::deadline;
-use crate::instructions::set_asset_plan::validate_assignments;
+use crate::instructions::set_asset_plan::{validate_assignments, validate_plan_mints};
 
 /// Owner overwrite of an existing AssetPlan buffer. Same guards as set_asset_plan;
 /// kept separate from `init` rather than using `init_if_needed`.
@@ -45,6 +45,7 @@ pub fn handler(ctx: Context<UpdateAssetPlan>, assignments: Vec<AssetAssignment>)
     require!(now < dl, VaultError::AssetPlanImmutable);
 
     validate_assignments(&assignments, vault.beneficiaries.len())?;
+    validate_plan_mints(&assignments, ctx.remaining_accounts)?;
 
     let plan = &mut ctx.accounts.asset_plan;
     plan.assignments = assignments;
