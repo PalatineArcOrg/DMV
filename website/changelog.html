@@ -45,6 +45,11 @@
     <p class="sub">Dead Man's Vault — autonomous crypto inheritance on Solana (Devnet). &nbsp;·&nbsp;
       <a href="/">Home</a> &nbsp;·&nbsp; <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases</a></p>
 <p>All notable changes to Dead Man's Vault are documented here. The format follows <a href="https://keepachangelog.com/" target="_blank" rel="noopener">Keep a Changelog</a>, and releases (with APKs) are on the <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases page</a>; this log is also rendered at <a href="https://dmv.palatinearc.com/changelog.html" target="_blank" rel="noopener">dmv.palatinearc.com/changelog</a>. Network: Solana Devnet. Program ID <code>GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb</code>.</p>
+<h2>[1.13.17] — 2026-07-08 — Bequests: all vault assets appear again</h2>
+<p>Fixes the Bequests picker showing <strong>only SOL</strong> when the vault also held tokens/NFTs.</p>
+<ul>
+<li><strong>App (v1.13.17 / versionCode 103).</strong> The picker enriched every held token in a single batch, so a single failed enrichment of <em>one</em> asset (a Hermes-runtime-only throw — e.g. on a Token-2022 tokenized stock) dropped the <strong>whole</strong> list and the screen silently fell back to SOL-only. Each asset now loads independently: every held token/NFT appears (with a short-address fallback label if its metadata can't resolve), and a genuine load failure shows a visible <strong>retry banner</strong> ("couldn't load your tokens — tap to retry / switch RPC") instead of masquerading as "only SOL." No on-chain change.</li>
+</ul>
 <h2>[1.13.16] — 2026-07-08 — Plan-mint validation (NEW-1) + keeper anti-orphan (NEW-2)</h2>
 <p>An independent five-lens re-audit of the frozen audit code re-confirmed the fund-safety path is clean and surfaced two new <strong>availability</strong> findings, both now fixed.</p>
 <h3>On-chain program (redeployed to devnet)</h3>

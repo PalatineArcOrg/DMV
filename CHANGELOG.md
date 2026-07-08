@@ -6,6 +6,18 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 at [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.13.17] — 2026-07-08 — Bequests: all vault assets appear again
+
+Fixes the Bequests picker showing **only SOL** when the vault also held tokens/NFTs.
+
+- **App (v1.13.17 / versionCode 103).** The picker enriched every held token in a single
+  batch, so a single failed enrichment of *one* asset (a Hermes-runtime-only throw — e.g. on
+  a Token-2022 tokenized stock) dropped the **whole** list and the screen silently fell back
+  to SOL-only. Each asset now loads independently: every held token/NFT appears (with a
+  short-address fallback label if its metadata can't resolve), and a genuine load failure
+  shows a visible **retry banner** ("couldn't load your tokens — tap to retry / switch RPC")
+  instead of masquerading as "only SOL." No on-chain change.
+
 ## [1.13.16] — 2026-07-08 — Plan-mint validation (NEW-1) + keeper anti-orphan (NEW-2)
 
 An independent five-lens re-audit of the frozen audit code re-confirmed the fund-safety path
