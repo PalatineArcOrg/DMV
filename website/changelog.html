@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dead Man's Vault — Changelog</title>
+<meta name="description" content="Release history for Dead Man's Vault, the autonomous crypto-inheritance protocol on Solana.">
+<link rel="icon" href="/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#07090F; --surface:#0F1521; --text:#E7ECF3; --muted:#9AA6B8; --accent:#00FFA3; --border:#1C2534; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font-family:'Space Grotesk',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:820px; margin:0 auto; padding:48px 22px 96px; }
+  header { display:flex; align-items:center; gap:14px; margin-bottom:8px; }
+  header img { width:40px; height:40px; border-radius:9px; }
+  h1 { font-size:30px; font-weight:700; margin:0; letter-spacing:-0.02em; }
+  .sub { color:var(--muted); font-size:14px; margin:4px 0 34px; }
+  .sub a { color:var(--accent); text-decoration:none; }
+  h2 { font-size:20px; font-weight:700; margin:44px 0 6px; padding-top:22px; border-top:1px solid var(--border);
+    letter-spacing:-0.01em; }
+  h2:first-of-type { border-top:none; padding-top:0; }
+  h3 { font-size:13px; font-weight:500; text-transform:uppercase; letter-spacing:0.08em;
+    color:var(--accent); margin:22px 0 8px; }
+  p { margin:10px 0; color:#CFD7E3; }
+  ul { margin:8px 0 8px; padding-left:20px; }
+  li { margin:7px 0; color:#CFD7E3; }
+  li::marker { color:var(--accent); }
+  strong { color:#FFFFFF; font-weight:500; }
+  em { color:#DCE3EC; font-style:italic; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.86em;
+    background:var(--surface); border:1px solid var(--border); border-radius:5px; padding:1px 5px; color:#B9F5DE; overflow-wrap:anywhere; }
+  a { color:var(--accent); }
+  .back { display:inline-block; margin-top:40px; color:var(--muted); text-decoration:none; font-size:14px; }
+  .back:hover { color:var(--accent); }
+  @media (max-width:600px){ .wrap{padding:32px 18px 72px;} h1{font-size:24px;} }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header><img src="/icon.png" alt=""><h1>Changelog</h1></header>
+    <p class="sub">Dead Man's Vault — autonomous crypto inheritance on Solana (Devnet). &nbsp;·&nbsp;
+      <a href="/">Home</a> &nbsp;·&nbsp; <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases</a></p>
+<p>All notable changes to Dead Man's Vault are documented here. The format follows <a href="https://keepachangelog.com/" target="_blank" rel="noopener">Keep a Changelog</a>, and releases (with APKs) are on the <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases page</a>; this log is also rendered at <a href="https://dmv.palatinearc.com/changelog.html" target="_blank" rel="noopener">dmv.palatinearc.com/changelog</a>. Network: Solana Devnet. Program ID <code>GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb</code>.</p>
+<h2>[1.13.14–1.13.15] — 2026-07-07 — Security audit remediation + Clear bequests</h2>
+<p>An internal, skill-driven security audit (OWASP-Solana, Token-2022, Anchor, client, and testing checklists) found the <strong>fund-safety path clean</strong> — every theft, over-distribution, misroute, and auth-bypass class mitigated with evidence — with all findings in the availability / operational category. Remediation shipped across the app (v1.13.14 → v1.13.15), the on-chain program (redeployed to devnet), and the two crankers, alongside a new <strong>Clear bequests</strong> feature. Every fix got a blast-radius impact analysis first; the one finding that would have turned an availability bug into fund <em>misdirection</em> was routed to external audit rather than built.</p>
+<h3>App</h3>
+<ul>
+<li><strong>Clear all bequests (1.13.15).</strong> When a plan exists, the Bequests screen now shows a <strong>Clear all bequests</strong> action: one owner-signed transaction removes every specific bequest, which unlocks editing your beneficiaries (blocked while a plan exists). Assets stay in the vault and split pro-rata by share until you set new bequests.</li>
+<li><strong>Deposit &amp; bequest warnings (1.13.14).</strong> The app now warns — never blocks — when a Token-2022 mint's issuer could freeze / pause / seize (permanent delegate) / hook it, both when depositing and when naming it in a specific bequest, so you see the risk before committing an asset the issuer could later make un-distributable.</li>
+<li><strong>Withdraw precision (1.13.14).</strong> The owner withdraw-all path now uses an exact bigint balance (a large token balance could lose precision as a JS number).</li>
+<li><strong>Removed dead code (1.13.14).</strong> Deleted an un-wired DeFi autonomous-swap path that was never reachable from execution.</li>
+</ul>
+<h3>On-chain program (Anchor 0.32.1; redeployed to devnet)</h3>
+<ul>
+<li><strong><code>clear_asset_plan</code> instruction.</strong> Owner-only, pre-grace: closes the AssetPlan (rent → owner) and clears <code>has_asset_plan</code> — the escape hatch behind the Clear bequests feature. Freeze-gated like every other plan mutation; verified end-to-end on the deployed program.</li>
+<li><strong>Interval / grace upper bounds.</strong> Caps of 1 year / 2 years reject a value that would overflow the deadline computation and brick a vault (new errors 6042 / 6043).</li>
+<li><strong><code>record_heartbeat</code> canonical PDA seeds</strong> — defense-in-depth pinning, matching the other instructions.</li>
+</ul>
+<h3>Crankers (keeper-bot + notify-server)</h3>
+<ul>
+<li><strong>Priority fee + compute-unit limits.</strong> Both crankers now set a best-effort priority fee and explicit per-instruction CU limits so autonomous distribution lands under mainnet congestion. The fee lookup can never throw, so third-party keepers on any RPC are unaffected.</li>
+<li><strong>Skip stuck mints.</strong> A mint the issuer paused / froze / hooked / made non-transferable is skipped for the tick instead of aborting the whole crank — every other asset still reaches the heirs; only that mint's residual + rent strand.</li>
+<li><strong>Mint-lookup retry</strong> (a transient RPC error no longer drops a bequeathed mint) and an <strong>executor finalize-gate re-fetch guard</strong> (re-reads the on-chain masks before finalizing, so a stale in-memory mask can't skip finalize one step from done).</li>
+</ul>
+<h3>Testing &amp; CI</h3>
+<ul>
+<li><strong>Property-fuzz suite</strong> (<code>dead-mans-vault/tests/fuzz/</code>, <code>yarn test:fuzz</code>) — litesvm + fast-check, 9 properties over conservation, idempotency, specific bequests, a theft-must-revert battery (exact error codes), the post-deadline freeze, Token-2022 transfer-fee close, NFT bequests, residual dust-at-scale (n≤20), and a <strong>stateful instruction-sequence fuzzer</strong> (random orderings vs 7 global invariants). Runs against the real production floors via clock-warp. <strong>Found no program bug</strong>, and now runs in <strong>CI on every push</strong>.</li>
+<li><strong>New coverage:</strong> <code>close_revoked_vault</code> (guard + a crafted-zombie close), a compute-unit budget measurement at 20 beneficiaries (batch-of-8 stays well under limits), client crank index/batch math units, and an executor finalize-gate regression.</li>
+<li><strong>Crank RPC-failure / race stress</strong> (<code>keeper-bot/stress/</code>) — a local validator + fault-injecting RPC proxy drives the real keeper crank under 429s / timeouts / concurrent races; confirms RPC failure and racing are correctness-safe (delayed retry at worst, never loss / double-pay / misdirection).</li>
+</ul>
+<h3>Docs &amp; ops</h3>
+<ul>
+<li>Public reviewer docs reorganized into repo-root <code>docs/</code> — added <code>SECURITY.md</code> (vuln reporting + bug bounty), <code>STRESS-TESTING-PLAN.md</code>, <code>FUZZ-HARNESS-PLAN.md</code>, plus <code>AUDIT-SCOPE.md</code> (pinned to tag <code>audit-2026-07-07</code>) and the design spec. The old hackathon <code>pitch-deck/</code> and <code>docs/</code>(pptx) folders were removed.</li>
+<li>Cranker balance monitor (<code>keeper-bot/balance-monitor.mjs</code>) with a systemd timer and Discord low-balance alerting.</li>
+</ul>
+<h2>[1.13.9–1.13.13] — 2026-07-05 — Tokenized stocks (RWA) + transfer-fee close + setup fixes</h2>
+<p>Adds a first-class <strong>Stocks</strong> section for Token-2022 tokenized equities (xStocks / Backpack Securities-style RWAs), makes fee/pausable stocks deposit and distribute correctly, and fixes two vault-close/setup bugs surfaced by on-device testing with a transfer-fee stock. Devnet build; single-release convention unchanged.</p>
+<h3>App</h3>
+<ul>
+<li><strong>Stocks tab (1.13.9).</strong> New <code>Assets → Stocks</code> section and an inline Dashboard Stocks list, mirroring the NFTs / DeFi split. Token-2022 fungibles are classified as stocks by a known-mint registry (real mainnet xStocks + the devnet test mints) plus an <code>[A-Z]{2,6}x</code> symbol heuristic; the Tokens tab excludes them.</li>
+<li><strong>Stocks-invisible fix (1.13.10).</strong> A separate-module import of the stock classifier resolved to <code>undefined</code> under Hermes and threw inside the portfolio parse loop, silently hiding <strong>every Token-2022 token</strong> (legacy tokens still showed). The classifier is now inlined into <code>PortfolioScanner</code>, and the RPC-fallback scan enumerates both the legacy Token and Token-2022 programs — so stocks show with or without a Helius key.</li>
+<li><strong>Deposit correctness + guards (1.13.11).</strong> Token deposits now use <code>transfer_checked</code> (the unchecked transfer is rejected by transfer-fee <strong>and pausable</strong> mints, so real xStocks could never deposit before). A pre-sign check reads the mint's Token-2022 extensions and <strong>blocks</strong> non-transferable / frozen-by-default / transfer-hook / paused mints with a clear reason, and <strong>warns</strong> on transfer-fee mints (a percentage is lost on every hop). The Bequests picker now shows stock names instead of raw mint addresses.</li>
+<li><strong>Executed-vault close actually closes on-chain (1.13.12).</strong> Closing an executed vault now closes any remaining TokenDists <strong>and</strong> the core PDAs on-chain and reclaims rent, surfacing a real error if something blocks it — previously the executed path silently "cleared local data," leaving the vault on-chain so it reappeared on restart.</li>
+<li><strong>Transfer-fee close fix (1.13.12).</strong> A transfer-fee mint leaves <em>withheld</em> fees in the vault's token account (e.g. from the deposit), and Token-2022 refuses to close an account that still holds withheld fees — which stuck <code>close_token_dist</code> and kept <code>open_token_dists &gt; 0</code>, blocking the whole close. The close now <strong>harvests the withheld fees to the mint first</strong> (permissionless), so fee / pausable stocks close cleanly.</li>
+<li><strong>Setup wizard re-sync (1.13.12).</strong> A vault that executes while the app is idle now surfaces the "Vault Executed" summary instead of a stale editable wizard showing old beneficiaries — the wizard re-fetches on-chain vault state on focus, not only before setup.</li>
+<li><strong>Stale "Configure Heartbeat ✓" fix (1.13.13).</strong> The heartbeat config is persisted to the device (so a mid-setup draft survives a restart) and re-hydrated on launch, but Start Over and revoke only reset it in memory — so it re-appeared on restart and marked the heartbeat step done on a brand-new setup. Both reset paths now delete the persisted copy too.</li>
+</ul>
+<h3>Keeper bot + notify-server</h3>
+<ul>
+<li>Both autonomous cranks got the same <strong>harvest-before-close</strong> fix, so a transfer-fee / pausable Token-2022 stock closes cleanly whether the owner's app, the standalone keeper bot, or the notify-server runs the crank. This matters most for the fully-autonomous path (owner gone, only the server or a keeper cranks).</li>
+</ul>
+<h2>[1.13.6–1.13.8] — 2026-07-04 — Rebrand + keeper crank-only + cleanup</h2>
+<h3>App</h3>
+<ul>
+<li><strong>Rebrand (1.13.6–1.13.7).</strong> New ECG-pulse brand mark everywhere: app icon, Android adaptive icon, splash, and a proper tintable-silhouette notification icon (accent fixed to the real brand mint <code>#00FFA3</code>); in-app, a react-native-svg <code>BrandMark</code> replaces the generic icon-font shields at every logo position (auth gate, Dashboard header + connect hero, Welcome hero), the all-clear status icon is now a pulse, and remaining shields became semantic icons (check-decagram / alert-octagon / open-padlock / etc.). No shield glyphs remain in the UI.</li>
+<li><strong>1.13.8.</strong> Removed the non-functional Close / Transfer / Ignore buttons from DeFi positions in the Assets screen — they were dead no-ops (only toggled unused local state).</li>
+</ul>
+<h3>Keeper bot (server-side)</h3>
+<ul>
+<li>Added a <strong><code>CLOSE_EXECUTED</code></strong> flag (default on). Set to <code>0</code> for a <strong>crank-only</strong> keeper: it still distributes expired vaults but never closes an executed vault to collect its rents, leaving those for the owner. Recommended on devnet, where the close window is only 60s and an always-on keeper would otherwise sweep an owner's own rent before they can reclaim it; mainnet keeps it on (the 24h window is a fair owner window).</li>
+</ul>
+<h3>Website</h3>
+<ul>
+<li>New pulse favicon/logo + phone-mockup mark, and a mobile-responsive layout pass.</li>
+</ul>
+<h2>[1.13.5] — 2026-07-04 — Keeper economics + permissionless cleanup</h2>
+<p>Removes the last stranded value from a fired vault and makes third-party keepers economically self-sustaining. Program redeployed to devnet + IDL upgraded.</p>
+<h3>On-chain program — new <code>close_executed_vault</code> (permissionless)</h3>
+<ul>
+<li>After execution has finalized, all TokenDists are closed, and a <strong>24-hour owner-exclusive window</strong> has elapsed (<code>EXECUTED_CLOSE_DELAY</code>, 60 s under the <code>devnet</code> feature; error <code>CloseDelayNotElapsed</code>), <strong>anyone</strong> may close the core PDAs (VaultConfig + HeartbeatRecord + ExecutionLog + AssetPlan) and claim their rents (~0.01–0.03 SOL) as a cleanup reward. Previously that rent stranded forever when the owner was dead — the owner-signed close could never run. SOL dust above rent still goes to the largest-share beneficiary; a living owner can still close (and keep the rents) any time via <code>close_executed_vault_by_owner</code>. Additive instruction — no layout change, existing vaults unaffected. 29/29 tests (blocked-in-window, rents-to-cranker, owner-priority).</li>
+</ul>
+<h3>Keeper bot — <code>keeper-bot/</code> (new, standalone)</h3>
+<ul>
+<li>A self-contained keeper anyone can run: discriminator-scans the program for expired vaults (skipping undecodable legacy accounts), runs the full permissionless crank, and collects the keeper bounty + cleanup rents. <code>RPC_URL</code> + <code>KEYPAIR_PATH</code> and go; <code>--once</code> for cron. Devnet-verified: one tick cranked 5 expired vaults and closed 4 executed ones — the keeper more than doubled its stake from bounties + rents.</li>
+</ul>
+<h3>App</h3>
+<ul>
+<li><strong>Agent funding halved: 0.01 → 0.005 SOL</strong> (~1,000 heartbeats of fees — still years of margin). Halves what is unrecoverable with a lost phone after a real death (the agent key exists only on that device) and drops activation cost to ≈ 0.028 SOL. The close/revoke flows already sweep the agent's leftover SOL back to a living owner.</li>
+</ul>
+<h2>[1.13.0–1.13.4] — 2026-07-04 — Security hardening (pre-mainnet) + fixes</h2>
+<p>A pre-mainnet security review across the on-chain program, the notify-server, and the app's agent-key storage (shipped as v1.13.0), followed by same-day fixes: v1.13.1 reverted a parser-module regression that broke vault reads on-device ("created but can't see it"); v1.13.2 re-added the account-parse hardening inline (bundle-verified); v1.13.3 reverted notification registration to the silent unsigned flow (the auto background wallet-signing popup was unreliable and its verifying server was never deployed — the signed variants remain dormant for a coordinated mainnet release) and fixed a crank bug where paying the last bequest and finalizing in the same pass compared a stale in-memory mask (vault stuck one step from done); v1.13.4 added NFT names + thumbnails to the vault views and Bequests picker, and an "Estate plan complete" push after autonomous execution. Devnet Program ID unchanged.</p>
+<h3>On-chain program (Anchor) — redeploy + IDL upgrade required</h3>
+<ul>
+<li><strong>CRITICAL — specific bequests could be misdirected.</strong> <code>execute_specific_asset</code> didn't pin <code>vault_ata</code> to the canonical associated-token address (the anti-spoof guard the other token instructions already used). A permissionless caller could pass an empty vault-owned token account, mark a specific SPL/NFT bequest paid at 0, and leak the real asset to the largest-share beneficiary as dust. Now pinned → <code>InvalidVaultAta</code>; added a regression test.</li>
+<li><strong>CRITICAL — devnet timing minimums restored for mainnet.</strong> The production heartbeat/grace minimums (1 day / 7 days) are the DEFAULT build again; the 10s/30s demo floors are behind an opt-in <code>devnet</code> Cargo feature (<code>anchor build -- --features devnet</code> for tests). A plain build/deploy is now fail-safe.</li>
+<li><strong>Keeper-bounty cap.</strong> <code>initialize_vault</code> bounds <code>keeper_bounty</code> to 0.1 SOL (<code>MAX_KEEPER_BOUNTY_LAMPORTS</code>, error <code>KeeperBountyTooLarge</code>) so it can't zero out beneficiary SOL; mirrored client-side.</li>
+<li><strong>Anti-grief on <code>begin_token_dist</code></strong> (<code>NothingToDistribute</code>): rejects a mint the vault neither holds nor bequeaths, so junk mints can't inflate <code>open_token_dists</code> and block the owner's rent reclaim.</li>
+<li><strong>Checks-effects-interactions</strong>: <code>execute_specific_asset</code> / <code>execute_token_shares</code> set the paid bit before the transfer CPI (blocks Token-2022 transfer-hook reentrancy).</li>
+<li>23/23 tests pass. Two error codes appended: <code>KeeperBountyTooLarge</code>, <code>NothingToDistribute</code>.</li>
+</ul>
+<h3>Notify-server — deployed</h3>
+<ul>
+<li><strong>Fail-closed auth.</strong> Refuses to boot without <code>REGISTER_SECRET</code> unless <code>NODE_ENV=development</code>; constant-time secret compare; <code>/debug/push</code> is dev-only.</li>
+<li><strong>Ownership-proofed registration.</strong> <code>/register</code> verifies the vault is the canonical PDA for the owner and a real on-chain <code>VaultConfig</code> (program-owner + discriminator + stored owner) before writing; <code>readVaultState</code> verifies owner/discriminator and bounds-checks parsing.</li>
+<li><strong>DoS / robustness.</strong> <code>/inheritances</code>: per-IP rate limit + short-TTL RPC cache + scan cap. Per-vault timeouts + bounded concurrency + a poll-tick watchdog so one hung vault can't wedge the daemon; process-level crash guards; per-vault crank lock; <code>/execute-now</code> returns a generic error (raw errors could leak the RPC api-key); <code>.env</code> set to mode 600.</li>
+<li><strong>Cranker dust-drain bound.</strong> The executor skips zero-balance token accounts and caps non-plan mints per vault, bounding the rent an attacker can make the cranker spend.</li>
+</ul>
+<h3>App — new APK build required</h3>
+<ul>
+<li><strong>Agent key behind biometrics.</strong> The heartbeat-signing key is stored with <code>requireAuthentication</code> (device credential / biometric) plus a safe fallback, and its secret is zeroized on destroy; <code>android.allowBackup=false</code>. Blocks extracted key material from forging heartbeats and stalling the switch. (Key RNG verified CSPRNG-backed.)</li>
+<li>Client-side keeper-bounty cap mirrors the on-chain limit.</li>
+</ul>
+<h2>[1.12.2] — 2026-07-03</h2>
+<h3>Changed</h3>
+<ul>
+<li><strong>Default RPC shown as "Default DMV RPC API"</strong> in Settings → Network (built-in endpoint no longer exposed; a user's own custom URL is still shown).</li>
+</ul>
+<h3>Added</h3>
+<ul>
+<li><strong>Rate-limit banner.</strong> <code>useRpcStatusStore</code> is written from the fetch layer on any HTTP 429 / JSON-RPC 429; a banner on Dashboard + Assets surfaces "Network busy — data may be delayed" and links to Settings. Auto-hides ~12s after traffic settles.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Dashboard "View All" tab targeting.</strong> NFTs/DeFi "View All" navigated to Assets without a tab param (wrong/last tab); they now pass the target tab via the nested AssetsOverview route and AssetsScreen honors <code>route.params.tab</code>.</li>
+</ul>
+<h2>[1.12.1] — 2026-07-03</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>NFT metadata decoded as byte codes on-device.</strong> The Metaplex parser used <code>subarray().toString('utf8')</code>; in RN's buffer polyfill <code>subarray()</code> returns a plain Uint8Array whose <code>toString</code> ignores the encoding, so names rendered as "68,77,86…" (byte codes) and the uri/image broke too. Fixed to <code>Buffer.toString('utf8', start, end)</code>.</li>
+</ul>
+<h2>[1.12.0] — 2026-07-03</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>Custom RPC endpoint (Settings → Network).</strong> Set your own RPC/DAS URL (Helius, Triton, QuickNode, Aura…) so NFT/portfolio data uses your own rate limits. Test / Save / Reset, masked display, DAS-support probe; loaded at bootstrap, "restart to apply". Default behavior unchanged if unset. New <code>src/utils/rpcConfig.ts</code> is the single source of truth for the RPC URL + Helius endpoints/key; all consumers migrated off <code>constants.ts</code>.</li>
+<li><strong>On-chain Metaplex-metadata fallback.</strong> NFT names + images resolve directly from the on-chain Metadata account (batched read + manual borsh parse, no dependency) with the image from the metadata uri, cached in SQLite — so NFTs show name + artwork even when the DAS index is rate-limited, over any RPC. Standard NFTs only (cNFTs remain DAS-only).</li>
+</ul>
+<h2>[1.11.3] — 2026-07-03</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>NFT names/images load; Helius features re-enabled.</strong> <code>EXPO_PUBLIC_HELIUS_API_KEY</code> was empty in the release bundle (verified: the key appeared only once, inside <code>RPC_URL</code>), so <code>PortfolioScanner</code> skipped the DAS metadata path entirely — NFTs showed mint addresses, no images, and Helius tx-history + priority fees were silently off. The key is now derived from the api-key in the Helius <code>RPC_URL</code> when the standalone var is empty. DAS runs → NFT names + artwork, tx history, and priority fees all work.</li>
+</ul>
+<h2>[1.11.2] — 2026-07-03</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>NFTs categorized even when the portfolio scan falls back from DAS.</strong> The Helius DAS path tags NFTs, but the <code>getParsedTokenAccountsByOwner</code> fallback (used on DAS error/ rate-limit) did not, so NFTs landed in the Tokens list with the NFTs tab empty. The fallback now tags NFTs by signature (0 decimals, 1 unit) — the same heuristic the bequest picker uses. Names/images still come from DAS when available.</li>
+</ul>
+<h2>[1.11.1] — 2026-07-03</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>NFTs as a portfolio category.</strong> The Assets tab has a dedicated <strong>NFTs</strong> tab (Tokens · NFTs · DeFi), and the Dashboard portfolio card shows an inline NFTs section.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Removed inaccurate messaging.</strong> Corrected escalation copy that falsely claimed "emergency contacts notified" / "beneficiaries have been notified" (DMV notifies the <em>owner</em>, not third parties — there are no emergency contacts), a misleading "&lt; 24 hours" timing label, and a stale "Execution: Agent Key (TEE)" detail → "Permissionless" (v2 execution is permissionless; the agent signs heartbeats only).</li>
+</ul>
+<h2>[1.11.0] — 2026-07-03</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>NFT support, end to end.</strong> NFTs (Metaplex <code>V1_NFT</code>/<code>ProgrammableNFT</code>) now appear in the Assets tab with an NFT tag, can be <strong>deposited</strong> into a vault (quantity fixed at 1), and assigned to a beneficiary as a <strong>specific bequest</strong> — then carved out and distributed on execution via <code>execute_specific_asset</code>. Previously the wallet scanner skipped NFTs, so they couldn't be funded into a vault at all. Portfolio scanner includes NFTs from DAS (<code>amount: 1, decimals: 0, isNft: true</code>); DepositModal deposits exactly 1.</li>
+</ul>
+<h2>[1.10.6] — 2026-07-03</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>MAX button on bequests.</strong> Next to the Amount field, a MAX button fills the vault's full held amount of the selected asset — bequeath an entire (fractional) token balance in one tap. Disabled when the vault holds none.</li>
+</ul>
+<h2>[1.10.5] — 2026-07-03</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Bequests use the vault's assets, not the wallet.</strong> The Bequests screen listed the owner's wallet portfolio, so a bequest could name an asset the vault doesn't hold — which distributes nothing and could stall execution. It now lists only the vault's holdings (distributable SOL + <code>getVaultTokenBalances</code>); wallet balances are used only for symbols.</li>
+<li><strong>A stalled distribution can't brick the vault.</strong> All three cranks (app, notify-server, heir claim) now create the vault's token ATA idempotently before <code>begin_token_dist</code>, so a bequest for an unheld mint snapshots/pays 0 and finalizes instead of throwing <code>AccountNotInitialized</code> and freezing the owner out post-grace.</li>
+</ul>
+<h2>[1.10.4] — 2026-07-02</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Accurate vault-activation cost estimate (~0.033 SOL).</strong> The review screen padded rent to ~0.015 and showed ~0.04 total; actual rent is ~0.008, so the real cost is ~0.033 (rent + 0.01 fee + 0.01 agent + 0.005 keeper) — which is what the wallet correctly charges. Corrected the breakdown, total, and preflight. No transaction change.</li>
+</ul>
+<h2>[1.10.3] — 2026-07-03</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Bequests stay visible after setup.</strong> The Bequests screen went blank after saving and on return, though the bequests were saved on-chain. The previous load ran once on mount, but React Navigation keeps the screen mounted, so it never re-loaded; <code>onSave</code> also cleared the list. It now reloads the on-chain plan on every focus (without clobbering unsaved edits) and after saving. The Vault overview's bequests row shows "Configured" when a plan exists.</li>
+</ul>
+<h2>[1.10.2] — 2026-07-02</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Transaction links restored in execution history.</strong> The execution detail again shows each distribution transaction as a clickable Solana Explorer link. The history parser still looked for v1 instruction names and grouped sessions on the removed <code>record_execution</code> instruction, so it found nothing for v2 executions; it now identifies instructions on-chain by Anchor discriminator and groups one session per <code>begin_execution</code>. Verified against a real devnet execution.</li>
+</ul>
+<h2>[1.10.1] — 2026-07-02</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Bequests screen shows saved bequests.</strong> It opened with an empty list and never loaded the on-chain <code>AssetPlan</code>, so already-configured bequests looked absent (they were saved and distributed correctly). It now loads the plan on open and displays your existing bequests, editable.</li>
+</ul>
+<h2>[1.10.0] — 2026-07-02</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>On-chain keeper reward.</strong> Each vault reserves a small bounty (0.005 SOL) that the program pays to whoever submits the final distribution transaction, making permissionless cranking profitable — so the estate can be distributed by anyone (a beneficiary, a keeper bot, or the watcher) who's rewarded for it, without depending on any single server. Stored in <code>VaultConfig</code> (reused padding — non-breaking), set at creation (opt out with 0), carved out of the SOL snapshot at <code>begin_execution</code> so it <strong>never reduces beneficiary payouts</strong>, and paid to the <code>finalize_execution</code> cranker. Program now 39 error codes; 23/23 tests; verified e2e on devnet.</li>
+</ul>
+<h2>[1.9.0] — 2026-07-02</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>Beneficiary claim.</strong> A new <strong>Inheritances</strong> screen lists vaults where the connected wallet is a beneficiary (auto-discovered via the notify-server, or imported by owner address), with each vault's status and your share. Once grace has elapsed, <strong>"Distribute Estate"</strong> lets the heir trigger the whole distribution from their own wallet — the same permissionless on-chain crank the app/watcher run, MWA-signed with the heir paying only network fees (they control nothing about destinations). Pure-SOL estates distribute in a single transaction; mixed estates run across passes, idempotent and resumable. First step toward a switch that needs no watcher server. (Server: read-only <code>GET /inheritances</code> discovery endpoint; no program change.)</li>
+</ul>
+<h2>[1.8.0] — 2026-07-02</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>Specific-SOL bequests.</strong> Assign an exact amount of SOL to a specific beneficiary (alongside specific SPL-token and NFT bequests). The amount is carved out of the estate first; the remaining SOL still splits pro-rata by share. A SOL assignment reuses the existing bequest structure via a zero-pubkey sentinel mint (no on-chain layout change), and is paid by a dedicated <code>execute_specific_sol</code> instruction — enforced on-chain and distributed autonomously by the permissionless crank. On-chain program: 19 instructions / 39 error codes; 22/22 tests; verified e2e on devnet.</li>
+</ul>
+<h2>[1.7.4] — 2026-07-02</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Stale "Configure Heartbeat" tick on the Vault screen</strong> after a vault executed. When the notify-server distributed a vault autonomously, the app had no local execution record and fell back to the partial setup wizard, where the heartbeat config (synced from the on-chain vault) showed a tick that reappeared on every reopen. An on-chain executed vault is now recognized as a past execution and shows the "Vault Executed" summary instead.</li>
+</ul>
+<h2>[1.7.3] — 2026-07-02</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Duplicate escalation notifications — root cause resolved.</strong> The on-device local notification timeline double-fired alongside the notify-server. FCM delivery is confirmed reliable (including killed-app), so the local timeline was removed and the server is now the single source — exactly one notification per stage.</li>
+<li><strong>Skipped stages</strong> — the server poll interval (60s) was coarser than short demo stages (30s) and could skip one; tightened to 15s so every stage is delivered.</li>
+<li><strong>Executed-vault status</strong> — Settings now shows "Executed" (not "Active") after execution.</li>
+<li><strong>Setup cost</strong> — "Total Est. Cost" corrected to 0.035 SOL (0.015 rent + 0.01 agent + 0.01 creation fee).</li>
+</ul>
+<h2>[1.7.2] — 2026-07-02</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>0.01 SOL vault-creation fee, enforced on-chain.</strong> <code>initialize_vault</code> collects a 0.01 SOL fee to the project wallet as part of creation — required and not bypassable (a <code>fee_recipient</code> account pinned by address + a CPI transfer).</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Executed vaults no longer appear active.</strong> Settings now shows a "Close Vault &amp; Reclaim Rent" action for executed vaults (which closes the account on-chain and returns rent) instead of a Revoke that didn't persist across reopen.</li>
+<li><strong>Duplicate escalation notifications</strong> eliminated — the Stage-4 app/server overlap is closed (the app defers to the server's push when FCM is active).</li>
+<li><strong>Notification copy</strong> rewritten and corrected across app + server (Stage 4 now reflects that distribution happens automatically).</li>
+</ul>
+<p>&gt; Because the fee is enforced on-chain, builds older than 1.7.2 can no longer create &gt; vaults; 1.7.2 is required for vault creation.</p>
+<h2>[1.7.1] — 2026-07-01</h2>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Duplicate escalation notifications.</strong> The local pre-scheduled OS timeline and the FCM notify-server were both delivering stage 1–3 alerts, so a registered vault received two notifications per stage event. They are now mutually exclusive (FCM primary, local fallback): when the app confirms the server is watching a vault, the server is the sole source and the local timeline is cancelled; otherwise the local timeline remains as the offline fallback — no duplicates, no loss of killed-app coverage.</li>
+</ul>
+<h3>Website</h3>
+<ul>
+<li>New <code>dmv.palatinearc.com</code> homepage (permissionless design), now served from the VPS via Caddy and moved off GitHub Pages (source at <code>website/</code>).</li>
+<li>Fact-checked all copy against the shipped v2 build; corrected the download callout to the latest release and refined the Stage 2 escalation copy.</li>
+<li>Added the DMV logo to the header nav and a favicon.</li>
+<li>Dropped the bundle's debug error overlay so visitors never see a red error box (a benign error surfaced by Cloudflare's injected bot-detection script).</li>
+</ul>
+<h2>[1.7.0] — 2026-07-01</h2>
+<p>Permissionless autonomous execution + specific bequests. The dead-man's switch now fires even if the owner's phone is lost, dead, or never reopened.</p>
+<h3>Added</h3>
+<ul>
+<li><strong>Permissionless execution.</strong> After grace, the on-chain program computes every payout from on-chain state and <em>any</em> signer (the app, a beneficiary, or a keyless watcher) can submit it. The caller controls nothing — funds can only reach the pre-set beneficiaries, in the pre-set proportions, after the deadline.</li>
+<li><strong>Keyless watcher service</strong> (<code>notify-server</code>) that autonomously distributes after grace with no app or owner action required.</li>
+<li><strong>Specific bequests</strong> — assign exact SPL token amounts or whole NFTs to specific beneficiaries (carved out first); the remainder splits pro-rata by share.</li>
+<li><strong>Token-2022</strong> support for distribution (via <code>InterfaceAccount</code>).</li>
+<li>New on-chain accounts <code>AssetPlan</code> and <code>TokenDist</code>; frozen residual snapshots + per-asset idempotency bitmasks so a partial distribution is safely resumed by anyone.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li>The agent key now signs <strong>heartbeats only</strong> (was: execution); agent funding reduced 0.05 → 0.01 SOL.</li>
+<li>Owner mutations and heartbeats <strong>freeze once the grace deadline is reached</strong>, guaranteeing the trustless switch.</li>
+<li>Runs on <strong>any modern Android phone</strong> via Mobile Wallet Adapter — Seeker recommended (Seed Vault) but no longer required.</li>
+<li>On-chain program is now 18 instructions / 5 accounts / 37 error codes; 20/20 tests.</li>
+</ul>
+<h3>Security</h3>
+<ul>
+<li>Fixed a <strong>critical</strong> fund-misdirection bug found in review before deploy: a caller-supplied token program could spoof a mint's residual snapshot to zero and redirect the whole token residual. The canonical vault ATA is now derived from the mint's true owner program. Added an orphan-guard (<code>open_token_dists</code>) on the owner close and canonical-ATA pinning throughout the token paths.</li>
+</ul>
+<p>&gt; <strong>Breaking (devnet):</strong> the v2 on-chain byte layout changed; vaults created under the &gt; old program won't deserialize — revoke/recreate. Devnet only.</p>
+<h2>[1.6.x] — 2026-06-29</h2>
+<p>Pre-v2 line (Solana Mobile Hackathon build). Notable changes across 1.6.3 / 1.6.4:</p>
+<h3>Added</h3>
+<ul>
+<li><strong>FCM push notifications</strong> for killed-app escalation alerts (chain-watching notify server).</li>
+<li><strong>Pre-scheduled OS notification timeline</strong> so escalation notifications fire on time even when the app is killed.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Agent-SOL refund accounting on execution and a full transaction/total breakdown on revoke (incl. an "Agent SOL already returned earlier" line so the refund is never silently omitted).</li>
+<li>SPL vault-ATA close on revoke so token-account rent isn't stranded.</li>
+</ul>
+<p>---</p>
+<p>_Versions before 1.6.3 predate this changelog._</p>
+    <a class="back" href="/">← Back to dmv.palatinearc.com</a>
+  </div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Keep the tracked changelog snapshot honest: if CHANGELOG.md is part of this commit,
+# regenerate website/changelog.html and stage it, so it never lags CHANGELOG.md.
+# Install once per clone:  ln -sf ../../website/hooks/pre-commit .git/hooks/pre-commit
+if git diff --cached --name-only | grep -qx 'CHANGELOG.md'; then
+  root="$(git rev-parse --show-toplevel)"
+  if ! command -v node >/dev/null 2>&1; then
+    export PATH="$(echo "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | tr ' ' ':'):$PATH"
+  fi
+  if command -v node >/dev/null 2>&1; then
+    node "$root/website/gen-changelog.mjs" >/dev/null && git add "$root/website/changelog.html"
+    echo "[pre-commit] regenerated + staged website/changelog.html from CHANGELOG.md"
+  else
+    echo "[pre-commit] node not found — changelog.html NOT regenerated" >&2
+  fi
+fi
