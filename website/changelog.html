@@ -45,6 +45,10 @@
     <p class="sub">Dead Man's Vault — autonomous crypto inheritance on Solana (Devnet). &nbsp;·&nbsp;
       <a href="/">Home</a> &nbsp;·&nbsp; <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases</a></p>
 <p>All notable changes to Dead Man's Vault are documented here. The format follows <a href="https://keepachangelog.com/" target="_blank" rel="noopener">Keep a Changelog</a>, and releases (with APKs) are on the <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases page</a>; this log is also rendered at <a href="https://dmv.palatinearc.com/changelog.html" target="_blank" rel="noopener">dmv.palatinearc.com/changelog</a>. Network: Solana Devnet. Program ID <code>GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb</code>.</p>
+<h2>[1.13.18] — 2026-07-08 — Bequests: clear asset &amp; beneficiary pickers</h2>
+<ul>
+<li><strong>App (v1.13.18 / versionCode 104).</strong> The Bequests asset selector and the "To" (beneficiary) selector were invisible tap-to-cycle pills with no affordance that they were tappable or that other options existed. Both are now <strong>dropdown pickers</strong>: each pill carries a chevron and opens a scrollable modal list (styled like Deposit) — assets show a thumbnail, symbol, an <code>NFT</code> badge, the vault's balance, and an issuer-risk flag; beneficiaries show their share %. Selection-only UI change; no change to asset loading, saving, or on-chain behavior.</li>
+</ul>
 <h2>[1.13.17] — 2026-07-08 — Bequests: all vault assets appear again</h2>
 <p>Fixes the Bequests picker showing <strong>only SOL</strong> when the vault also held tokens/NFTs.</p>
 <ul>

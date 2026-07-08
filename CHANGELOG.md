@@ -6,6 +6,16 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 at [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.13.18] — 2026-07-08 — Bequests: clear asset & beneficiary pickers
+
+- **App (v1.13.18 / versionCode 104).** The Bequests asset selector and the "To"
+  (beneficiary) selector were invisible tap-to-cycle pills with no affordance that they
+  were tappable or that other options existed. Both are now **dropdown pickers**: each pill
+  carries a chevron and opens a scrollable modal list (styled like Deposit) — assets show a
+  thumbnail, symbol, an `NFT` badge, the vault's balance, and an issuer-risk flag;
+  beneficiaries show their share %. Selection-only UI change; no change to asset loading,
+  saving, or on-chain behavior.
+
 ## [1.13.17] — 2026-07-08 — Bequests: all vault assets appear again
 
 Fixes the Bequests picker showing **only SOL** when the vault also held tokens/NFTs.
