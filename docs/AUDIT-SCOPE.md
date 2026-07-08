@@ -30,7 +30,7 @@ Assumption to state explicitly and have the auditor weigh: **availability of the
 | Program source | **31 `.rs` files, ~2,700 LOC**, `programs/dead-mans-vault/src/` |
 | Instructions | **20** (11 owner/setup + 9 permissionless execution) |
 | State PDAs | **5**: `VaultConfig`, `HeartbeatRecord`, `ExecutionLog`, `AssetPlan`, `TokenDist` |
-| Error codes | **42** (`errors.rs`) |
+| Error codes | **45** (`errors.rs`) |
 | Tests | **29** integration tests (~1,450 LOC, ts-mocha), pass **locally** via `yarn test:devnet`. **CI runs only** the host-only prod-floor guard (`cargo test --lib`, asserts the timing minimums per build profile) — the full suite is **not** CI-gated. |
 | Fuzzing | **9-property litesvm + fast-check suite** (`dead-mans-vault/tests/fuzz/`, `yarn test:fuzz`) covering the §6 invariants — conservation, idempotency, specific-bequest carve-out, a theft-must-revert battery (exact error codes), post-deadline freeze, Token-2022 transfer-fee close, NFT bequests + residual dust-at-scale, and a **stateful instruction-sequence fuzzer** (random orderings vs 7 global invariants). Runs against the **real production floors** via clock-warp. Found no program bug. See `FUZZ-HARNESS-PLAN.md`. |
 | Crank stress | Local-validator + fault-injecting-RPC-proxy harness (`keeper-bot/stress/`) exercising the crank under 429s/timeouts/concurrent races — RPC failure & racing are correctness-safe. See `STRESS-TESTING-PLAN.md`. |
@@ -124,7 +124,7 @@ Per-vault, owners can also opt into **immutability** (`VaultConfig.is_mutable`),
 ---
 
 ## 8. Docs vs. code — the code is the source of truth
-`tasks/BUILD-SPEC-permissionless-execution.md` was reconciled to the as-built code on 2026-07-05 (included in the pinned tag) — its **§0.5 "As-built deltas"** authoritatively lists what shipped (specific-SOL via `execute_specific_sol`, the permissionless 24h-gated `close_executed_vault`, the keeper bounty, the 0.01 SOL creation fee, `open_token_dists`, the `devnet` feature, the 42 errors). Even so, **treat the on-chain code at the pinned commit as the source of truth** — the spec is prose context, not a substitute. `CLAUDE.md` is a current, accurate model overview and is in the repo.
+`tasks/BUILD-SPEC-permissionless-execution.md` was reconciled to the as-built code on 2026-07-05 (included in the pinned tag) — its **§0.5 "As-built deltas"** authoritatively lists what shipped (specific-SOL via `execute_specific_sol`, the permissionless 24h-gated `close_executed_vault`, the keeper bounty, the 0.01 SOL creation fee, `open_token_dists`, the `devnet` feature, the 45 errors). Even so, **treat the on-chain code at the pinned commit as the source of truth** — the spec is prose context, not a substitute. `CLAUDE.md` is a current, accurate model overview and is in the repo.
 
 ---
 
@@ -144,7 +144,7 @@ We can share the internal review notes + the ATA-spoof fix commit as an appendix
 
 | Item | Value |
 |---|---|
-| **Pinned commit** | Tag **`audit-2026-07-07`** (branch `devnet`; supersedes `-05c`) — folds in the **Tier-2 program hardening** from the internal skill-driven audit: **C1** MAX heartbeat-interval/grace bounds (fixes a `deadline()` overflow self-brick; errors 6042/6043), **C2a** the new owner-only pre-grace `clear_asset_plan` instruction, **G2** explicit canonical seeds on `record_heartbeat`'s `vault_config`. 44 errors now. Scope is frozen at that commit. The only remaining pre-mainnet program change will be the `FEE_WALLET` **constant value** (non-logic, not security-relevant). |
+| **Pinned commit** | Tag **`audit-2026-07-08`** (branch `devnet`; supersedes `-07-07`) — adds the **NEW-1** input-validation fix from the 2026-07-08 five-lens re-audit: `set_asset_plan`/`update_asset_plan` now reject a bequest whose mint is not a real token mint account (each distinct non-sentinel mint passed in `remaining_accounts`, validated via owner-check + Mint unpack), erroring **`InvalidPlanMint` (6044)** — closing a set-time footgun where a garbage mint could permanently block `finalize`. **45 errors now.** (`audit-2026-07-07` folded the Tier-2 hardening: **C1** MAX interval/grace bounds → 6042/6043, **C2a** `clear_asset_plan`, **G2** canonical `record_heartbeat` seeds.) Scope is frozen at this commit. Remaining planned program change: the **A1** execution-time escape-hatch (the *valid-then-closed / stuck-mint* availability class NEW-1's set-time guard cannot reach — see §5) plus the `FEE_WALLET` **constant value** (non-logic). |
 | **In-scope files** | the 32 `.rs` under `programs/dead-mans-vault/src/` (primary) + the crank's completability question (§3). |
 | **Out of scope** | `tasks/*.md`, TEE/agent-key device custody, mobile UX, RPC/notify infra, economics. |
 | **Build/test** | `anchor build` (prod floors) — **mainnet must NOT set the `devnet` Cargo feature** (it lowers timing floors for tests only; CI asserts this). Tests: `yarn`/`ts-mocha` via `yarn test:devnet`. Caveat: local validator gossip port collides with another service — spec §11 has the standalone-validator recipe. |
