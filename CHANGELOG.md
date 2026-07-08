@@ -5,18 +5,63 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 [Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
-## [Unreleased] — Testing, security docs & ops
+## [1.13.14–1.13.15] — 2026-07-07 — Security audit remediation + Clear bequests
 
-No app or on-chain program change — these are test, documentation, and ops additions,
-so there is no new release/APK. App remains **v1.13.13**; the program is unchanged.
+An internal, skill-driven security audit (OWASP-Solana, Token-2022, Anchor, client, and
+testing checklists) found the **fund-safety path clean** — every theft, over-distribution,
+misroute, and auth-bypass class mitigated with evidence — with all findings in the
+availability / operational category. Remediation shipped across the app (v1.13.14 →
+v1.13.15), the on-chain program (redeployed to devnet), and the two crankers, alongside a
+new **Clear bequests** feature. Every fix got a blast-radius impact analysis first; the one
+finding that would have turned an availability bug into fund *misdirection* was routed to
+external audit rather than built.
 
-### Testing
+### App
+- **Clear all bequests (1.13.15).** When a plan exists, the Bequests screen now shows a
+  **Clear all bequests** action: one owner-signed transaction removes every specific
+  bequest, which unlocks editing your beneficiaries (blocked while a plan exists). Assets
+  stay in the vault and split pro-rata by share until you set new bequests.
+- **Deposit & bequest warnings (1.13.14).** The app now warns — never blocks — when a
+  Token-2022 mint's issuer could freeze / pause / seize (permanent delegate) / hook it,
+  both when depositing and when naming it in a specific bequest, so you see the risk before
+  committing an asset the issuer could later make un-distributable.
+- **Withdraw precision (1.13.14).** The owner withdraw-all path now uses an exact bigint
+  balance (a large token balance could lose precision as a JS number).
+- **Removed dead code (1.13.14).** Deleted an un-wired DeFi autonomous-swap path that was
+  never reachable from execution.
+
+### On-chain program (Anchor 0.32.1; redeployed to devnet)
+- **`clear_asset_plan` instruction.** Owner-only, pre-grace: closes the AssetPlan (rent →
+  owner) and clears `has_asset_plan` — the escape hatch behind the Clear bequests feature.
+  Freeze-gated like every other plan mutation; verified end-to-end on the deployed program.
+- **Interval / grace upper bounds.** Caps of 1 year / 2 years reject a value that would
+  overflow the deadline computation and brick a vault (new errors 6042 / 6043).
+- **`record_heartbeat` canonical PDA seeds** — defense-in-depth pinning, matching the other
+  instructions.
+
+### Crankers (keeper-bot + notify-server)
+- **Priority fee + compute-unit limits.** Both crankers now set a best-effort priority fee
+  and explicit per-instruction CU limits so autonomous distribution lands under mainnet
+  congestion. The fee lookup can never throw, so third-party keepers on any RPC are
+  unaffected.
+- **Skip stuck mints.** A mint the issuer paused / froze / hooked / made non-transferable
+  is skipped for the tick instead of aborting the whole crank — every other asset still
+  reaches the heirs; only that mint's residual + rent strand.
+- **Mint-lookup retry** (a transient RPC error no longer drops a bequeathed mint) and an
+  **executor finalize-gate re-fetch guard** (re-reads the on-chain masks before finalizing,
+  so a stale in-memory mask can't skip finalize one step from done).
+
+### Testing & CI
 - **Property-fuzz suite** (`dead-mans-vault/tests/fuzz/`, `yarn test:fuzz`) — litesvm +
   fast-check, 9 properties over conservation, idempotency, specific bequests, a
   theft-must-revert battery (exact error codes), the post-deadline freeze, Token-2022
   transfer-fee close, NFT bequests, residual dust-at-scale (n≤20), and a **stateful
   instruction-sequence fuzzer** (random orderings vs 7 global invariants). Runs against
-  the real production floors via clock-warp. **Found no program bug.**
+  the real production floors via clock-warp. **Found no program bug**, and now runs in
+  **CI on every push**.
+- **New coverage:** `close_revoked_vault` (guard + a crafted-zombie close), a compute-unit
+  budget measurement at 20 beneficiaries (batch-of-8 stays well under limits), client
+  crank index/batch math units, and an executor finalize-gate regression.
 - **Crank RPC-failure / race stress** (`keeper-bot/stress/`) — a local validator +
   fault-injecting RPC proxy drives the real keeper crank under 429s / timeouts /
   concurrent races; confirms RPC failure and racing are correctness-safe (delayed retry
@@ -24,9 +69,9 @@ so there is no new release/APK. App remains **v1.13.13**; the program is unchang
 
 ### Docs & ops
 - Public reviewer docs reorganized into repo-root `docs/` — added `SECURITY.md` (vuln
-  reporting + bug bounty), `STRESS-TESTING-PLAN.md`, `FUZZ-HARNESS-PLAN.md`, plus the
-  audit scope and design spec. The old hackathon `pitch-deck/` and `docs/`(pptx) folders
-  were removed.
+  reporting + bug bounty), `STRESS-TESTING-PLAN.md`, `FUZZ-HARNESS-PLAN.md`, plus
+  `AUDIT-SCOPE.md` (pinned to tag `audit-2026-07-07`) and the design spec. The old
+  hackathon `pitch-deck/` and `docs/`(pptx) folders were removed.
 - Cranker balance monitor (`keeper-bot/balance-monitor.mjs`) with a systemd timer and
   Discord low-balance alerting.
 
