@@ -6,18 +6,39 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 at [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
-## [Unreleased] — Tooling & CI
+## [1.13.16] — 2026-07-08 — Plan-mint validation (NEW-1) + keeper anti-orphan (NEW-2)
 
-No app or on-chain program change (no new release/APK); app remains **v1.13.15**.
+An independent five-lens re-audit of the frozen audit code re-confirmed the fund-safety path
+is clean and surfaced two new **availability** findings, both now fixed.
 
-- **CI**: fixed the notify-server job — it now runs on **node 24** (matching the runtime).
-  A node-20 ESM/CJS interop failure surfaced once the new executor regression test
-  imported `@coral-xyz/anchor` (a CommonJS module); the unused `BN` import was also dropped.
-- **Website**: the changelog is now published at
-  [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html), rendered
-  from this file, and the marketing site has a **repo → live deploy pipeline** — repo
-  `website/` is the source of truth, with git hooks that keep the tracked `changelog.html`
-  snapshot fresh and auto-deploy `/var/www/dmv` on commit.
+### On-chain program (redeployed to devnet)
+- **NEW-1 — reject invalid bequest mints at plan-set.** `set_asset_plan` / `update_asset_plan`
+  now validate that every bequeathed mint is a real token-program-owned mint account (passed as
+  remaining accounts). Previously a garbage or invalid mint could be stored in a plan and then
+  permanently block `finalize` — its payout bit could never be set — with no post-deadline
+  recovery. New error **`InvalidPlanMint` (6044)**. Scope: this is a *set-time* guard; a mint
+  valid at set-time but closed later remains an execution-time concern.
+
+### App (v1.13.16 / versionCode 102)
+- Both plan builders pass each distinct bequest mint for on-chain validation; the Bequests
+  screen cap is now **transaction-size aware** (an all-NFT plan caps a little lower, since each
+  mint rides in the transaction's account list).
+- **Requires the upgraded program for SPL/NFT bequests** — older builds that don't pass the mint
+  accounts are rejected after the redeploy (SOL-only bequests are unaffected). Installs over
+  v1.13.15 in place.
+
+### Keeper
+- **NEW-2 — anti-orphan close gate.** The keeper now refuses to close an executed vault's core
+  accounts while it still holds any undistributed token balance, so a vault holding more token
+  mints than the per-tick cap can't have the extras orphaned by the permissionless close.
+
+### Tooling & CI
+- **CI**: the notify-server job now runs on **node 24** (matching the runtime); fixes a node-20
+  ESM/CJS interop failure once the executor regression test imported `@coral-xyz/anchor`.
+- **Website**: the changelog is published at
+  [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html), rendered from
+  this file, with a **repo → live deploy pipeline** (git hooks keep the tracked `changelog.html`
+  snapshot fresh and auto-deploy `/var/www/dmv` on commit).
 
 ## [1.13.14–1.13.15] — 2026-07-07 — Security audit remediation + Clear bequests
 

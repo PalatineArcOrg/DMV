@@ -45,11 +45,25 @@
     <p class="sub">Dead Man's Vault — autonomous crypto inheritance on Solana (Devnet). &nbsp;·&nbsp;
       <a href="/">Home</a> &nbsp;·&nbsp; <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases</a></p>
 <p>All notable changes to Dead Man's Vault are documented here. The format follows <a href="https://keepachangelog.com/" target="_blank" rel="noopener">Keep a Changelog</a>, and releases (with APKs) are on the <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases page</a>; this log is also rendered at <a href="https://dmv.palatinearc.com/changelog.html" target="_blank" rel="noopener">dmv.palatinearc.com/changelog</a>. Network: Solana Devnet. Program ID <code>GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb</code>.</p>
-<h2>[Unreleased] — Tooling &amp; CI</h2>
-<p>No app or on-chain program change (no new release/APK); app remains <strong>v1.13.15</strong>.</p>
+<h2>[1.13.16] — 2026-07-08 — Plan-mint validation (NEW-1) + keeper anti-orphan (NEW-2)</h2>
+<p>An independent five-lens re-audit of the frozen audit code re-confirmed the fund-safety path is clean and surfaced two new <strong>availability</strong> findings, both now fixed.</p>
+<h3>On-chain program (redeployed to devnet)</h3>
 <ul>
-<li><strong>CI</strong>: fixed the notify-server job — it now runs on <strong>node 24</strong> (matching the runtime). A node-20 ESM/CJS interop failure surfaced once the new executor regression test imported <code>@coral-xyz/anchor</code> (a CommonJS module); the unused <code>BN</code> import was also dropped.</li>
-<li><strong>Website</strong>: the changelog is now published at <a href="https://dmv.palatinearc.com/changelog.html" target="_blank" rel="noopener">dmv.palatinearc.com/changelog</a>, rendered from this file, and the marketing site has a <strong>repo → live deploy pipeline</strong> — repo <code>website/</code> is the source of truth, with git hooks that keep the tracked <code>changelog.html</code> snapshot fresh and auto-deploy <code>/var/www/dmv</code> on commit.</li>
+<li><strong>NEW-1 — reject invalid bequest mints at plan-set.</strong> <code>set_asset_plan</code> / <code>update_asset_plan</code> now validate that every bequeathed mint is a real token-program-owned mint account (passed as remaining accounts). Previously a garbage or invalid mint could be stored in a plan and then permanently block <code>finalize</code> — its payout bit could never be set — with no post-deadline recovery. New error <strong><code>InvalidPlanMint</code> (6044)</strong>. Scope: this is a <em>set-time</em> guard; a mint valid at set-time but closed later remains an execution-time concern.</li>
+</ul>
+<h3>App (v1.13.16 / versionCode 102)</h3>
+<ul>
+<li>Both plan builders pass each distinct bequest mint for on-chain validation; the Bequests screen cap is now <strong>transaction-size aware</strong> (an all-NFT plan caps a little lower, since each mint rides in the transaction's account list).</li>
+<li><strong>Requires the upgraded program for SPL/NFT bequests</strong> — older builds that don't pass the mint accounts are rejected after the redeploy (SOL-only bequests are unaffected). Installs over v1.13.15 in place.</li>
+</ul>
+<h3>Keeper</h3>
+<ul>
+<li><strong>NEW-2 — anti-orphan close gate.</strong> The keeper now refuses to close an executed vault's core accounts while it still holds any undistributed token balance, so a vault holding more token mints than the per-tick cap can't have the extras orphaned by the permissionless close.</li>
+</ul>
+<h3>Tooling &amp; CI</h3>
+<ul>
+<li><strong>CI</strong>: the notify-server job now runs on <strong>node 24</strong> (matching the runtime); fixes a node-20 ESM/CJS interop failure once the executor regression test imported <code>@coral-xyz/anchor</code>.</li>
+<li><strong>Website</strong>: the changelog is published at <a href="https://dmv.palatinearc.com/changelog.html" target="_blank" rel="noopener">dmv.palatinearc.com/changelog</a>, rendered from this file, with a <strong>repo → live deploy pipeline</strong> (git hooks keep the tracked <code>changelog.html</code> snapshot fresh and auto-deploy <code>/var/www/dmv</code> on commit).</li>
 </ul>
 <h2>[1.13.14–1.13.15] — 2026-07-07 — Security audit remediation + Clear bequests</h2>
 <p>An internal, skill-driven security audit (OWASP-Solana, Token-2022, Anchor, client, and testing checklists) found the <strong>fund-safety path clean</strong> — every theft, over-distribution, misroute, and auth-bypass class mitigated with evidence — with all findings in the availability / operational category. Remediation shipped across the app (v1.13.14 → v1.13.15), the on-chain program (redeployed to devnet), and the two crankers, alongside a new <strong>Clear bequests</strong> feature. Every fix got a blast-radius impact analysis first; the one finding that would have turned an availability bug into fund <em>misdirection</em> was routed to external audit rather than built.</p>
