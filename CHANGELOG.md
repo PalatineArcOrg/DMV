@@ -6,6 +6,19 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 at [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [Unreleased] — Tooling & CI
+
+No app or on-chain program change (no new release/APK); app remains **v1.13.15**.
+
+- **CI**: fixed the notify-server job — it now runs on **node 24** (matching the runtime).
+  A node-20 ESM/CJS interop failure surfaced once the new executor regression test
+  imported `@coral-xyz/anchor` (a CommonJS module); the unused `BN` import was also dropped.
+- **Website**: the changelog is now published at
+  [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html), rendered
+  from this file, and the marketing site has a **repo → live deploy pipeline** — repo
+  `website/` is the source of truth, with git hooks that keep the tracked `changelog.html`
+  snapshot fresh and auto-deploy `/var/www/dmv` on commit.
+
 ## [1.13.14–1.13.15] — 2026-07-07 — Security audit remediation + Clear bequests
 
 An internal, skill-driven security audit (OWASP-Solana, Token-2022, Anchor, client, and
