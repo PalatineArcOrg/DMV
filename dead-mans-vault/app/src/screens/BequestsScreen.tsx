@@ -64,6 +64,7 @@ export function BequestsScreen() {
   const [drafts, setDrafts] = useState<DraftAssignment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [vaultAssets, setVaultAssets] = useState<VaultAsset[]>([]);
+  const [assetsError, setAssetsError] = useState(false);
 
   // On-chain beneficiary order is authoritative for assignment indices.
   const beneficiaries = useMemo(() => {
@@ -87,49 +88,67 @@ export function BequestsScreen() {
   const loadVaultAssets = useCallback(async (): Promise<VaultAsset[]> => {
     if (!publicKey) return [];
     const solOnly: VaultAsset[] = [{ mint: PublicKey.default, symbol: 'SOL', decimals: 9, amount: 0 }];
-    try {
-      const txService = new VaultTransactionService();
-      const conn = txService.getConnection();
-      const [vaultPda] = txService.getVaultPDA(publicKey);
-      const info = await conn.getAccountInfo(vaultPda);
-      const rent = info ? await conn.getMinimumBalanceForRentExemption(info.data.length) : 0;
-      // Distributable SOL = vault balance − rent − reserved keeper bounty.
-      const solAmount = info ? Math.max(0, (info.lamports - rent - KEEPER_BOUNTY_LAMPORTS) / 1e9) : 0;
-      const tokens = await txService.getVaultTokenBalances(vaultPda);
-      // Resolve name + image for the vault's mints (cache-first, provider-agnostic)
-      // so the picker shows the actual NFT, not a bare address. Best-effort.
-      let meta = new Map<string, { name: string; symbol: string; image: string | null }>();
+    const txService = new VaultTransactionService();
+    const conn = txService.getConnection();
+    const [vaultPda] = txService.getVaultPDA(publicKey);
+
+    // Load the vault's raw holdings — this is the SOURCE OF TRUTH for what's
+    // bequeathable. Retry a few times; a transient failure here must NOT be shown as
+    // "only SOL" (which silently hides the vault's real tokens/NFTs).
+    let solAmount = 0;
+    let tokens: { mint: PublicKey; amount: bigint; decimals: number; uiAmount: number }[] | null = null;
+    for (let tryN = 0; tryN < 3 && tokens === null; tryN++) {
       try {
-        const scanner = new PortfolioScanner(getRpcUrl(), getHeliusApiKey());
-        meta = await scanner.resolveNftMetadata(tokens.map((t) => t.mint));
+        const info = await conn.getAccountInfo(vaultPda);
+        const rent = info ? await conn.getMinimumBalanceForRentExemption(info.data.length) : 0;
+        // Distributable SOL = vault balance − rent − reserved keeper bounty.
+        solAmount = info ? Math.max(0, (info.lamports - rent - KEEPER_BOUNTY_LAMPORTS) / 1e9) : 0;
+        tokens = await txService.getVaultTokenBalances(vaultPda);
       } catch {
-        // fall back to symbol-only below
+        if (tryN < 2) await new Promise((r) => setTimeout(r, 400 * (tryN + 1)));
       }
-      const tokenAssets: VaultAsset[] = await Promise.all(tokens.map(async (t) => {
-        const m = meta.get(t.mint.toBase58());
-        // Known tokenized stocks (Token-2022 RWAs) have no Metaplex PDA and may no
-        // longer be in the wallet once deposited — resolve their label from the registry.
-        const sMeta = PortfolioScanner.stockMeta(t.mint.toBase58());
-        const known = balances.find((b: any) => b.mint?.toBase58?.() === t.mint.toBase58());
-        // A1 mitigation #3: flag a mint whose issuer could freeze / pause / seize / hook
-        // it, so the owner sees the risk before assigning a specific bequest. Best-effort.
-        const risk = await txService.checkBequestRisk(t.mint).catch(() => null);
-        return {
-          mint: t.mint,
-          symbol: sMeta?.symbol || m?.name || m?.symbol || known?.symbol || `${t.mint.toBase58().slice(0, 4)}…`,
-          decimals: t.decimals,
-          amount: t.uiAmount,
-          image: m?.image ?? (known as any)?.image ?? undefined,
-          risk,
-        };
-      }));
-      const result: VaultAsset[] = [{ mint: PublicKey.default, symbol: 'SOL', decimals: 9, amount: solAmount }, ...tokenAssets];
-      setVaultAssets(result);
-      return result;
-    } catch {
+    }
+    if (tokens === null) {
+      // Could not read the vault's holdings — surface the error instead of hiding the tokens.
       setVaultAssets(solOnly);
+      setAssetsError(true);
       return solOnly;
     }
+
+    // Metadata is best-effort and NEVER fatal.
+    let meta = new Map<string, { name: string; symbol: string; image: string | null }>();
+    try {
+      const scanner = new PortfolioScanner(getRpcUrl(), getHeliusApiKey());
+      meta = await scanner.resolveNftMetadata(tokens.map((t) => t.mint));
+    } catch {
+      // symbol-only below
+    }
+
+    // Enrich each token INDEPENDENTLY: a throw resolving one token's symbol/risk
+    // (e.g. a Hermes named-export issue for a Token-2022 stock) must never drop the
+    // whole list — every held token/NFT stays bequeathable, with a fallback label.
+    const tokenAssets: VaultAsset[] = [];
+    for (const t of tokens) {
+      let symbol = `${t.mint.toBase58().slice(0, 4)}…`;
+      let image: string | undefined;
+      let risk: string | null = null;
+      try {
+        const m = meta.get(t.mint.toBase58());
+        const sMeta = PortfolioScanner.stockMeta(t.mint.toBase58());
+        const known = balances.find((b: any) => b.mint?.toBase58?.() === t.mint.toBase58());
+        symbol = sMeta?.symbol || m?.name || m?.symbol || known?.symbol || symbol;
+        image = m?.image ?? (known as any)?.image ?? undefined;
+        risk = await txService.checkBequestRisk(t.mint).catch(() => null);
+      } catch {
+        // keep fallback symbol — the token still appears and is bequeathable
+      }
+      tokenAssets.push({ mint: t.mint, symbol, decimals: t.decimals, amount: t.uiAmount, image, risk });
+    }
+
+    const result: VaultAsset[] = [{ mint: PublicKey.default, symbol: 'SOL', decimals: 9, amount: solAmount }, ...tokenAssets];
+    setVaultAssets(result);
+    setAssetsError(false);
+    return result;
   }, [publicKey, balances]);
 
   const assets = useMemo(
@@ -417,6 +436,15 @@ export function BequestsScreen() {
           everything else splits pro-rata by share. SOL is always pro-rata.
         </Text>
 
+        {assetsError && (
+          <TouchableOpacity style={styles.assetsErrorBanner} onPress={() => loadVaultAssets()}>
+            <Text style={styles.assetsErrorText}>
+              Couldn't load your vault's tokens — your RPC may be unreachable. Tap to retry, or
+              switch RPC in Settings → Network. (SOL is still available below.)
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {drafts.map((d, i) => {
           const benef = beneficiaries.find((b) => b.index === d.beneficiaryIndex);
           return (
@@ -574,6 +602,8 @@ const styles = StyleSheet.create({
   addBtnText: { color: COLORS.accent, fontSize: 14, fontFamily: FONTS.primaryMedium },
   counter: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily: FONTS.primary, textAlign: 'center', marginTop: 14 },
   warning: { color: COLORS.warning, fontSize: 12, fontFamily: FONTS.primary, marginTop: 10, lineHeight: 17 },
+  assetsErrorBanner: { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: COLORS.critical, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 14 },
+  assetsErrorText: { color: COLORS.critical, fontSize: 12.5, fontFamily: FONTS.primary, lineHeight: 18 },
   saveBtn: {
     backgroundColor: COLORS.accent,
     margin: 20,
