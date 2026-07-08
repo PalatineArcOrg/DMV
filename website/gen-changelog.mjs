@@ -1,7 +1,9 @@
 // Render CHANGELOG.md → a self-contained, on-brand changelog.html for dmv.palatinearc.com.
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const md = readFileSync('/root/DMV/CHANGELOG.md', 'utf8');
+// Input is the repo CHANGELOG.md (relative to this script in website/). Output is
+// argv[2] if given (deploy.sh points it straight at the live path), else website/changelog.html.
+const md = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 function inline(s) {
@@ -92,5 +94,6 @@ ${body}
 </body>
 </html>`;
 
-writeFileSync('/var/www/dmv/changelog.html', page);
-console.log('wrote /var/www/dmv/changelog.html —', page.length, 'bytes;', out.length, 'blocks');
+const outPath = process.argv[2] || new URL('./changelog.html', import.meta.url);
+writeFileSync(outPath, page);
+console.log('wrote', String(outPath.pathname || outPath), '—', page.length, 'bytes;', out.length, 'blocks');

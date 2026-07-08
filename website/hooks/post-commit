@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Auto-deploy the marketing site when a commit touches website/ or CHANGELOG.md, so the
+# live /var/www/dmv site never drifts from the repo. Install once per clone:
+#   ln -sf ../../website/hooks/post-commit .git/hooks/post-commit
+# Non-fatal: a deploy failure logs but never blocks the commit (it already happened).
+changed="$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || true)"
+if echo "$changed" | grep -qE '^website/|^CHANGELOG\.md$'; then
+  root="$(git rev-parse --show-toplevel)"
+  echo "[post-commit] website/ or CHANGELOG.md changed -> deploying to /var/www/dmv"
+  bash "$root/website/deploy.sh" || echo "[post-commit] deploy FAILED (see output above)" >&2
+fi
