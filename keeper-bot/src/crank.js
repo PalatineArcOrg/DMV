@@ -108,6 +108,25 @@ async function collectMints(connection, vault, plan) {
   return chosen.map(([m, v]) => ({ mint: new PublicKey(m), programId: v.programId }));
 }
 
+// Read-only: does the vault PDA still own any token account with a positive balance?
+// Uncapped across both token programs — unlike collectMints (which caps non-plan
+// mints at MAX_AUTO_MINTS to bound fronted rent), this scan is exhaustive because it
+// gates the irreversible core-PDA close. A fully-distributed mint leaves no vault
+// token account behind (close_token_dist CloseAccounts the vault ATA), so a surviving
+// positive balance is genuinely undistributed value a permissionless close would
+// orphan forever. Deliberately read-only: we never begin_token_dist a straggler here
+// — doing so on a frozen/paused mint would ratchet open_token_dists up with no way
+// back down, permanently blocking every core close (the owner's included).
+async function vaultHoldsUndistributedTokens(connection, vault) {
+  for (const pid of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+    const res = await connection.getParsedTokenAccountsByOwner(vault, { programId: pid });
+    for (const { account } of res.value) {
+      if (BigInt(account.data.parsed.info.tokenAmount?.amount ?? '0') > 0n) return true;
+    }
+  }
+  return false;
+}
+
 async function ensureAta(ctx, ata, mint, owner, programId) {
   const info = await ctx.connection.getAccountInfo(ata);
   if (info) return;
@@ -367,6 +386,18 @@ export async function cleanupExecutedVault(ctx, vault, cfg) {
     await crankVault(ctx, vault, cfg);
     const fresh = await program.account.vaultConfig.fetch(vault);
     if (fresh.openTokenDists > 0) return 'token_dists_open';
+  }
+
+  // Anti-orphan gate: close_executed_vault only checks open_token_dists, which a
+  // never-begun held mint never increments — so a vault holding more than
+  // MAX_AUTO_MINTS non-plan mints can reach 0 here with real balances left, and the
+  // close would orphan them forever (the vault PDA can never sign again). Refuse to
+  // close while the vault still owns any token balance: the core rent stays
+  // reclaimable and the tokens stay inheritable via a later uncapped app/heir crank.
+  // Best-effort (scan->close is a TOCTOU, and the owner-signed close doesn't re-scan);
+  // the durable guarantee is the on-chain A1 escape-hatch work (external-audit scope).
+  if (await vaultHoldsUndistributedTokens(ctx.connection, vault)) {
+    return 'held_mints_remain';
   }
 
   const maxWallet = cfg.beneficiaries[largestShareIndex(cfg.beneficiaries)].wallet;
