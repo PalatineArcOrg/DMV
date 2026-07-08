@@ -21,6 +21,8 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 import { VaultTransactionService } from '../services/VaultTransactionService';
 import { PortfolioScanner } from '../services/PortfolioScanner';
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { PickerModal, PickerOption } from '../components/PickerModal';
 import type { AssetAssignment } from '../types/vault';
 
 // Single set/update_asset_plan tx must fit the 1232-byte limit. Distinct bequest
@@ -65,6 +67,8 @@ export function BequestsScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [vaultAssets, setVaultAssets] = useState<VaultAsset[]>([]);
   const [assetsError, setAssetsError] = useState(false);
+  const [assetPickerFor, setAssetPickerFor] = useState<number | null>(null);
+  const [benefPickerFor, setBenefPickerFor] = useState<number | null>(null);
 
   // On-chain beneficiary order is authoritative for assignment indices.
   const beneficiaries = useMemo(() => {
@@ -242,28 +246,48 @@ export function BequestsScreen() {
 
   const removeDraft = (i: number) => setDrafts((d) => d.filter((_, idx) => idx !== i));
 
-  const cycleAsset = (i: number) => {
-    const cur = drafts[i];
-    const pos = assets.findIndex((a) => a.mint.toBase58() === cur.mint);
-    const next = assets[(pos + 1) % assets.length];
-    const nft = next.decimals === 0 && next.amount === 1;
+  const selectAsset = (i: number, mintKey: string) => {
+    const a = assets.find((x) => x.mint.toBase58() === mintKey);
+    if (!a) return;
+    const nft = a.decimals === 0 && a.amount === 1;
     updateDraft(i, {
-      mint: next.mint.toBase58(),
-      symbol: next.symbol,
-      decimals: next.decimals,
+      mint: a.mint.toBase58(),
+      symbol: a.symbol,
+      decimals: a.decimals,
       isNft: nft,
       uiAmount: nft ? '1' : '',
-      holding: next.amount,
-      image: next.image,
+      holding: a.amount,
+      image: a.image,
     });
   };
 
-  const cycleBeneficiary = (i: number) => {
-    const cur = drafts[i];
-    const pos = beneficiaries.findIndex((b) => b.index === cur.beneficiaryIndex);
-    const next = beneficiaries[(pos + 1) % beneficiaries.length];
-    updateDraft(i, { beneficiaryIndex: next.index });
+  const selectBeneficiary = (i: number, indexKey: string) => {
+    updateDraft(i, { beneficiaryIndex: Number(indexKey) });
   };
+
+  const fmtHeld = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/\.?0+$/, ''));
+
+  // Options for the selection modals, derived from the (already-loaded) vault assets
+  // and on-chain beneficiaries. SOL is always the first asset option.
+  const assetOptions: PickerOption[] = useMemo(
+    () => assets.map((a) => ({
+      key: a.mint.toBase58(),
+      label: a.symbol || `${a.mint.toBase58().slice(0, 6)}…`,
+      sublabel: fmtHeld(a.amount),
+      badge: a.decimals === 0 && a.amount === 1 ? 'NFT' : undefined,
+      image: a.image,
+      warn: !!a.risk,
+    })),
+    [assets],
+  );
+  const benefOptions: PickerOption[] = useMemo(
+    () => beneficiaries.map((b) => ({
+      key: String(b.index),
+      label: b.label,
+      sublabel: `${(b.shareBps / 100).toFixed(0)}%`,
+    })),
+    [beneficiaries],
+  );
 
   const validate = (): string | null => {
     if (drafts.length === 0) return 'Add at least one bequest.';
@@ -451,11 +475,12 @@ export function BequestsScreen() {
             <View key={i} style={styles.card}>
               <View style={styles.row}>
                 <Text style={styles.cardLabel}>Asset</Text>
-                <TouchableOpacity style={styles.pill} onPress={() => cycleAsset(i)}>
+                <TouchableOpacity style={styles.pill} onPress={() => setAssetPickerFor(i)}>
                   {d.image ? <Image source={{ uri: d.image }} style={styles.pillThumb} /> : null}
                   <Text style={styles.pillText}>
                     {d.symbol || `${d.mint.slice(0, 6)}…`}{d.isNft ? ' · NFT' : ''}
                   </Text>
+                  <MaterialCommunityIcons name="chevron-down" size={16} color="rgba(255,255,255,0.4)" style={styles.pillCaret} />
                 </TouchableOpacity>
               </View>
 
@@ -484,10 +509,11 @@ export function BequestsScreen() {
 
               <View style={styles.row}>
                 <Text style={styles.cardLabel}>To</Text>
-                <TouchableOpacity style={styles.pill} onPress={() => cycleBeneficiary(i)}>
+                <TouchableOpacity style={styles.pill} onPress={() => setBenefPickerFor(i)}>
                   <Text style={styles.pillText}>
                     {benef ? `${benef.label} (${(benef.shareBps / 100).toFixed(0)}%)` : '—'}
                   </Text>
+                  <MaterialCommunityIcons name="chevron-down" size={16} color="rgba(255,255,255,0.4)" style={styles.pillCaret} />
                 </TouchableOpacity>
               </View>
 
@@ -535,6 +561,23 @@ export function BequestsScreen() {
           <Text style={styles.clearBtnText}>Clear all bequests</Text>
         </TouchableOpacity>
       )}
+
+      <PickerModal
+        visible={assetPickerFor !== null}
+        title="Choose an asset"
+        options={assetOptions}
+        selectedKey={assetPickerFor !== null ? drafts[assetPickerFor]?.mint ?? '' : ''}
+        onSelect={(k) => { if (assetPickerFor !== null) selectAsset(assetPickerFor, k); }}
+        onClose={() => setAssetPickerFor(null)}
+      />
+      <PickerModal
+        visible={benefPickerFor !== null}
+        title="Choose a beneficiary"
+        options={benefOptions}
+        selectedKey={benefPickerFor !== null ? String(drafts[benefPickerFor]?.beneficiaryIndex ?? '') : ''}
+        onSelect={(k) => { if (benefPickerFor !== null) selectBeneficiary(benefPickerFor, k); }}
+        onClose={() => setBenefPickerFor(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -565,6 +608,7 @@ const styles = StyleSheet.create({
   },
   pillText: { color: COLORS.accent, fontSize: 13, fontFamily: FONTS.primaryMedium },
   pillThumb: { width: 20, height: 20, borderRadius: 5, marginRight: 8, backgroundColor: 'rgba(255,255,255,0.06)' },
+  pillCaret: { marginLeft: 6 },
   input: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
