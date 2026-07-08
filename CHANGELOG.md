@@ -2,7 +2,8 @@
 
 All notable changes to Dead Man's Vault are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and releases (with APKs) are on the
-[Releases page](https://github.com/Romulus-Sol/DMV/releases). Network: Solana Devnet.
+[Releases page](https://github.com/Romulus-Sol/DMV/releases); this log is also rendered
+at [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
 ## [1.13.14–1.13.15] — 2026-07-07 — Security audit remediation + Clear bequests
