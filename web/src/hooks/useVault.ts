@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { VaultTransactionService } from '../lib/core';
+import { fetchOwnerAssetMeta } from '../lib/assetMeta';
 
 export interface Beneficiary {
   wallet: string;
@@ -12,6 +13,10 @@ export interface VaultToken {
   amount: bigint;
   decimals: number;
   uiAmount: number;
+  isNft: boolean;
+  name?: string;
+  symbol?: string;
+  image?: string;
 }
 export interface VaultView {
   vaultPda: string;
@@ -65,13 +70,15 @@ export function useVault() {
       const [vaultPda] = svc.getVaultPDA(owner);
       // ENRICHMENT (decorative). Each isolated — a failure here must NEVER hide the
       // vault the LOAD already proved exists. Defaults keep the console usable.
-      const [deadline, solLamports, tokens, planAssignments] = await Promise.all([
+      const [deadline, solLamports, tokens, planAssignments, meta] = await Promise.all([
         svc.getOnChainDeadline(owner).catch(() => null),
         svc.getConnection().getBalance(vaultPda).catch(() => 0),
         svc.getVaultTokenBalances(vaultPda).catch(() => []),
         config.hasAssetPlan
           ? svc.fetchAssetPlan(owner).then((p) => p?.assignments.length ?? 0).catch(() => 0)
           : Promise.resolve(0),
+        // names/logos for the vault's holdings — parallel + isolated (best-effort).
+        fetchOwnerAssetMeta(vaultPda.toBase58()).catch(() => new Map()),
       ]);
       setVault({
         vaultPda: vaultPda.toBase58(),
@@ -94,6 +101,8 @@ export function useVault() {
           amount: t.amount,
           decimals: t.decimals,
           uiAmount: t.uiAmount,
+          isNft: t.decimals === 0 && t.amount === 1n,
+          ...meta.get(t.mint.toBase58()),
         })),
         planAssignments,
       });

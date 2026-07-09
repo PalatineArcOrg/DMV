@@ -162,12 +162,18 @@ function Balances({ v, actions }: { v: VaultView; actions: ReturnType<typeof use
       <h3 style={sectionTitle}>Tokens in vault</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {v.tokens.map((t) => (
-          <div key={t.mint} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontWeight: 600 }}>{t.uiAmount}</span>
-              <a href={explorerAddress(t.mint)} target="_blank" rel="noreferrer" style={{ color: COLORS.textDim, fontSize: 11, textDecoration: 'none', fontFamily: 'monospace' }}>
-                {short(t.mint)}
-              </a>
+          <div key={t.mint} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 13 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <Thumb image={t.image} label={t.symbol || t.name || t.mint} />
+              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 150 }}>
+                  {t.name || t.symbol || short(t.mint)}
+                  {t.isNft && <span style={{ ...pill(COLORS.accent), fontSize: 9.5, padding: '1px 7px', marginLeft: 6 }}>NFT</span>}
+                </span>
+                <a href={explorerAddress(t.mint)} target="_blank" rel="noreferrer" style={{ color: COLORS.textDim, fontSize: 11, textDecoration: 'none' }}>
+                  {t.isNft ? '1 NFT' : `${t.uiAmount}${t.symbol ? ' ' + t.symbol : ''}`}
+                </a>
+              </div>
             </div>
             {canWithdraw && (
               <button
