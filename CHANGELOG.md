@@ -6,6 +6,15 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 at [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.13.19] — 2026-07-09 — Vault balance: token names & logos
+
+- **App (v1.13.19 / versionCode 105).** The Status screen's Vault Balance card listed the
+  vault's tokens by mint prefix (e.g. `JEHGuq`). It now shows each token's **name/symbol and
+  logo**, resolved from the vault's own on-chain metadata — vault-held tokens aren't in your
+  wallet, so they're scanned directly rather than matched against your portfolio. Metadata is
+  best-effort and isolated: if it can't resolve, tokens still list (by mint prefix). Display
+  only — no change to amounts, deposits/withdrawals, or on-chain behavior.
+
 ## [Web app] — 2026-07-09 — Browser claim portal + owner console
 
 Dead Man's Vault now has a **web app at [dmvapp.palatinearc.com](https://dmvapp.palatinearc.com)** —

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { explorerTx } from '../utils/rpcConfig';
+import { explorerTx, getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 
 import {
   View,
@@ -33,6 +33,7 @@ import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils
 import { EscalationStage } from '../types';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
+import { PortfolioScanner } from '../services/PortfolioScanner';
 import { DepositModal } from '../components/DepositModal';
 import { PublicKey, LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
 
@@ -111,7 +112,7 @@ export function DashboardScreen() {
   const walletStocks = useMemo(() => balances.filter((b) => b.isStock), [balances]);
 
   const [vaultBalance, setVaultBalance] = useState(0);
-  const [vaultTokenBalances, setVaultTokenBalances] = useState<{ mint: string; uiAmount: number; symbol: string; decimals: number }[]>([]);
+  const [vaultTokenBalances, setVaultTokenBalances] = useState<{ mint: string; uiAmount: number; symbol: string; decimals: number; logoUri?: string | null }[]>([]);
   const [walletBalance, setWalletBalance] = useState(0);
   const [showDepositModal, setShowDepositModal] = useState(false);
 
@@ -171,14 +172,26 @@ export function DashboardScreen() {
           }
           setWalletBalance(await connection.getBalance(publicKey));
 
-          // Fetch vault PDA token balances
+          // Fetch vault PDA token balances (authoritative amounts).
           const vaultTokens = await txService.getVaultTokenBalances(vaultPda);
+          // ENRICH with names/logos (best-effort). Vault-held tokens aren't in the
+          // owner's wallet, so scan the vault PDA itself for metadata. Isolated —
+          // if this fails, tokens still show by mint prefix (the LOAD is unaffected).
+          const metaByMint = new Map<string, { symbol: string; logoUri?: string | null }>();
+          try {
+            const scanned = await new PortfolioScanner(getRpcUrl(), getHeliusApiKey()).getTokenBalances(vaultPda);
+            for (const s of scanned) metaByMint.set(s.mint.toString(), { symbol: s.symbol, logoUri: s.logoUri ?? s.image ?? null });
+          } catch {
+            // no metadata — fall back to mint prefixes
+          }
           setVaultTokenBalances(vaultTokens.map((t) => {
-            const match = balances.find((b) => b.mint.toString() === t.mint.toString());
+            const m = metaByMint.get(t.mint.toString());
+            const wallet = balances.find((b) => b.mint.toString() === t.mint.toString());
             return {
               mint: t.mint.toString(),
               uiAmount: t.uiAmount,
-              symbol: match?.symbol ?? t.mint.toString().slice(0, 6),
+              symbol: m?.symbol ?? wallet?.symbol ?? t.mint.toString().slice(0, 6),
+              logoUri: m?.logoUri ?? wallet?.logoUri ?? wallet?.image ?? null,
               decimals: t.decimals,
             };
           }));
@@ -502,8 +515,11 @@ export function DashboardScreen() {
           {vaultTokenBalances.length > 0 && (
             <View style={{ marginTop: 4, marginBottom: 4 }}>
               {vaultTokenBalances.map((t, i) => (
-                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
-                  <Text style={styles.vaultTokenLabel}>{t.symbol}</Text>
+                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, marginRight: 8 }}>
+                    <TokenIcon symbol={t.symbol} logoUri={t.logoUri} />
+                    <Text style={styles.vaultTokenLabel} numberOfLines={1}>{t.symbol}</Text>
+                  </View>
                   <Text style={styles.vaultTokenValue}>{t.uiAmount.toFixed(t.decimals > 4 ? 4 : t.decimals)}</Text>
                 </View>
               ))}

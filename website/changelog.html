@@ -45,6 +45,10 @@
     <p class="sub">Dead Man's Vault — autonomous crypto inheritance on Solana (Devnet). &nbsp;·&nbsp;
       <a href="/">Home</a> &nbsp;·&nbsp; <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases</a></p>
 <p>All notable changes to Dead Man's Vault are documented here. The format follows <a href="https://keepachangelog.com/" target="_blank" rel="noopener">Keep a Changelog</a>, and releases (with APKs) are on the <a href="https://github.com/Romulus-Sol/DMV/releases" target="_blank" rel="noopener">Releases page</a>; this log is also rendered at <a href="https://dmv.palatinearc.com/changelog.html" target="_blank" rel="noopener">dmv.palatinearc.com/changelog</a>. Network: Solana Devnet. Program ID <code>GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb</code>.</p>
+<h2>[1.13.19] — 2026-07-09 — Vault balance: token names &amp; logos</h2>
+<ul>
+<li><strong>App (v1.13.19 / versionCode 105).</strong> The Status screen's Vault Balance card listed the vault's tokens by mint prefix (e.g. <code>JEHGuq</code>). It now shows each token's <strong>name/symbol and logo</strong>, resolved from the vault's own on-chain metadata — vault-held tokens aren't in your wallet, so they're scanned directly rather than matched against your portfolio. Metadata is best-effort and isolated: if it can't resolve, tokens still list (by mint prefix). Display only — no change to amounts, deposits/withdrawals, or on-chain behavior.</li>
+</ul>
 <h2>[Web app] — 2026-07-09 — Browser claim portal + owner console</h2>
 <p>Dead Man's Vault now has a <strong>web app at <a href="https://dmvapp.palatinearc.com" target="_blank" rel="noopener">dmvapp.palatinearc.com</a></strong> — claim and manage from any browser, no APK required. Not an APK release; the mobile versions below are unchanged.</p>
 <ul>
