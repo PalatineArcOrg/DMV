@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useVault, VaultView } from '../hooks/useVault';
 import { useOwnerActions } from '../hooks/useOwnerActions';
+import { useWalletAssets, WalletAsset } from '../hooks/useWalletAssets';
 import { COLORS } from '../lib/theme';
 import { explorerAddress, explorerTx, getRpcUrl, maskRpc, networkLabel } from '../lib/core';
 
@@ -77,7 +79,12 @@ export function MyVaultView() {
           <StatusCard v={vault} />
           <Beneficiaries v={vault} />
           <Balances v={vault} actions={actions} />
-          {!isFrozen(vault) && !vault.executed && <FundPanel v={vault} actions={actions} />}
+          {!isFrozen(vault) && !vault.executed && (
+            <>
+              <FundPanel v={vault} actions={actions} />
+              <DepositAssetsPanel actions={actions} vaultRefresh={refresh} />
+            </>
+          )}
           <DangerZone v={vault} actions={actions} />
         </>
       )}
@@ -200,6 +207,80 @@ function FundPanel({ v, actions }: { v: VaultView; actions: ReturnType<typeof us
       <p style={{ color: COLORS.textDim, fontSize: 11.5, margin: '10px 0 0' }}>
         Balance: {sol(v.solLamports)} SOL. Keep a little for rent; withdrawing everything may be rejected.
       </p>
+    </div>
+  );
+}
+
+function DepositAssetsPanel({
+  actions,
+  vaultRefresh,
+}: {
+  actions: ReturnType<typeof useOwnerActions>;
+  vaultRefresh: () => Promise<void>;
+}) {
+  const { assets, loading, refresh, svc } = useWalletAssets();
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<{ mint: string; text: string; kind: 'err' | 'warn' } | null>(null);
+  const busy = !!actions.state.busy;
+
+  async function deposit(a: WalletAsset) {
+    setMsg(null);
+    const raw = a.isNft
+      ? 1n
+      : BigInt(Math.round((parseFloat(amounts[a.mint] ?? String(a.uiAmount)) || 0) * 10 ** a.decimals));
+    if (raw <= 0n) return setMsg({ mint: a.mint, text: 'Enter an amount above 0.', kind: 'err' });
+    if (raw > a.amount) return setMsg({ mint: a.mint, text: "That's more than your balance.", kind: 'err' });
+    try {
+      const chk = await svc.checkDepositable(new PublicKey(a.mint));
+      if (!chk.ok) return setMsg({ mint: a.mint, text: chk.reason ?? 'This asset cannot be deposited.', kind: 'err' });
+      if (chk.warning) setMsg({ mint: a.mint, text: chk.warning, kind: 'warn' }); // proceed, but inform
+    } catch {
+      /* if the check itself fails, let the tx be the source of truth */
+    }
+    await actions.depositToken(a.mint, raw);
+    await Promise.all([refresh(), vaultRefresh()]);
+  }
+
+  return (
+    <div style={card()}>
+      <h3 style={sectionTitle}>Deposit from your wallet</h3>
+      {loading && assets.length === 0 && <p style={{ color: COLORS.textDim, fontSize: 13 }}>Loading your assets…</p>}
+      {!loading && assets.length === 0 && (
+        <p style={{ color: COLORS.textDim, fontSize: 13 }}>No SPL tokens or NFTs in this wallet to deposit.</p>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {assets.map((a) => (
+          <div key={a.mint} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>
+                  {a.isNft ? 'NFT' : a.uiAmount}{' '}
+                  {a.isNft && <span style={{ ...pill(COLORS.accent), fontSize: 9.5, padding: '1px 7px' }}>NFT</span>}
+                </span>
+                <a href={explorerAddress(a.mint)} target="_blank" rel="noreferrer" style={{ color: COLORS.textDim, fontSize: 11, textDecoration: 'none', fontFamily: 'monospace' }}>
+                  {a.mint.slice(0, 4)}…{a.mint.slice(-4)}
+                </a>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                {!a.isNft && (
+                  <input
+                    value={amounts[a.mint] ?? String(a.uiAmount)}
+                    onChange={(e) => setAmounts((m) => ({ ...m, [a.mint]: e.target.value }))}
+                    inputMode="decimal"
+                    style={{ ...input, width: 110, flex: 'none', padding: '8px 10px', fontSize: 12.5 }}
+                  />
+                )}
+                <button onClick={() => deposit(a)} disabled={busy} style={accentBtn(!busy)}>
+                  Deposit
+                </button>
+              </div>
+            </div>
+            {msg?.mint === a.mint && (
+              <p style={{ fontSize: 11.5, margin: 0, color: msg.kind === 'err' ? COLORS.critical : COLORS.warning }}>{msg.text}</p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

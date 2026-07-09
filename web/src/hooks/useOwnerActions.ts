@@ -49,10 +49,15 @@ export function useOwnerActions(svc: VaultTransactionService, refresh: () => Pro
       run('Withdrawing token', (o) => svc.buildWithdrawTokenTx(o, new PublicKey(mint), Number(rawAmount))),
     [run, svc],
   );
+  const depositToken = useCallback(
+    (mint: string, rawAmount: bigint) =>
+      run('Depositing asset', (o) => svc.buildDepositTokenTx(o, new PublicKey(mint), Number(rawAmount))),
+    [run, svc],
+  );
   const clearBequests = useCallback(() => run('Clearing bequests', (o) => svc.buildClearAssetPlanTx(o)), [run, svc]);
   const revoke = useCallback(() => run('Revoking vault', (o) => svc.buildRevokeVaultTx(o)), [run, svc]);
   const closeExecuted = useCallback(() => run('Closing vault', (o) => svc.buildCloseExecutedVaultTx(o)), [run, svc]);
 
   const reset = useCallback(() => setState(IDLE), []);
-  return { state, depositSol, withdrawSol, withdrawToken, clearBequests, revoke, closeExecuted, reset };
+  return { state, depositSol, withdrawSol, withdrawToken, depositToken, clearBequests, revoke, closeExecuted, reset };
 }
