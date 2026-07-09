@@ -6,6 +6,23 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 at [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [Web app] — 2026-07-09 — Browser claim portal + owner console
+
+Dead Man's Vault now has a **web app at [dmvapp.palatinearc.com](https://dmvapp.palatinearc.com)** —
+claim and manage from any browser, no APK required. Not an APK release; the mobile versions below
+are unchanged.
+
+- **Inheritances tab (heir claim).** Connect a browser wallet (Phantom / Solflare / Backpack); vaults
+  where you're a beneficiary auto-appear (via the notify-server) or you import by the owner's address,
+  and you distribute a matured estate yourself — permissionless, you only pay fees.
+- **My Vault tab (owner console).** Status + countdown, beneficiaries & shares, SOL/token/NFT balances
+  with names & logos; deposit/withdraw SOL, deposit & withdraw SPL tokens + NFTs, edit beneficiaries,
+  set/edit specific bequests, and revoke or close — all owner-signed in the browser.
+- **Same on-chain logic as the app** (reuses `ClaimService` / `VaultTransactionService`), and the web
+  app **never holds a key** — heartbeats and vault creation stay on the phone. RPC is proxied
+  server-side (Helius key hidden), rate-limited, and origin-locked to Cloudflare; bring-your-own RPC
+  is available in Settings → Network.
+
 ## [1.13.18] — 2026-07-08 — Bequests: clear asset & beneficiary pickers
 
 - **App (v1.13.18 / versionCode 104).** The Bequests asset selector and the "To"

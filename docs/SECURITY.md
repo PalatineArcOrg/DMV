@@ -30,7 +30,15 @@ execution model is in [`BUILD-SPEC-permissionless-execution.md`](./BUILD-SPEC-pe
 |---|---|
 | Network | Solana **devnet** (mainnet not yet launched) |
 | Program ID | `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb` |
+| Surfaces | Android app; a keyless notify-server + keeper bot (permissionless cranks); and a web app at `dmvapp.palatinearc.com` |
 | License | MIT — the source is public; on-chain bytecode will be published as a verifiable build at mainnet |
+
+**Web app key-handling.** The web app (`dmvapp.palatinearc.com`) holds **no private keys** — the
+owner and heir both sign with their own browser wallet, and the heartbeat agent key stays on the
+phone (the on-chain `record_heartbeat` is locked to it). It reuses the app's transaction builders,
+so it adds no new on-chain authority — a web heir "claim" is just another permissionless caller.
+Its RPC is proxied server-side (the Helius key is never shipped to the browser), rate-limited, and
+the origin rejects non-Cloudflare source IPs. Custom bring-your-own RPC is user-configurable.
 
 ## Reporting a vulnerability
 

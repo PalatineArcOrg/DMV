@@ -20,7 +20,8 @@ the owner is incapacitated, **nothing executes** — which defeats a dead-man's-
 
 We are making execution **permissionless and trustless**: after the grace period,
 the on-chain program computes every payout from on-chain state, and **anyone** (a
-beneficiary, the keyless notify-server, any keeper) can submit the transactions.
+beneficiary — from the mobile app OR the web app at `dmvapp.palatinearc.com` — the
+keyless notify-server, any keeper) can submit the transactions.
 The caller controls nothing — funds can only go to the pre-set beneficiaries, in the
 pre-set proportions, after the deadline. No trusted trigger, no server holding keys,
 no app required.

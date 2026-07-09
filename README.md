@@ -20,7 +20,8 @@ Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initi
 ### Links
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.13)
+- **Web app** (claim + manage in a browser): [dmvapp.palatinearc.com](https://dmvapp.palatinearc.com)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.18)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility
@@ -274,6 +275,21 @@ Authentication screen guards app access with biometric/PIN when enabled.
 | **Transaction history** | Helius Enhanced TX API | Any protocol with recent wallet activity |
 
 Positions are deduplicated by protocol+account. Real positions take priority over activity-detected hints.
+
+---
+
+## Web App
+
+A browser companion at **[dmvapp.palatinearc.com](https://dmvapp.palatinearc.com)** (React + Vite + `@solana/wallet-adapter`) lets you claim and manage from any desktop or mobile browser — no APK needed. It has two tabs:
+
+- **Inheritances** — the heir claim portal. Connect a browser wallet (Phantom / Solflare / Backpack); vaults where you're a beneficiary auto-appear (via the notify-server's `GET /inheritances`) or you can import by the owner's address. When a vault has matured, you distribute the whole estate yourself — execution is permissionless and you only pay network fees.
+- **My Vault** — the owner console. View status (stage, countdown, beneficiaries + shares, SOL/token/NFT balances with names & logos), deposit/withdraw SOL, deposit and withdraw SPL tokens + NFTs (guarded by the same `checkDepositable` extension checks), edit beneficiaries, set and edit specific bequests (SOL/SPL/NFT), and revoke or close the vault.
+
+**No forked logic.** The web app imports the mobile app's real `ClaimService` and `VaultTransactionService` (via a Vite `@app` alias into `dead-mans-vault/app/src`), so web and mobile build the exact same on-chain transactions.
+
+**No keys in the browser.** Owner and heir both sign with their wallet extension. The heartbeat agent key and vault *creation* stay on the phone (the on-chain `record_heartbeat` is locked to the agent key), so the web app is a companion, not a replacement.
+
+**RPC.** Requests default through the notify-server proxy (`notify.palatinearc.com/rpc`) so the Helius key stays server-side; HTTP JSON-RPC is rate-limited (150 req / 10 s per client) and the WebSocket confirmation is proxied to Helius. Users can plug in their own RPC in **Settings → Network**. The Cloudflare-proxied origins reject non-Cloudflare source IPs at the edge, so the rate limit can't be bypassed. Source and dev notes: [`web/README.md`](web/README.md).
 
 ---
 

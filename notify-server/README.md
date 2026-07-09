@@ -54,8 +54,17 @@ It never closes the core PDAs — that cleanup is the owner's (`close_executed_v
 | `POST` | `/poll-now` | `x-dmv-secret` | Run one poll tick immediately (testing) |
 | `POST` | `/execute-now` | `x-dmv-secret` | Manually crank one vault's execution: `{ vault }` (testing). Returns a generic error on failure (raw errors can embed the RPC api-key) |
 | `POST` | `/debug/push` | `x-dmv-secret`, **dev only** | Send one test FCM push: `{ token, title?, body?, channel? }`. Only mounted when `NODE_ENV=development` — an arbitrary push to any token is a phishing primitive and is not exposed in production |
+| `POST` | `/rpc` | CORS-scoped, rate-limited | JSON-RPC proxy. Forwards the request body to `config.rpcUrl` (the Helius devnet RPC) so the **Helius api-key stays server-side** and is never shipped in the web app's browser bundle. The default RPC for the web claim portal / owner console at `dmvapp.palatinearc.com` (users can override with their own RPC in the app's Settings → Network) |
 
 `x-dmv-secret` must match `REGISTER_SECRET` (compared in constant time). `/health` masks the RPC api-key so the (public) endpoint never leaks it.
+
+### `POST /rpc` — browser RPC proxy
+
+The web claim portal / owner console at `dmvapp.palatinearc.com` runs in the browser and must not embed the Helius api-key. `/rpc` forwards each JSON-RPC request body to `config.rpcUrl` (the Helius devnet RPC) server-side, so the key never leaves the server. It is HTTP JSON-RPC only:
+
+- **Rate-limited.** A dedicated per-IP fixed-window limiter allows **150 requests / 10 seconds per client** and returns HTTP `429` over the limit. The window is keyed on the **`CF-Connecting-IP`** header — the real client behind Cloudflare — because `req.ip` would be the shared Cloudflare edge IP and would lump every client into one bucket.
+- **CORS-scoped.** `Access-Control-Allow-Origin` is set to the `RPC_ALLOWED_ORIGIN` env var (default `https://dmvapp.palatinearc.com`), and `Access-Control-Allow-Headers: *` (web3.js adds a `solana-client` request header that would otherwise fail the preflight).
+- **WebSocket is NOT here.** web3.js's `confirmTransaction` opens a WebSocket on the same `/rpc` path; that WS is proxied by **Caddy directly to Helius** (with the api-key injected), not by this Node app. This handler only serves HTTP JSON-RPC.
 
 Every FCM send logs `[fcm] ACCEPTED`/`[fcm] REJECTED` (with the token truncated) so delivery can be traced in the journal.
 
@@ -98,6 +107,9 @@ Hardened for mainnet (see the repo CHANGELOG "Security hardening" entry):
   always distributed; surplus held mints beyond the cap are left for the (uncapped) app/heir crank.
 - **Secrets on disk.** `.env` must be mode `600` (it holds `REGISTER_SECRET` + the Helius
   api-key in `RPC_URL`); `cranker.json` and the FCM JSON are gitignored and `600`.
+- **Origin can't be bypassed.** The CF-proxied origin (`notify.palatinearc.com`) now rejects
+  non-Cloudflare source IPs at the Caddy layer (returns `403`), so the `/rpc` rate limit can't
+  be bypassed by hitting the origin directly.
 
 ---
 
@@ -111,6 +123,7 @@ Copy `.env.example` → `.env` (mode `600`) and fill it in. Key vars:
 - `EXECUTOR_ENABLED` — `1` to enable autonomous execution.
 - `CRANKER_KEYPAIR` — absolute path to a `solana-keygen` JSON keypair, funded with a little devnet SOL. **Gitignored.** Only pays fees/rent. Monitor its balance (the executor caps per-vault spend, but running the crank still costs fees/rent).
 - `REGISTER_SECRET` — **required in production** (the server won't start without it). Long random string; the app sends it as `x-dmv-secret`. Extractable from the app bundle, so treated as weak auth — registration is additionally ownership-proofed on-chain.
+- `RPC_ALLOWED_ORIGIN` — *optional* (default `https://dmvapp.palatinearc.com`). The CORS origin allowed to use `POST /rpc`.
 - `FCM_PROJECT_ID`, `FCM_SERVICE_ACCOUNT` — as documented in `.env.example`.
 
 `idl/dead_mans_vault.json` is the Anchor IDL the executor loads; keep it in sync with deploys (`cp ../dead-mans-vault/target/idl/dead_mans_vault.json idl/`).
