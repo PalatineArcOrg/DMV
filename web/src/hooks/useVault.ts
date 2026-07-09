@@ -60,14 +60,19 @@ export function useVault() {
     setError(null);
     try {
       const owner = publicKey;
+      const [vaultPda] = svc.getVaultPDA(owner);
       // LOAD (source of truth for "does a vault exist"). Only this decides exists.
       const config = await svc.fetchVaultConfig(owner);
       if (!config) {
+        // fetchVaultConfig returns null for BOTH "account absent" AND an RPC
+        // failure (e.g. a 429). Probe getAccountInfo to tell them apart — never
+        // tell an owner with a real vault that it "doesn't exist" over a hiccup.
+        const info = await svc.getConnection().getAccountInfo(vaultPda); // throws on RPC error
+        if (info) throw new Error('Your vault exists but could not be read. Try again, or set your own RPC in ⚙ Network.');
         setVault(null);
         setExists(false);
         return;
       }
-      const [vaultPda] = svc.getVaultPDA(owner);
       // ENRICHMENT (decorative). Each isolated — a failure here must NEVER hide the
       // vault the LOAD already proved exists. Defaults keep the console usable.
       const [deadline, solLamports, tokens, planAssignments, meta] = await Promise.all([

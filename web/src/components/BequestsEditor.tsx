@@ -33,6 +33,11 @@ export function BequestsEditor({
   svc: VaultTransactionService;
   onClose: () => void;
 }) {
+  // Plan-referenced mints the vault no longer holds (withdrawn / partly distributed).
+  // Loaded with their real decimals so an existing plan renders + saves correctly
+  // instead of collapsing to SOL or a raw-unit amount.
+  const [extraOpts, setExtraOpts] = useState<AssetOpt[]>([]);
+
   const assetOpts = useMemo<AssetOpt[]>(
     () => [
       { key: 'SOL', label: `SOL (vault ${(vault.solLamports / 1e9).toFixed(3)})`, decimals: 9, isNft: false, max: vault.solLamports / 1e9 },
@@ -43,8 +48,9 @@ export function BequestsEditor({
         isNft: t.isNft,
         max: t.uiAmount,
       })),
+      ...extraOpts,
     ],
-    [vault],
+    [vault, extraOpts],
   );
   const optByKey = useMemo(() => new Map(assetOpts.map((o) => [o.key, o])), [assetOpts]);
 
@@ -60,12 +66,40 @@ export function BequestsEditor({
         const plan = await svc.fetchAssetPlan(new PublicKey(vault.owner));
         if (!live) return;
         if (plan?.assignments.length) {
+          // decimals by mint: held tokens first, then fetch any plan mint not held.
+          const decByMint = new Map<string, number>(vault.tokens.map((t) => [t.mint, t.decimals]));
+          const unheld = [
+            ...new Set(
+              plan.assignments
+                .filter((a) => !a.mint.equals(PublicKey.default))
+                .map((a) => a.mint.toBase58())
+                .filter((m) => !decByMint.has(m)),
+            ),
+          ];
+          const extra: AssetOpt[] = [];
+          await Promise.all(
+            unheld.map(async (m) => {
+              const assign = plan.assignments.find((a) => a.mint.toBase58() === m);
+              let dec = 0;
+              try {
+                const info = await svc.getConnection().getParsedAccountInfo(new PublicKey(m));
+                const parsed = info.value?.data as { parsed?: { info?: { decimals?: number } } } | undefined;
+                dec = parsed?.parsed?.info?.decimals ?? 0;
+              } catch {
+                /* leave dec = 0 */
+              }
+              decByMint.set(m, dec);
+              extra.push({ key: m, label: `${short(m)} — not in vault`, decimals: dec, isNft: !!assign?.isNft, max: 0 });
+            }),
+          );
+          if (!live) return;
+          setExtraOpts(extra);
           setRows(
             plan.assignments.map((a) => {
-              const isSol = a.mint.equals(PublicKey.default);
-              if (isSol) return { assetKey: 'SOL', amount: String(a.amount.toNumber() / 1e9), benIndex: a.beneficiaryIndex };
+              if (a.mint.equals(PublicKey.default))
+                return { assetKey: 'SOL', amount: String(Number(a.amount.toString()) / 1e9), benIndex: a.beneficiaryIndex };
               const mintStr = a.mint.toBase58();
-              const dec = vault.tokens.find((t) => t.mint === mintStr)?.decimals ?? 0;
+              const dec = decByMint.get(mintStr) ?? 0;
               const ui = a.isNft ? 1 : Number(a.amount.toString()) / 10 ** dec;
               return { assetKey: mintStr, amount: String(ui), benIndex: a.beneficiaryIndex };
             }),

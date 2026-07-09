@@ -50,13 +50,15 @@ export function useOwnerActions(svc: VaultTransactionService, refresh: () => Pro
     [run, svc],
   );
   const withdrawToken = useCallback(
+    // exact string → new BN(string) in the builder (no >2^53 Number() precision loss)
     (mint: string, rawAmount: bigint) =>
-      run('Withdrawing token', (o) => svc.buildWithdrawTokenTx(o, new PublicKey(mint), Number(rawAmount))),
+      run('Withdrawing token', (o) => svc.buildWithdrawTokenTx(o, new PublicKey(mint), rawAmount.toString())),
     [run, svc],
   );
   const depositToken = useCallback(
+    // exact bigint → createTransferCheckedInstruction accepts bigint (no precision loss)
     (mint: string, rawAmount: bigint) =>
-      run('Depositing asset', (o) => svc.buildDepositTokenTx(o, new PublicKey(mint), Number(rawAmount))),
+      run('Depositing asset', (o) => svc.buildDepositTokenTx(o, new PublicKey(mint), rawAmount)),
     [run, svc],
   );
   const clearBequests = useCallback(() => run('Clearing bequests', (o) => svc.buildClearAssetPlanTx(o)), [run, svc]);

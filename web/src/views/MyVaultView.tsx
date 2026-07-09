@@ -293,9 +293,12 @@ function DepositAssetsPanel({
 
   async function deposit(a: WalletAsset) {
     setMsg(null);
+    const edited = amounts[a.mint] !== undefined; // untouched field => deposit the exact balance
     const raw = a.isNft
       ? 1n
-      : BigInt(Math.round((parseFloat(amounts[a.mint] ?? String(a.uiAmount)) || 0) * 10 ** a.decimals));
+      : edited
+        ? BigInt(Math.round((parseFloat(amounts[a.mint]) || 0) * 10 ** a.decimals))
+        : a.amount; // exact bigint — avoids float round-trip through the lossy uiAmount
     if (raw <= 0n) return setMsg({ mint: a.mint, text: 'Enter an amount above 0.', kind: 'err' });
     if (raw > a.amount) return setMsg({ mint: a.mint, text: "That's more than your balance.", kind: 'err' });
     try {

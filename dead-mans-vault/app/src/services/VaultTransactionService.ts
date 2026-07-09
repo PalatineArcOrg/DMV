@@ -611,7 +611,7 @@ export class VaultTransactionService {
     }
   }
 
-  async buildDepositTokenTx(owner: PublicKey, mint: PublicKey, rawAmount: number): Promise<Transaction> {
+  async buildDepositTokenTx(owner: PublicKey, mint: PublicKey, rawAmount: number | bigint): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
     const tokenProgram = await this.getTokenProgramForMint(mint);
     const ownerAta = this.ataFor(mint, owner, false, tokenProgram);
@@ -633,7 +633,7 @@ export class VaultTransactionService {
     return this.addPriorityFee(tx, [owner, vaultPda, mint], 120_000);
   }
 
-  async buildWithdrawTokenTx(owner: PublicKey, mint: PublicKey, amount: number): Promise<Transaction> {
+  async buildWithdrawTokenTx(owner: PublicKey, mint: PublicKey, amount: number | string): Promise<Transaction> {
     const [vaultPda] = this.getVaultPDA(owner);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
     const tokenProgram = await this.getTokenProgramForMint(mint);
