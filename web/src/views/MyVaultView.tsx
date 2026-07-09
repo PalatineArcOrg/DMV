@@ -4,7 +4,7 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useVault, VaultView } from '../hooks/useVault';
 import { useOwnerActions } from '../hooks/useOwnerActions';
 import { COLORS } from '../lib/theme';
-import { explorerAddress, explorerTx } from '../lib/core';
+import { explorerAddress, explorerTx, getRpcUrl, maskRpc, networkLabel } from '../lib/core';
 
 const LPS = 1_000_000_000;
 const short = (k: string) => `${k.slice(0, 4)}…${k.slice(-4)}`;
@@ -21,7 +21,7 @@ function duration(secs: number): string {
 }
 
 export function MyVaultView() {
-  const { connected } = useWallet();
+  const { connected, publicKey } = useWallet();
   const { vault, exists, loading, error, refresh, svc } = useVault();
   const actions = useOwnerActions(svc, refresh);
 
@@ -52,16 +52,22 @@ export function MyVaultView() {
       <PhoneNote />
 
       {loading && !vault && <p style={{ color: COLORS.textDim }}>Loading…</p>}
-      {error && <p style={{ color: COLORS.warning, fontSize: 13 }}>{error}</p>}
+      {error && (
+        <div style={{ ...card(), borderColor: COLORS.critical }}>
+          <p style={{ color: COLORS.critical, fontSize: 13, margin: '0 0 8px' }}>{error}</p>
+          <ConnInfo publicKey={publicKey?.toBase58()} />
+        </div>
+      )}
 
       {exists === false && !loading && (
         <div style={card()}>
           <p style={{ color: COLORS.text, fontWeight: 600, margin: '0 0 6px' }}>No vault found for this wallet.</p>
-          <p style={{ color: COLORS.textDim, fontSize: 13, lineHeight: 1.5, margin: 0 }}>
-            Creating a vault sets up your device's heartbeat key, so it's done in the{' '}
-            <b style={{ color: COLORS.text }}>Dead Man's Vault mobile app</b>. Once created, you can fund and manage
-            it here from any browser wallet.
+          <p style={{ color: COLORS.textDim, fontSize: 13, lineHeight: 1.5, margin: '0 0 12px' }}>
+            Make sure you're connected with the <b style={{ color: COLORS.text }}>same wallet you created the vault
+            with</b> on your phone, and on the right network. A vault is created in the mobile app (it sets up your
+            device's heartbeat key); once created you can manage it here.
           </p>
+          <ConnInfo publicKey={publicKey?.toBase58()} />
         </div>
       )}
 
@@ -281,6 +287,19 @@ function ActionBanner({ actions }: { actions: ReturnType<typeof useOwnerActions>
           </a>
         </span>
       )}
+    </div>
+  );
+}
+
+function ConnInfo({ publicKey }: { publicKey?: string }) {
+  return (
+    <div style={{ fontSize: 11.5, color: COLORS.textDim, fontFamily: 'monospace', lineHeight: 1.6 }}>
+      <div>
+        Connected: <span style={{ color: COLORS.text }}>{publicKey ?? '—'}</span>
+      </div>
+      <div>
+        Network: <span style={{ color: COLORS.text }}>{networkLabel()}</span> · {maskRpc(getRpcUrl())}
+      </div>
     </div>
   );
 }

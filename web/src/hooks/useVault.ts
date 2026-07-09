@@ -55,6 +55,7 @@ export function useVault() {
     setError(null);
     try {
       const owner = publicKey;
+      // LOAD (source of truth for "does a vault exist"). Only this decides exists.
       const config = await svc.fetchVaultConfig(owner);
       if (!config) {
         setVault(null);
@@ -62,16 +63,16 @@ export function useVault() {
         return;
       }
       const [vaultPda] = svc.getVaultPDA(owner);
-      const [deadline, solLamports, tokens] = await Promise.all([
-        svc.getOnChainDeadline(owner),
-        svc.getConnection().getBalance(vaultPda),
-        svc.getVaultTokenBalances(vaultPda),
+      // ENRICHMENT (decorative). Each isolated — a failure here must NEVER hide the
+      // vault the LOAD already proved exists. Defaults keep the console usable.
+      const [deadline, solLamports, tokens, planAssignments] = await Promise.all([
+        svc.getOnChainDeadline(owner).catch(() => null),
+        svc.getConnection().getBalance(vaultPda).catch(() => 0),
+        svc.getVaultTokenBalances(vaultPda).catch(() => []),
+        config.hasAssetPlan
+          ? svc.fetchAssetPlan(owner).then((p) => p?.assignments.length ?? 0).catch(() => 0)
+          : Promise.resolve(0),
       ]);
-      let planAssignments = 0;
-      if (config.hasAssetPlan) {
-        const plan = await svc.fetchAssetPlan(owner).catch(() => null);
-        planAssignments = plan?.assignments.length ?? 0;
-      }
       setVault({
         vaultPda: vaultPda.toBase58(),
         owner: owner.toBase58(),
