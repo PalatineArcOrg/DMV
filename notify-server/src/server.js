@@ -290,6 +290,60 @@ if (isDev) {
   });
 }
 
+// ── RPC proxy (rate-limited) ─────────────────────────────────────────────────
+// The web claim portal / owner console POST JSON-RPC here so the Helius key stays
+// server-side (never shipped in the browser bundle). Dedicated per-IP window —
+// RPC is far chattier than /inheritances, so it gets its own, higher limit. The
+// WebSocket confirmation subscription web3.js opens on /rpc is proxied separately
+// by Caddy → Helius (see Caddyfile) and never reaches this handler.
+const RPC_WINDOW_MS = 10_000;
+const RPC_MAX = 150; // requests per IP per 10s (~15 rps sustained — ample for one user, caps abuse)
+const rpcBuckets = new Map(); // ip -> { count, resetAt }
+function rpcRateLimit(req, res, next) {
+  const now = Date.now();
+  // Behind Cloudflare, req.ip (from X-Forwarded-For) is the CF edge IP shared by
+  // many users — CF-Connecting-IP is the real client. Fall back to req.ip.
+  const ip = req.headers['cf-connecting-ip'] || req.ip || 'unknown';
+  if (rpcBuckets.size > 10_000) {
+    for (const [k, v] of rpcBuckets) if (now >= v.resetAt) rpcBuckets.delete(k); // bound memory
+  }
+  let b = rpcBuckets.get(ip);
+  if (!b || now >= b.resetAt) {
+    b = { count: 0, resetAt: now + RPC_WINDOW_MS };
+    rpcBuckets.set(ip, b);
+  }
+  b.count += 1;
+  if (b.count > RPC_MAX) {
+    res.set('retry-after', String(Math.ceil((b.resetAt - now) / 1000)));
+    return res.status(429).json({ jsonrpc: '2.0', id: null, error: { code: 429, message: 'rate limited' } });
+  }
+  return next();
+}
+
+const RPC_ALLOWED_ORIGIN = process.env.RPC_ALLOWED_ORIGIN || 'https://dmvapp.palatinearc.com';
+function rpcCors(req, res, next) {
+  res.set('Access-Control-Allow-Origin', RPC_ALLOWED_ORIGIN);
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', '*'); // web3.js adds a `solana-client` header
+  res.set('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  return next();
+}
+app.options('/rpc', rpcCors);
+app.post('/rpc', rpcCors, rpcRateLimit, async (req, res) => {
+  try {
+    const upstream = await fetch(config.rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(req.body ?? {}),
+    });
+    const text = await upstream.text();
+    res.status(upstream.status).type('application/json').send(text);
+  } catch {
+    res.status(502).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'rpc upstream error' } });
+  }
+});
+
 // Last-resort guards: a stray rejection/exception must not take down the daemon
 // — that would silently halt BOTH escalation alerts and the autonomous switch.
 process.on('unhandledRejection', (reason) => {
