@@ -9,12 +9,14 @@ import { networkLabel } from './lib/core';
 type Tab = 'inheritances' | 'vault';
 
 export default function App() {
+  // Land on My Vault by default (most people manage their own vault); the claim
+  // tab is deep-linkable via #inheritances.
   const [tab, setTabState] = useState<Tab>(
-    typeof location !== 'undefined' && location.hash === '#vault' ? 'vault' : 'inheritances',
+    typeof location !== 'undefined' && location.hash === '#inheritances' ? 'inheritances' : 'vault',
   );
   const setTab = (t: Tab) => {
     setTabState(t);
-    if (typeof history !== 'undefined') history.replaceState(null, '', t === 'vault' ? '#vault' : '#');
+    if (typeof history !== 'undefined') history.replaceState(null, '', t === 'inheritances' ? '#inheritances' : '#');
   };
   const [showSettings, setShowSettings] = useState(false);
 
