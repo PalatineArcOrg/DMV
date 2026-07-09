@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { VaultTransactionService } from '../lib/core';
+import { VaultTransactionService, AssetAssignment } from '../lib/core';
 import { signSendOwnerTx } from '../lib/ownerTx';
 
 export interface ActionState {
@@ -18,10 +18,13 @@ export function useOwnerActions(svc: VaultTransactionService, refresh: () => Pro
   const [state, setState] = useState<ActionState>(IDLE);
 
   const run = useCallback(
-    async (label: string, build: (owner: PublicKey) => Promise<import('@solana/web3.js').Transaction>) => {
+    async (
+      label: string,
+      build: (owner: PublicKey) => Promise<import('@solana/web3.js').Transaction>,
+    ): Promise<boolean> => {
       if (!publicKey || !signTransaction) {
         setState({ ...IDLE, error: 'Connect your wallet first.' });
-        return;
+        return false;
       }
       setState({ busy: label, error: null, lastSig: null });
       try {
@@ -29,8 +32,10 @@ export function useOwnerActions(svc: VaultTransactionService, refresh: () => Pro
         const sig = await signSendOwnerTx(svc.getConnection(), tx, publicKey, signTransaction);
         setState({ busy: null, error: null, lastSig: sig });
         await refresh();
+        return true;
       } catch (e) {
         setState({ busy: null, error: e instanceof Error ? e.message : 'Transaction failed.', lastSig: null });
+        return false;
       }
     },
     [publicKey, signTransaction, svc, refresh],
@@ -55,9 +60,37 @@ export function useOwnerActions(svc: VaultTransactionService, refresh: () => Pro
     [run, svc],
   );
   const clearBequests = useCallback(() => run('Clearing bequests', (o) => svc.buildClearAssetPlanTx(o)), [run, svc]);
+  const updateBeneficiaries = useCallback(
+    (bens: { wallet: string; shareBps: number }[]) =>
+      run('Updating beneficiaries', (o) =>
+        svc.buildUpdateVaultTx(o, {
+          beneficiaries: bens.map((b) => ({ wallet: new PublicKey(b.wallet), shareBps: b.shareBps })),
+        }),
+      ),
+    [run, svc],
+  );
+  const saveBequests = useCallback(
+    (assignments: AssetAssignment[], hasPlan: boolean) =>
+      run('Saving bequests', (o) =>
+        hasPlan ? svc.buildUpdateAssetPlanTx(o, assignments) : svc.buildSetAssetPlanTx(o, assignments),
+      ),
+    [run, svc],
+  );
   const revoke = useCallback(() => run('Revoking vault', (o) => svc.buildRevokeVaultTx(o)), [run, svc]);
   const closeExecuted = useCallback(() => run('Closing vault', (o) => svc.buildCloseExecutedVaultTx(o)), [run, svc]);
 
   const reset = useCallback(() => setState(IDLE), []);
-  return { state, depositSol, withdrawSol, withdrawToken, depositToken, clearBequests, revoke, closeExecuted, reset };
+  return {
+    state,
+    depositSol,
+    withdrawSol,
+    withdrawToken,
+    depositToken,
+    clearBequests,
+    updateBeneficiaries,
+    saveBequests,
+    revoke,
+    closeExecuted,
+    reset,
+  };
 }

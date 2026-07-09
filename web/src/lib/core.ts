@@ -6,6 +6,7 @@ export { ClaimService } from '@app/services/ClaimService';
 export type { ClaimProgress } from '@app/services/ClaimService';
 export { VaultTransactionService } from '@app/services/VaultTransactionService';
 export { PROGRAM_ID } from '@app/utils/constants';
+export type { AssetAssignment } from '@app/types/vault';
 export {
   getRpcUrl,
   isDevnet,

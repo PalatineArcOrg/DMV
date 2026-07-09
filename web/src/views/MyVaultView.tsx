@@ -5,6 +5,8 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useVault, VaultView } from '../hooks/useVault';
 import { useOwnerActions } from '../hooks/useOwnerActions';
 import { useWalletAssets, WalletAsset } from '../hooks/useWalletAssets';
+import { BeneficiaryEditor } from '../components/BeneficiaryEditor';
+import { BequestsEditor } from '../components/BequestsEditor';
 import { COLORS } from '../lib/theme';
 import { explorerAddress, explorerTx, getRpcUrl, maskRpc, networkLabel } from '../lib/core';
 
@@ -26,6 +28,7 @@ export function MyVaultView() {
   const { connected, publicKey } = useWallet();
   const { vault, exists, loading, error, refresh, svc } = useVault();
   const actions = useOwnerActions(svc, refresh);
+  const [editor, setEditor] = useState<null | 'benef' | 'bequests'>(null);
 
   if (!connected) {
     return (
@@ -77,7 +80,7 @@ export function MyVaultView() {
         <>
           <ActionBanner actions={actions} />
           <StatusCard v={vault} />
-          <Beneficiaries v={vault} />
+          <Beneficiaries v={vault} canEdit={!isFrozen(vault) && !vault.executed} onEdit={setEditor} />
           <Balances v={vault} actions={actions} />
           {!isFrozen(vault) && !vault.executed && (
             <>
@@ -86,6 +89,13 @@ export function MyVaultView() {
             </>
           )}
           <DangerZone v={vault} actions={actions} />
+
+          {editor === 'benef' && (
+            <BeneficiaryEditor vault={vault} owner={vault.owner} actions={actions} onClose={() => setEditor(null)} />
+          )}
+          {editor === 'bequests' && (
+            <BequestsEditor vault={vault} actions={actions} svc={svc} onClose={() => setEditor(null)} />
+          )}
         </>
       )}
     </>
@@ -133,10 +143,17 @@ function StatusCard({ v }: { v: VaultView }) {
   );
 }
 
-function Beneficiaries({ v }: { v: VaultView }) {
+function Beneficiaries({ v, canEdit, onEdit }: { v: VaultView; canEdit: boolean; onEdit: (which: 'benef' | 'bequests') => void }) {
   return (
     <div style={card()}>
-      <h3 style={sectionTitle}>Beneficiaries</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <h3 style={{ ...sectionTitle, margin: 0 }}>Beneficiaries</h3>
+        {canEdit && (
+          <button onClick={() => onEdit('benef')} style={smallBtn}>
+            Edit
+          </button>
+        )}
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {v.beneficiaries.map((b) => (
           <div key={b.wallet} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
@@ -147,9 +164,17 @@ function Beneficiaries({ v }: { v: VaultView }) {
           </div>
         ))}
       </div>
-      <p style={{ color: COLORS.textDim, fontSize: 11.5, margin: '12px 0 0', lineHeight: 1.5 }}>
-        Editing beneficiaries and bequests is coming to the web console — for now, use the mobile app.
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
+        <div style={{ fontSize: 12.5 }}>
+          <span style={{ color: COLORS.textDim }}>Specific bequests: </span>
+          <span style={{ color: COLORS.text, fontWeight: 600 }}>{v.hasAssetPlan ? `${v.planAssignments} set` : 'none'}</span>
+        </div>
+        {canEdit && (
+          <button onClick={() => onEdit('bequests')} style={smallBtn}>
+            {v.hasAssetPlan ? 'Edit bequests' : 'Add bequests'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
