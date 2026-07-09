@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: #07090f;
+}
+
+/* Wallet-adapter button — recolor to the DMV accent. */
+.wallet-adapter-button-trigger {
+  background-color: #00ffa3 !important;
+  color: #04120b !important;
+  font-family: 'Space Grotesk', sans-serif !important;
+  font-weight: 700 !important;
+  border-radius: 8px !important;
+  height: 40px !important;
+}
+
+/* Mobile nav: keep it on one row, shrink chrome so the wallet button always fits. */
+@media (max-width: 480px) {
+  .dmv-nav {
+    padding: 0 14px !important;
+    gap: 8px !important;
+  }
+  .dmv-brand {
+    font-size: 13px !important;
+    gap: 7px !important;
+  }
+  .dmv-net-badge {
+    display: none !important;
+  }
+  .wallet-adapter-button-trigger {
+    height: 38px !important;
+    font-size: 13px !important;
+    padding: 0 12px !important;
+  }
+}
