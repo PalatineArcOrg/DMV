@@ -211,6 +211,43 @@ function FundPanel({ v, actions }: { v: VaultView; actions: ReturnType<typeof us
   );
 }
 
+function Thumb({ image, label }: { image?: string; label: string }) {
+  const [broken, setBroken] = useState(false);
+  const size = 30;
+  if (image && !broken) {
+    return (
+      <img
+        src={image}
+        alt=""
+        width={size}
+        height={size}
+        onError={() => setBroken(true)}
+        style={{ borderRadius: 8, objectFit: 'cover', flexShrink: 0, background: COLORS.surfaceHi }}
+      />
+    );
+  }
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 8,
+        flexShrink: 0,
+        background: COLORS.surfaceHi,
+        border: `1px solid ${COLORS.border}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 13,
+        fontWeight: 700,
+        color: COLORS.textDim,
+      }}
+    >
+      {(label || '?').slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
+
 function DepositAssetsPanel({
   actions,
   vaultRefresh,
@@ -252,14 +289,17 @@ function DepositAssetsPanel({
         {assets.map((a) => (
           <div key={a.mint} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>
-                  {a.isNft ? 'NFT' : a.uiAmount}{' '}
-                  {a.isNft && <span style={{ ...pill(COLORS.accent), fontSize: 9.5, padding: '1px 7px' }}>NFT</span>}
-                </span>
-                <a href={explorerAddress(a.mint)} target="_blank" rel="noreferrer" style={{ color: COLORS.textDim, fontSize: 11, textDecoration: 'none', fontFamily: 'monospace' }}>
-                  {a.mint.slice(0, 4)}…{a.mint.slice(-4)}
-                </a>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <Thumb image={a.image} label={a.symbol || a.name || a.mint} />
+                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 150 }}>
+                    {a.name || a.symbol || `${a.mint.slice(0, 4)}…${a.mint.slice(-4)}`}
+                    {a.isNft && <span style={{ ...pill(COLORS.accent), fontSize: 9.5, padding: '1px 7px', marginLeft: 6 }}>NFT</span>}
+                  </span>
+                  <a href={explorerAddress(a.mint)} target="_blank" rel="noreferrer" style={{ color: COLORS.textDim, fontSize: 11, textDecoration: 'none' }}>
+                    {a.isNft ? '1 NFT' : `${a.uiAmount}${a.symbol ? ' ' + a.symbol : ''}`}
+                  </a>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 {!a.isNft && (
