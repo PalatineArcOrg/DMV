@@ -138,14 +138,8 @@ export function BeneficiaryEditor({
 
 export function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
-    <div
-      onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 50 }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 24, width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto' }}
-      >
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>
@@ -182,9 +176,9 @@ export function Blocked({
   );
 }
 
-export const inp: React.CSSProperties = { background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: '9px 11px', color: COLORS.text, fontSize: 13 };
-export const ghost: React.CSSProperties = { background: 'transparent', color: COLORS.textDim, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: '9px 16px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
-export const xBtn: React.CSSProperties = { background: 'transparent', color: COLORS.textDim, border: `1px solid ${COLORS.border}`, borderRadius: 8, width: 34, height: 34, fontSize: 18, cursor: 'pointer', flexShrink: 0 };
+export const inp: React.CSSProperties = { background: 'var(--inset)', border: '1px solid var(--line)', borderRadius: 9, padding: '10px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--mono)' };
+export const ghost: React.CSSProperties = { background: 'transparent', color: 'var(--dim)', border: '1px solid var(--line-2)', borderRadius: 9, padding: '9px 16px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
+export const xBtn: React.CSSProperties = { background: 'transparent', color: 'var(--dim)', border: '1px solid var(--line)', borderRadius: 9, width: 34, height: 34, fontSize: 18, cursor: 'pointer', flexShrink: 0 };
 export function accent(enabled: boolean): React.CSSProperties {
-  return { background: COLORS.accent, color: '#04120B', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 700, cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.5 };
+  return { background: 'var(--mint)', color: 'var(--mint-ink)', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 12.5, fontWeight: 700, cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.5 };
 }

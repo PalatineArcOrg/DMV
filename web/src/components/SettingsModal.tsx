@@ -1,5 +1,4 @@
 import { FC, useState } from 'react';
-import { COLORS } from '../lib/theme';
 import {
   getRpcUrl,
   isCustomRpc,
@@ -52,119 +51,47 @@ export const SettingsModal: FC<{ onClose: () => void }> = ({ onClose }) => {
     location.reload();
   }
 
+  const testColor = test.kind === 'ok' ? 'var(--mint)' : test.kind === 'err' ? 'var(--red)' : 'var(--dim)';
+
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.6)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 20,
-        zIndex: 50,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: COLORS.surface,
-          border: `1px solid ${COLORS.border}`,
-          borderRadius: 14,
-          padding: 24,
-          width: '100%',
-          maxWidth: 460,
-        }}
-      >
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Network</h2>
-          <button
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', color: COLORS.textDim, fontSize: 20, cursor: 'pointer' }}
-          >
-            ×
-          </button>
+          <h2>Network</h2>
+          <button className="x" onClick={onClose}>×</button>
         </div>
 
-        <p style={{ color: COLORS.textDim, fontSize: 12.5, lineHeight: 1.5, margin: '0 0 18px' }}>
-          Requests use a shared DMV RPC by default. For higher reliability you can use your own RPC endpoint
-          (e.g. a Helius URL). Stored only in this browser.
+        <p className="dim" style={{ fontSize: 12.5, lineHeight: 1.5, margin: '0 0 18px' }}>
+          Requests use a shared DMV RPC by default. For higher reliability you can use your own endpoint (e.g. a Helius
+          URL). Stored only in this browser.
         </p>
 
-        <div style={{ fontSize: 12.5, color: COLORS.textDim, marginBottom: 6 }}>
-          Current: <span style={{ color: COLORS.text }}>{custom ? maskRpc(getRpcUrl()) : 'Default DMV RPC'}</span>{' '}
-          <span style={{ color: COLORS.accent }}>({networkLabel()})</span>
+        <div className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>
+          Current <span style={{ color: 'var(--text)' }}>{custom ? maskRpc(getRpcUrl()) : 'Default DMV RPC'}</span>{' '}
+          <span style={{ color: 'var(--mint)' }}>({networkLabel()})</span>
         </div>
 
-        <label style={{ fontSize: 12.5, color: COLORS.textDim, display: 'block', marginBottom: 6 }}>
-          Custom RPC URL
-        </label>
+        <p className="eyebrow" style={{ margin: '0 0 6px' }}>Custom RPC URL</p>
         <input
+          className="input"
           value={url}
-          onChange={(e) => {
-            setUrl(e.target.value);
-            setTest({ kind: 'idle' });
-          }}
+          onChange={(e) => { setUrl(e.target.value); setTest({ kind: 'idle' }); }}
           placeholder="https://devnet.helius-rpc.com/?api-key=…"
-          style={{
-            width: '100%',
-            background: COLORS.bg,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 8,
-            padding: '10px 12px',
-            color: COLORS.text,
-            fontSize: 12.5,
-            fontFamily: 'monospace',
-            marginBottom: 10,
-          }}
+          style={{ marginBottom: 10 }}
         />
 
         {test.kind !== 'idle' && (
-          <p
-            style={{
-              fontSize: 12,
-              margin: '0 0 10px',
-              color:
-                test.kind === 'ok' ? COLORS.accent : test.kind === 'err' ? COLORS.critical : COLORS.textDim,
-            }}
-          >
+          <p style={{ fontSize: 12, margin: '0 0 10px', color: testColor }}>
             {test.kind === 'testing' ? 'Testing…' : test.msg}
           </p>
         )}
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            onClick={runTest}
-            disabled={!url.trim() || test.kind === 'testing'}
-            style={btn(COLORS.surfaceHi, COLORS.text, !!url.trim())}
-          >
-            Test
-          </button>
-          <button onClick={save} disabled={!url.trim()} style={btn(COLORS.accent, '#04120B', !!url.trim())}>
-            Save & reload
-          </button>
-          {custom && (
-            <button onClick={reset} style={btn('transparent', COLORS.textDim, true)}>
-              Reset to default
-            </button>
-          )}
+          <button className="btn btn-soft" onClick={runTest} disabled={!url.trim() || test.kind === 'testing'}>Test</button>
+          <button className="btn btn-accent" onClick={save} disabled={!url.trim()}>Save &amp; reload</button>
+          {custom && <button className="btn btn-ghost" onClick={reset}>Reset to default</button>}
         </div>
       </div>
     </div>
   );
 };
-
-function btn(bg: string, color: string, enabled: boolean): React.CSSProperties {
-  return {
-    background: bg,
-    color,
-    border: bg === 'transparent' ? `1px solid ${COLORS.border}` : 'none',
-    borderRadius: 8,
-    padding: '9px 16px',
-    fontSize: 12.5,
-    fontWeight: 700,
-    cursor: enabled ? 'pointer' : 'not-allowed',
-    opacity: enabled ? 1 : 0.5,
-  };
-}

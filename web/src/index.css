@@ -1,48 +1,269 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
 
-* {
-  box-sizing: border-box;
+/* ============================================================================
+   DMV Console — design system
+   A vault instrument panel: near-black surfaces, mint signal, mono data.
+   ========================================================================== */
+
+:root {
+  --bg: #070a0f;
+  --panel: #0b1017;
+  --card: #0f1520;
+  --card-2: #141b28;
+  --inset: #080c12;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-2: rgba(255, 255, 255, 0.13);
+  --text: #eaedf2;
+  --dim: #8b94a7;
+  --mute: #5c6576;
+  --mint: #00ffa3;
+  --mint-ink: #04120b;
+  --mint-soft: rgba(0, 255, 163, 0.1);
+  --mint-line: rgba(0, 255, 163, 0.32);
+  --amber: #f5a524;
+  --red: #ff5d5d;
+
+  --sans: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --r: 14px;
+  --r-sm: 9px;
+  --maxw: 1200px;
+  --gap: 18px;
 }
 
-html,
-body {
-  margin: 0;
-  padding: 0;
-  overflow-x: hidden;
-}
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; overflow-x: hidden; }
 
 body {
-  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
-  background: #07090f;
+  text-rendering: optimizeLegibility;
+  color: var(--text);
+  background:
+    radial-gradient(1200px 600px at 78% -8%, rgba(0, 255, 163, 0.06), transparent 60%),
+    radial-gradient(900px 500px at 10% 0%, rgba(0, 200, 255, 0.03), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
 }
 
-/* Wallet-adapter button — recolor to the DMV accent. */
+a { color: inherit; }
+::selection { background: var(--mint-soft); }
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.num { font-variant-numeric: tabular-nums; }
+.dim { color: var(--dim); }
+
+/* ── shell / topbar ─────────────────────────────────────────────────────── */
+.app { min-height: 100vh; }
+
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  border-bottom: 1px solid var(--line);
+  background: rgba(7, 10, 15, 0.72);
+  backdrop-filter: blur(14px);
+}
+.topbar-in {
+  max-width: var(--maxw); margin: 0 auto; min-height: 60px;
+  padding: 0 28px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; white-space: nowrap; }
+.brand img { border-radius: 7px; display: block; }
+.net {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--mint); border: 1px solid var(--mint-line); border-radius: 999px; padding: 3px 9px;
+}
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+
+.icon-btn {
+  width: 38px; height: 38px; border-radius: var(--r-sm);
+  background: transparent; border: 1px solid var(--line); color: var(--dim);
+  font-size: 16px; cursor: pointer; display: grid; place-items: center;
+  transition: border-color .15s, color .15s;
+}
+.icon-btn:hover { border-color: var(--line-2); color: var(--text); }
+
+/* segmented tabs */
+.tabs { display: inline-flex; background: var(--inset); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.tab {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font-family: var(--sans); font-size: 12.5px; font-weight: 600; letter-spacing: 0.01em;
+  color: var(--dim); padding: 7px 16px; border-radius: 7px; transition: color .15s, background .15s;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-selected='true'] { background: var(--mint); color: var(--mint-ink); }
+
+.shell { max-width: var(--maxw); margin: 0 auto; padding: 28px 28px 90px; }
+
+/* ── typography helpers ─────────────────────────────────────────────────── */
+.eyebrow {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--mute); margin: 0;
+}
+.h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.lead { color: var(--dim); font-size: 15px; line-height: 1.6; margin: 10px 0 0; max-width: 60ch; }
+
+/* ── panels ─────────────────────────────────────────────────────────────── */
+.panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 40%), var(--card);
+  border: 1px solid var(--line); border-radius: var(--r);
+}
+.panel-pad { padding: 20px; }
+.panel-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 15px 20px; border-bottom: 1px solid var(--line);
+}
+.panel-hd h3 { margin: 0; }
+
+/* ── status band (the hero) ─────────────────────────────────────────────── */
+.band {
+  display: grid; grid-template-columns: 1.55fr 1fr; gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+.statuscard {
+  position: relative; overflow: hidden;
+  padding: 20px 24px 58px; min-height: 200px;
+  display: flex; flex-direction: column; gap: 11px;
+}
+.statuscard .pulsewrap {
+  position: absolute; left: 24px; right: 24px; bottom: 12px; height: 46px; opacity: 0.75; pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+.status-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.countdown { font-family: var(--mono); font-weight: 600; font-size: clamp(34px, 5vw, 50px); letter-spacing: -0.02em; line-height: 1; margin: 12px 0 8px; }
+.status-sub { color: var(--dim); font-size: 12.5px; line-height: 1.55; margin: 0; max-width: 44ch; }
+.status-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font-family: var(--mono); font-size: 11px; color: var(--mute); margin-top: auto; }
+.status-meta b { color: var(--dim); font-weight: 500; }
+
+.valuecard { padding: 22px 24px; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.value-num { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 3.6vw, 34px); letter-spacing: -0.01em; }
+.value-sub { color: var(--dim); font-size: 12.5px; }
+.value-addr { margin-top: auto; padding-top: 14px; font-family: var(--mono); font-size: 11.5px; color: var(--mute); text-decoration: none; }
+.value-addr:hover { color: var(--dim); }
+
+/* ── pills ──────────────────────────────────────────────────────────────── */
+.pill { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; padding: 4px 11px 4px 9px; border-radius: 999px; border: 1px solid; }
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
+.pill.armed { color: var(--mint); border-color: var(--mint-line); }
+.pill.warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+.pill.frozen, .pill.crit { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); }
+.pill.muted { color: var(--dim); border-color: var(--line-2); }
+.pill .dot.still { box-shadow: none; }
+
+/* ── main grid ──────────────────────────────────────────────────────────── */
+.grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: var(--gap); align-items: start; }
+.col { display: flex; flex-direction: column; gap: var(--gap); }
+
+/* ── data rows / assets ─────────────────────────────────────────────────── */
+.rows { display: flex; flex-direction: column; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 20px; border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; }
+.asset { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.asset .name { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+.asset .sub { font-family: var(--mono); font-size: 11px; color: var(--dim); text-decoration: none; }
+.asset .sub:hover { color: var(--text); }
+.thumb { width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0; background: var(--card-2); border: 1px solid var(--line); object-fit: cover; display: grid; place-items: center; font-weight: 700; font-size: 13px; color: var(--dim); }
+.amt { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; }
+
+.benef { display: flex; align-items: center; justify-content: space-between; padding: 11px 20px; border-top: 1px solid var(--line); font-size: 13px; }
+.benef:first-child { border-top: 0; }
+.benef a { font-family: var(--mono); color: var(--text); text-decoration: none; }
+.share { font-family: var(--mono); color: var(--mint); font-weight: 600; }
+
+/* ── buttons ────────────────────────────────────────────────────────────── */
+.btn {
+  appearance: none; font-family: var(--sans); font-weight: 700; font-size: 13px;
+  border-radius: var(--r-sm); padding: 10px 18px; cursor: pointer; border: 1px solid transparent;
+  transition: background .15s, border-color .15s, color .15s, opacity .15s; white-space: nowrap;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-accent { background: var(--mint); color: var(--mint-ink); }
+.btn-accent:not(:disabled):hover { background: #4dffbd; }
+.btn-ghost { background: transparent; color: var(--dim); border-color: var(--line-2); }
+.btn-ghost:not(:disabled):hover { color: var(--text); border-color: var(--line-2); background: rgba(255,255,255,0.02); }
+.btn-soft { background: var(--card-2); color: var(--text); border-color: var(--line); }
+.btn-soft:not(:disabled):hover { border-color: var(--line-2); }
+.btn-danger { background: var(--red); color: #fff; }
+.btn-danger-o { background: transparent; color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, transparent); }
+.btn-sm { padding: 7px 13px; font-size: 12px; font-weight: 600; }
+.btn-block { width: 100%; }
+
+/* ── inputs ─────────────────────────────────────────────────────────────── */
+.input, .select {
+  font-family: var(--mono); font-size: 13px; color: var(--text);
+  background: var(--inset); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 10px 12px; width: 100%; outline: none; transition: border-color .15s;
+}
+.input::placeholder { color: var(--mute); }
+.input:focus, .select:focus { border-color: var(--mint-line); }
+.field { display: flex; gap: 8px; }
+
+/* ── modal ──────────────────────────────────────────────────────────────── */
+.overlay { position: fixed; inset: 0; background: rgba(3, 5, 8, 0.66); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 60; }
+.modal { background: var(--card); border: 1px solid var(--line-2); border-radius: 16px; padding: 24px; width: 100%; max-width: 520px; max-height: 86vh; overflow-y: auto; }
+.modal h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.x { background: none; border: 0; color: var(--dim); font-size: 22px; line-height: 1; cursor: pointer; }
+.x:hover { color: var(--text); }
+
+/* ── heartbeat signature ────────────────────────────────────────────────── */
+.pulse-base { fill: none; stroke: var(--line-2); stroke-width: 1.5; }
+.pulse-live { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 60 460; animation: sweep 2.6s linear infinite; filter: drop-shadow(0 0 5px currentColor); }
+.pulse-live.armed { stroke: var(--mint); color: var(--mint); }
+.pulse-live.warn { stroke: var(--amber); color: var(--amber); animation-duration: 1.6s; }
+.pulse-flat { fill: none; stroke: var(--red); stroke-width: 1.5; opacity: 0.55; }
+@keyframes sweep { from { stroke-dashoffset: 520; } to { stroke-dashoffset: 0; } }
+
+/* ── inheritance cards grid ─────────────────────────────────────────────── */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--gap); }
+
+/* ── connect / empty states ─────────────────────────────────────────────── */
+.empty { text-align: center; padding: 48px 28px; max-width: 620px; margin: 24px auto 0; }
+.empty .lead { margin-left: auto; margin-right: auto; }
+.empty .eyebrow { text-align: center; }
+
+/* ── banners ────────────────────────────────────────────────────────────── */
+.banner { border-radius: var(--r); padding: 13px 17px; font-size: 13px; margin-bottom: var(--gap); border: 1px solid var(--line); background: var(--card); }
+.banner.ok { border-color: var(--mint-line); }
+.banner.err { border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
+.note { background: var(--mint-soft); border: 1px solid var(--mint-line); border-radius: var(--r-sm); padding: 11px 15px; font-size: 12.5px; color: var(--dim); line-height: 1.55; }
+.note b { color: var(--text); }
+
+/* ── entrance animation ─────────────────────────────────────────────────── */
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise .5s cubic-bezier(.16,1,.3,1) both; }
+.rise-1 { animation-delay: .04s; } .rise-2 { animation-delay: .1s; } .rise-3 { animation-delay: .16s; }
+
+/* ── wallet-adapter button ──────────────────────────────────────────────── */
 .wallet-adapter-button-trigger {
-  background-color: #00ffa3 !important;
-  color: #04120b !important;
-  font-family: 'Space Grotesk', sans-serif !important;
-  font-weight: 700 !important;
-  border-radius: 8px !important;
-  height: 40px !important;
+  background-color: var(--mint) !important; color: var(--mint-ink) !important;
+  font-family: var(--sans) !important; font-weight: 700 !important; font-size: 13px !important;
+  border-radius: 9px !important; height: 38px !important; padding: 0 16px !important;
 }
 
-/* Mobile nav: keep it on one row, shrink chrome so the wallet button always fits. */
-@media (max-width: 480px) {
-  .dmv-nav {
-    padding: 0 14px !important;
-    gap: 8px !important;
-  }
-  .dmv-brand {
-    font-size: 13px !important;
-    gap: 7px !important;
-  }
-  .dmv-net-badge {
-    display: none !important;
-  }
-  .wallet-adapter-button-trigger {
-    height: 38px !important;
-    font-size: 13px !important;
-    padding: 0 12px !important;
-  }
+/* ── responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .band { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: 1fr; }
+  .shell { padding: 20px 16px 80px; }
+  .topbar-in { padding: 0 16px; }
+}
+@media (max-width: 640px) {
+  .topbar-in { flex-wrap: wrap; padding: 9px 16px; row-gap: 9px; }
+  .tabs { order: 3; width: 100%; }
+  .tab { flex: 1; text-align: center; }
+}
+@media (max-width: 520px) {
+  .net { display: none; }
+  .h1 { font-size: 25px; }
+  .brand { font-size: 13.5px; }
+  .wallet-adapter-button-trigger { font-size: 12px !important; padding: 0 12px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-live { animation: none; stroke-dasharray: none; }
+  .rise { animation: none; }
 }
