@@ -84,6 +84,7 @@ Repo: `https://github.com/Romulus-Sol/DMV`, license MIT (repo root `LICENSE`).
 - **Order-independence** of the permissionless payouts (spec claims it via frozen snapshots) — ask for the formal argument, re-derived for `execute_specific_sol` (the conditional-accounts instruction).
 
 **(c) SPL / NFT / Token-2022 (the bricking failure modes)**
+> The escape-hatch we intend to add for this whole class — and the misdirection landmine it must avoid — is drafted in **Appendix A** (proposed, not yet implemented). Please review that design as part of this section.
 - **Transfer-hook / non-transferable / permanent-delegate / default-frozen mints:** a `transfer_checked` needing hook accounts (not supplied) or a non-transferable token can **never** be distributed → `close_token_dist` never runs → `open_token_dists` never decrements → `close_executed_vault` blocked, owner rent + residual stranded. What is the behavior for each extension?
 - **Frozen or missing beneficiary ATA:** a failed transfer leaves that mask bit unset **forever** → the same permanent-block cascade. Concrete griefing/liveness class.
 - **Close-path dust sweep hard-requires the *largest heir's* ATA.** `close_token_dist` sweeps *any* dust (`> 0`, even a few base units of rounding) and **requires** `largest_benef_ata` to exist/be-transferable; if it's missing/frozen/non-createable (default-frozen or non-transferable mint), the close reverts → the same permanent-block cascade — triggered by trivial dust, even after every actual bequest succeeded. Easier to hit than the pro-rata case above.
@@ -144,7 +145,7 @@ We can share the internal review notes + the ATA-spoof fix commit as an appendix
 
 | Item | Value |
 |---|---|
-| **Pinned commit** | Tag **`audit-2026-07-08`** (branch `devnet`; supersedes `-07-07`) — adds the **NEW-1** input-validation fix from the 2026-07-08 five-lens re-audit: `set_asset_plan`/`update_asset_plan` now reject a bequest whose mint is not a real token mint account (each distinct non-sentinel mint passed in `remaining_accounts`, validated via owner-check + Mint unpack), erroring **`InvalidPlanMint` (6044)** — closing a set-time footgun where a garbage mint could permanently block `finalize`. **45 errors now.** (`audit-2026-07-07` folded the Tier-2 hardening: **C1** MAX interval/grace bounds → 6042/6043, **C2a** `clear_asset_plan`, **G2** canonical `record_heartbeat` seeds.) Scope is frozen at this commit. Remaining planned program change: the **A1** execution-time escape-hatch (the *valid-then-closed / stuck-mint* availability class NEW-1's set-time guard cannot reach — see §5) plus the `FEE_WALLET` **constant value** (non-logic). |
+| **Pinned commit** | Tag **`audit-2026-07-08`** (branch `devnet`; supersedes `-07-07`) — adds the **NEW-1** input-validation fix from the 2026-07-08 five-lens re-audit: `set_asset_plan`/`update_asset_plan` now reject a bequest whose mint is not a real token mint account (each distinct non-sentinel mint passed in `remaining_accounts`, validated via owner-check + Mint unpack), erroring **`InvalidPlanMint` (6044)** — closing a set-time footgun where a garbage mint could permanently block `finalize`. **45 errors now.** (`audit-2026-07-07` folded the Tier-2 hardening: **C1** MAX interval/grace bounds → 6042/6043, **C2a** `clear_asset_plan`, **G2** canonical `record_heartbeat` seeds.) Scope is frozen at this commit. Remaining planned program change: the **A1** execution-time escape-hatch (the *valid-then-closed / stuck-mint* availability class NEW-1's set-time guard cannot reach — see §5(c) and the full **Appendix A** design proposal) plus the `FEE_WALLET` **constant value** (non-logic). |
 | **In-scope files** | the 32 `.rs` under `dead-mans-vault/programs/dead-mans-vault/src/` (primary) + the crank's completability question (§3). |
 | **Out of scope** | `tasks/*.md`, TEE/agent-key device custody, mobile UX, RPC/notify infra, economics. |
 | **Build/test** | `anchor build` (prod floors) — **mainnet must NOT set the `devnet` Cargo feature** (it lowers timing floors for tests only; CI asserts this). Tests: `yarn`/`ts-mocha` via `yarn test:devnet`. Caveat: local validator gossip port collides with another service — spec §11 has the standalone-validator recipe. |
@@ -156,4 +157,51 @@ We can share the internal review notes + the ATA-spoof fix commit as an appendix
 | **Contact / terms** | Romulus-Sol (repo owner) — GitHub `github.com/Romulus-Sol`; email + timezone: _add before sending_; mid-audit question SLA: same-day. NDA fine if required; license MIT; publication rights granted for the final report. |
 
 ---
-*Prepared 2026-07-05. This brief was itself reviewed for accuracy (claims verified against code) and completeness (skeptical-auditor pass) before sending.*
+
+## Appendix A — A1 redesign proposal: stuck-token-distribution escape hatch (please tear this apart)
+
+> **Status: proposed, NOT yet implemented.** This is the one remaining program change we intend to land *into* the audited scope. We are handing you the design deliberately — the obvious version of this fix is a **trap** that converts an availability bug into a fund-safety bug, and we want the mechanism reviewed *before* we write it. Grade the reasoning, not just the code.
+
+### A.1 The problem (recap of §5(c))
+After grace, if a bequeathed or held Token-2022 mint becomes unmovable mid-execution — a **frozen / non-KYC beneficiary ATA**, an issuer **pause**, or a **transfer-hook added after grace** — `transfer_checked` reverts and the paid-bit rolls back (CEI). Two independent blast radii:
+- **Specific bequest stuck** → `asset_plan.paid_mask` never fills → `finalize_execution` blocks the **whole vault** (`executed` never set, keeper bounty never paid, no close).
+- **Held/residual mint stuck** (or a donated junk mint) → `close_token_dist` unreachable → `open_token_dists` stuck > 0 → **both** core-PDA closes revert `TokensRemain` forever → ~0.02–0.03 SOL rent stranded.
+
+Heirs still receive every *movable* asset; this is post-grace, availability-only — **until** a naive fix turns it into loss (below).
+
+### A.2 What we will NOT build, and why (the landmine)
+The tempting fix — a **time-gated `force_close_token_dist(mint)` / `skip_stuck_bequest(j)`** that, after `EXECUTED_CLOSE_DELAY`, declares any stuck asset "done" and closes/skips it — is **rejected**:
+- **On-chain "provably unmovable" is only true for the `NonTransferable` extension.** Every other trigger (pause / freeze / transfer-hook / default-frozen) is **issuer-reversible**. A time delay does not make a reversible freeze permanent.
+- A premature skip therefore either **reroutes a specific bequest to the largest-share heir → theft-by-misdirection**, or **orphans a residual forever** — both are fund-safety failures, not availability ones.
+- **The fuzzer is blind to it:** sum-conservation (`Σpayouts ≤ snapshot`) still *passes* when tokens are silently orphaned or a bequest is redirected. A green suite would hide it.
+- Keying the force path off a beneficiary ATA's `frozen` flag re-opens a **decoy-frozen-ATA spoof** — the same class as the original Critical (`execute_specific_asset` ATA-spoof).
+
+### A.3 Design principles the escape hatch must satisfy
+- **P1 — Never reroute.** A stuck asset's rightful beneficiary is fixed at plan-set; no path may send it to a different heir (no largest-share sweep of a stuck *bequest*).
+- **P2 — Never orphan a *recoverable* asset.** Issuer-reversible stuck states can later clear; the core vault PDA must **not** be permanently closed while a recoverable positive balance remains.
+- **P3 — Provably-permanent vs reversible, decided on-chain and un-spoofably.** The only *provably permanent* unmovability signal we know is the canonical mint's **`NonTransferable`** extension. Force paths key off the mint account's extension set — **never** a beneficiary-ATA `frozen` flag, **never** a bare time delay.
+- **P4 — Decouple the two blast radii.** Finalizing the estate must not depend on a stuck *specific* bequest; and rent-cleanup close must never be *forced* at the cost of orphaning a recoverable balance.
+
+### A.4 Proposed mechanism (two independent changes)
+
+**Change 1 — decouple `finalize_execution` from stuck specific *token* bequests (kills blast-radius #1 with no skip/reroute).**
+Today `finalize` gates on `sol_paid_mask` full **and** `asset_plan.paid_mask` full. Proposed: gate `finalize` on `sol_paid_mask` + the **specific-SOL** portion of the plan (SOL is never issuer-freezable), and let **specific-*token* bequests complete independently, permissionlessly, idempotently — forever**. A stuck token bequest is **not skipped and not rerouted**; it is delivered to its *rightful* heir the moment the issuer unfreezes. `executed=true` + bounty are paid once the estate's SOL is distributed; the token bequest simply lags.
+*(Implementation sketch: split `asset_plan.paid_mask` accounting into SOL-specific vs token-specific, or add a `token_specifics_complete()` predicate that `finalize` no longer requires.)*
+
+**Change 2 — a narrow `force_close_token_dist(mint)` restricted to *provably-permanent* unmovability, + a re-inflation guard.**
+- `force_close_token_dist(mint)` may close a `TokenDist` (and decrement `open_token_dists`) **only when the canonical mint carries the `NonTransferable` extension** — the residual can provably *never* move. It does **not** sweep to the largest heir; the unmovable tokens stay in the vault ATA (orphaning is acceptable *only because they were permanently unmovable anyway*).
+- For every **reversible** stuck state (pause / freeze / hook / frozen-heir-ATA): **no force close.** `open_token_dists` stays > 0, the core close stays blocked, the ~0.02–0.03 SOL rent stays stranded until the issuer relents and a normal permissionless crank finishes the distribution + close. **Rent-stranding is the accepted cost** — recoverable, and it never risks funds.
+- **Prerequisite fix (invariant 6b, §5(b) re-inflation):** add a `!execution_log.completed` (or equivalent lifecycle) guard to `begin_token_dist` so no one can re-`init` a bequeathed mint's `TokenDist` at balance 0 *after* finalize to re-block the close. Without this, Change 2 cannot deliver a closeable vault.
+
+### A.5 Test / fuzz obligation (we will land this before the re-audit)
+- New stateful **"stuck-mint" property**: inject a mint whose `transfer_checked` reverts (paused / frozen heir ATA / hook-without-accounts) mid-sequence and assert — (i) SOL + all *movable* assets still reach the **correct** heirs; (ii) **no stuck asset is ever credited to a non-rightful beneficiary** (extend the no-misdirection oracle to cover the stuck asset, not just the movable ones); (iii) core close is blocked **iff** a *reversible*-stuck positive balance remains, and succeeds once it clears (or, for `NonTransferable`, after `force_close_token_dist`); (iv) `open_token_dists` cannot be re-inflated post-finalize.
+- **Strengthen the conservation oracle:** today `Σpayouts ≤ snapshot` passes even on orphaned/rerouted tokens. Add an oracle that a reversible-stuck balance is **neither dropped from accounting nor swept** — it must remain in the vault ATA. Re-run P6/P8/P9.
+
+### A.6 Questions we specifically want answered
+1. Is `NonTransferable` genuinely the **only** on-chain-provable permanent-unmovability signal, or are there other extension states (e.g. `default-account-state = frozen` on a mint whose `freeze_authority` is `None`, or permanent-delegate combinations) that are *also* provably permanent and safe to `force_close`?
+2. Is the **finalize/close decoupling** (Change 1) sound — does it break any conservation/idempotency invariant, and does paying the **bounty before token-specifics complete** open a griefing/incentive hole (nobody finishes the stuck bequest)? Is "specifics may lag finalize" acceptable, or is the stuck-but-un-executed vault the lesser evil?
+3. Is accepting **rent-stranding** (not orphaning) the right outcome for reversible-stuck mints? Is there a safe design in which the **rightful heir** (never the largest-share heir) can reclaim a long-reversibly-stuck bequest after an extended delay *without* opening a misdirection hole?
+4. Does the re-inflation guard on `begin_token_dist` adversely interact with legitimate **post-finalize** `execute_token_shares` (residual pro-rata distribution that correctly runs after `executed=true`)?
+
+---
+*Prepared 2026-07-05; Appendix A added 2026-07-10. This brief was itself reviewed for accuracy (claims verified against code) and completeness (skeptical-auditor pass) before sending.*
