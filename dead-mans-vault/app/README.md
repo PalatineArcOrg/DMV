@@ -118,7 +118,7 @@ And because execution is permissionless and off-device, the inheritance fires re
 │  │  • AssetPlan       ["asset_plan", vault]  (bequests)│ │
 │  │  • TokenDist       ["token_dist", vault, mint]      │ │
 │  │                                                     │ │
-│  │  19 instructions — owner setup + permissionless     │ │
+│  │  21 instructions — owner setup + permissionless     │ │
 │  │  execution (begin_execution, begin_token_dist,      │ │
 │  │  execute_specific_asset, execute_specific_sol,      │ │
 │  │  execute_sol_shares, execute_token_shares,          │ │
@@ -228,7 +228,7 @@ The complete flow, on a physical device:
 - **Node.js** 18+ and **Yarn**
 - **Android Studio** with SDK 34+ (for local builds)
 - **Rust** 1.89.0 and **Anchor CLI** 0.32.1 (for program development)
-- **Solana CLI** 3.0.15 (Agave) configured for devnet
+- **Solana CLI** 3.1.10 (Agave) configured for devnet
 - An MWA-compatible wallet (e.g., Phantom, Solflare, or Seed Vault) on your Android device
 - [Expo account](https://expo.dev/) (for EAS builds)
 
@@ -286,7 +286,7 @@ anchor deploy --provider.cluster devnet
 | **Network** | Solana Devnet |
 | **Explorer** | [View on Solana Explorer](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet) |
 | **Framework** | Anchor 0.32.1 |
-| **App version** | 1.13.13 (versionCode 99) |
+| **App version** | 1.13.19 (versionCode 105) |
 | **Tests** | 29/29 integration + property-fuzz suite (`yarn test:fuzz`) |
 
 ---
@@ -295,9 +295,9 @@ anchor deploy --provider.cluster devnet
 
 | Metric | Value |
 |--------|-------|
-| Program instructions | 20 |
+| Program instructions | 21 |
 | Program accounts (PDAs) | 5 (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist) |
-| Program error codes | 42 |
+| Program error codes | 45 |
 | Program tests | 29/29 integration + 9-property fuzz suite |
 | App screens | 14 |
 | App services | 10 |

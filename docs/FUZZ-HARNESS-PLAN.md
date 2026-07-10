@@ -121,7 +121,7 @@ The owner is the fee payer on every tx (incl. the permissionless cranks) so the 
 balance moves only by program transfers, keeping the bounty assertion exact.
 
 ## Risks / watch-items (Phase-1 outcomes)
-- ✅ **litesvm 1.2.1 executes the Agave-3.0.15-built `.so`** (verified via smoke probe;
+- ✅ **litesvm 1.2.1 executes the Agave-3.1.10-built `.so`** (verified via smoke probe;
   the creation-fee CPI runs). This was the main unknown — cleared.
 - ✅ `anchor-litesvm` incompat → dropped in favour of the native serialized-tx send
   (see Integration above).

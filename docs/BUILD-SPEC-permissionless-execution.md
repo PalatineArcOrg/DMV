@@ -7,7 +7,7 @@ the 0.01 SOL creation fee, the permissionless `close_executed_vault` + its 24h w
 `devnet` Cargo feature, `open_token_dists`) are summarized authoritatively in **§0.5**. The
 pre-build design narrative lives in `permissionless-execution-design.md`.
 
-**Program:** Anchor 0.32.1 · Rust 1.89.0 · Agave/Solana CLI 3.0.15 · Program ID
+**Program:** Anchor 0.32.1 · Rust 1.89.0 · Agave/Solana CLI 3.1.10 · Program ID
 `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb` (devnet; mainnet reuses the same keypair).
 
 ---
@@ -68,7 +68,7 @@ section overrides the older numbered sections wherever they still read stale.
   (`MIN_HEARTBEAT_INTERVAL` / `MIN_GRACE_PERIOD` / `EXECUTED_CLOSE_DELAY`); the `devnet` Cargo
   feature lowers them to 10s / 30s / 60s for tests. A CI test asserts the floors per profile.
   **Mainnet builds must NOT set `--features devnet`.**
-- **20 instructions** (11 owner + 9 permissionless) and **42 error codes** — see §4/§12/§13.
+- **21 instructions** (12 owner + 9 permissionless) and **45 error codes** — see §4/§12/§13.
 - **Owner-mutation freeze** is deadline-based (`require!(now < deadline)` → `VaultFrozen`) plus
   the `!executed` constraint (no ExecutionLog account added, cf. B1's optional). `update_vault`
   beneficiary edits are blocked while `has_asset_plan` (`BeneficiariesLockedByPlan`).

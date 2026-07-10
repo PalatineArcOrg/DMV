@@ -26,9 +26,9 @@ Assumption to state explicitly and have the auditor weigh: **availability of the
 | | |
 |---|---|
 | Framework | **Anchor 0.32.1** (`anchor-lang`/`anchor-spl` 0.32.1); compiles against **`solana-program` 2.3.0** |
-| Toolchain | **Rust pinned to 1.89.0** (`rust-toolchain.toml`); built with the **Agave/Solana CLI 3.0.15**. CI installs the same 1.89.0. |
+| Toolchain | **Rust pinned to 1.89.0** (`rust-toolchain.toml`); built with the **Agave/Solana CLI 3.1.10**. CI installs the same 1.89.0. |
 | Program source | **31 `.rs` files, ~2,700 LOC**, `programs/dead-mans-vault/src/` |
-| Instructions | **20** (11 owner/setup + 9 permissionless execution) |
+| Instructions | **21** (12 owner/setup + 9 permissionless execution) |
 | State PDAs | **5**: `VaultConfig`, `HeartbeatRecord`, `ExecutionLog`, `AssetPlan`, `TokenDist` |
 | Error codes | **45** (`errors.rs`) |
 | Tests | **29** integration tests (~1,450 LOC, ts-mocha), pass **locally** via `yarn test:devnet`. **CI runs only** the host-only prod-floor guard (`cargo test --lib`, asserts the timing minimums per build profile) — the full suite is **not** CI-gated. |
@@ -151,7 +151,7 @@ We can share the internal review notes + the ATA-spoof fix commit as an appendix
 | **Deployment** | devnet live; mainnet reuses the same program keypair (same ID); upgrade-authority per §7. |
 | **Upgrade authority** | Squads V4 multisig (2-of-3) + timelocked/announced upgrades; not immutable at launch (see §7). |
 | **Risk posture** | Early mainnet launch: aggregate TVL modest initially (early-adopter cohort, small test vaults), but **each vault may hold an individual's entire estate** — please weight severity by **per-vault worst-case (total, irreversible loss of one estate)**, not aggregate TVL. Vault count low at launch, growing with adoption; soft launch to a small cohort → public. |
-| **Timeline** | Start: earliest available slot (flexible on scheduling). Effort: your estimate for ~2,700 LOC / 20 instructions. Remediation turnaround: days. Re-audit requested after remediation. **Mainnet launch is gated on a passing re-audit — no fixed external deadline; we'd rather it be thorough than fast.** |
+| **Timeline** | Start: earliest available slot (flexible on scheduling). Effort: your estimate for ~2,700 LOC / 21 instructions. Remediation turnaround: days. Re-audit requested after remediation. **Mainnet launch is gated on a passing re-audit — no fixed external deadline; we'd rather it be thorough than fast.** |
 | **Prior report** | shareable on request (§9). |
 | **Contact / terms** | Romulus-Sol (repo owner) — GitHub `github.com/Romulus-Sol`; email + timezone: _add before sending_; mid-audit question SLA: same-day. NDA fine if required; license MIT; publication rights granted for the final report. |
 

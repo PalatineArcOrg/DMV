@@ -203,7 +203,7 @@ All transactions include per-instruction compute unit limits and dynamic priorit
 
 ### Error Codes
 
-42 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), specific-bequest shape including SOL bequests (`InvalidSolBequest`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, the owner-exclusive close window (`CloseDelayNotElapsed`), and vault lifecycle.
+45 custom error codes covering interval/share validation, signer authorization, the creation-fee recipient (`InvalidFeeRecipient`), specific-bequest shape including SOL bequests (`InvalidSolBequest`), the permissionless guards (index-equality recipients, mint/ATA pinning, anti-spoof canonical ATA, in-order bequests, mask state), the post-grace freeze, the owner-exclusive close window (`CloseDelayNotElapsed`), and vault lifecycle.
 
 ### Security
 
@@ -244,7 +244,7 @@ yarn build:prod      # PRODUCTION build (1-day / 7-day minimums) — mainnet
 | Tab | Screens | Purpose |
 |-----|---------|---------|
 | **Status** | Dashboard, Execution Log, Inheritances | Heartbeat button, portfolio overview (tokens + inline NFTs), vault status, escalation banner. **Inheritances** lists vaults the connected wallet can claim as a beneficiary and cranks the distribution (heir-paid) |
-| **Assets** | Assets Overview | Tokens · NFTs · DeFi tabs — token list with live prices, NFT gallery, DeFi positions grouped by protocol with closure strategies |
+| **Assets** | Assets Overview | Tokens · NFTs · Stocks · DeFi tabs — token list with live prices, NFT gallery, tokenized-stock (RWA) holdings, DeFi positions grouped by protocol with closure strategies |
 | **Vault** | SetupWizard, Welcome, Beneficiaries, Heartbeat Config, DeFi Positions, Estate Review | 4-step vault creation wizard with step indicator |
 | **Settings** | Settings | Wallet info, vault contract details, edit/update vault, revoke, demo mode, app lock |
 
@@ -308,7 +308,7 @@ React Native's Hermes runtime requires several workarounds:
 | Component | Version |
 |-----------|---------|
 | Anchor | 0.32.1 |
-| Solana CLI | 3.0.15 (Agave) |
+| Solana CLI | 3.1.10 (Agave) |
 | Rust | 1.89.0 |
 | Expo SDK | 52 |
 | React Native | 0.76.9 |
@@ -323,9 +323,9 @@ React Native's Hermes runtime requires several workarounds:
 ```
 dead-mans-vault/
 +-- programs/dead-mans-vault/src/    # Anchor program (Rust)
-|   +-- instructions/                # 20 instruction handlers
+|   +-- instructions/                # 21 instruction handlers
 |   +-- state/                       # Account definitions (VaultConfig, HeartbeatRecord, ExecutionLog, AssetPlan, TokenDist)
-|   +-- errors.rs                    # 42 error codes
+|   +-- errors.rs                    # 45 error codes
 |   +-- constants.rs                 # On-chain constants (FEE_WALLET, VAULT_CREATION_FEE_LAMPORTS) + mask helpers
 +-- tests/                           # dead-mans-vault.ts (29/29) + fuzz/ (litesvm + fast-check property suite)
 +-- app/                             # React Native mobile app (Expo SDK 52)
@@ -353,7 +353,7 @@ A standalone **keeper bot** (`keeper-bot/`) — runnable by anyone — discovers
 
 ### Prerequisites
 
-- Solana CLI 3.0.x
+- Solana CLI 3.1.x
 - Anchor 0.32.x
 - Rust 1.89.0 (pinned via rust-toolchain.toml)
 - Node.js 18+
