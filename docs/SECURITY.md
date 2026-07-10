@@ -13,16 +13,16 @@ Critical), and its money-math + state machine are now covered by an extensive
 **property-fuzz suite** — 9 properties over conservation, idempotency, specific
 bequests, a theft-must-revert battery, the post-deadline freeze, Token-2022
 transfer-fee close, NFT bequests, and a stateful instruction-sequence fuzzer (see
-[`FUZZ-HARNESS-PLAN.md`](./FUZZ-HARNESS-PLAN.md)) — plus an RPC-failure/race stress
-harness for the crank clients ([`STRESS-TESTING-PLAN.md`](./STRESS-TESTING-PLAN.md)).
+[`FUZZ-HARNESS-PLAN.md`](https://github.com/Romulus-Sol/DMV/blob/HEAD/docs/FUZZ-HARNESS-PLAN.md)) — plus an RPC-failure/race stress
+harness for the crank clients ([`STRESS-TESTING-PLAN.md`](https://github.com/Romulus-Sol/DMV/blob/HEAD/docs/STRESS-TESTING-PLAN.md)).
 That fuzzing + stress testing found **no program bug**. **But it has NOT had a paid
 professional audit.** Treat it as community-reviewed and fuzz-tested, not audited. Do
 not entrust more than you can afford to lose, and prefer small vaults while the
 protocol is young.
 
 The trust model, invariants, and the exact surface we want eyes on are documented in
-[`AUDIT-SCOPE.md`](./AUDIT-SCOPE.md) — start there. The design of the permissionless
-execution model is in [`BUILD-SPEC-permissionless-execution.md`](./BUILD-SPEC-permissionless-execution.md).
+[`AUDIT-SCOPE.md`](https://github.com/Romulus-Sol/DMV/blob/HEAD/docs/AUDIT-SCOPE.md) — start there. The design of the permissionless
+execution model is in [`BUILD-SPEC-permissionless-execution.md`](https://github.com/Romulus-Sol/DMV/blob/HEAD/docs/BUILD-SPEC-permissionless-execution.md).
 
 ## Deployment
 
@@ -52,7 +52,7 @@ will keep you updated on the fix and any reward. Please give us reasonable time 
 remediate before any public disclosure (coordinated disclosure).
 
 ### In scope
-- The on-chain Anchor program (`programs/dead-mans-vault/`) — anything that lets funds
+- The on-chain Anchor program (`dead-mans-vault/programs/dead-mans-vault/`) — anything that lets funds
   reach a non-beneficiary, over-distributes, bypasses the post-deadline freeze, or
   **permanently blocks** a legitimate distribution (availability is a security property
   for an inheritance switch).

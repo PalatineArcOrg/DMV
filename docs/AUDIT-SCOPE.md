@@ -27,7 +27,7 @@ Assumption to state explicitly and have the auditor weigh: **availability of the
 |---|---|
 | Framework | **Anchor 0.32.1** (`anchor-lang`/`anchor-spl` 0.32.1); compiles against **`solana-program` 2.3.0** |
 | Toolchain | **Rust pinned to 1.89.0** (`rust-toolchain.toml`); built with the **Agave/Solana CLI 3.1.10**. CI installs the same 1.89.0. |
-| Program source | **31 `.rs` files, ~2,700 LOC**, `programs/dead-mans-vault/src/` |
+| Program source | **32 `.rs` files, ~2,700 LOC**, `dead-mans-vault/programs/dead-mans-vault/src/` |
 | Instructions | **21** (12 owner/setup + 9 permissionless execution) |
 | State PDAs | **5**: `VaultConfig`, `HeartbeatRecord`, `ExecutionLog`, `AssetPlan`, `TokenDist` |
 | Error codes | **45** (`errors.rs`) |
@@ -45,7 +45,7 @@ Repo: `https://github.com/Romulus-Sol/DMV`, license MIT (repo root `LICENSE`).
 
 ## 3. Scope
 
-**Primary (the trust boundary):** the Anchor program — **all 31 `.rs` files** under `programs/dead-mans-vault/src/`.
+**Primary (the trust boundary):** the Anchor program — **all 32 `.rs` files** under `dead-mans-vault/programs/dead-mans-vault/src/`.
 
 **Elevated to primary — liveness/completability of the permissionless flow.** The §7 crank sequence is replicated in three callers (`app/`, `notify-server/src/executor.js`, `keeper-bot/`). These hold **no fund authority** (they only pay fees), so *theft* review is light — **but the correctness of the on-chain program depends on the crank driving it to completion** (orphaned-token invariant, tx-fittability, transfer-hook account passing). We ask the auditor to assess **whether the permissionless flow is always completable and cannot be permanently blocked**, treating the crank logic as in-scope for that question (the specific TypeScript implementation review can be lighter).
 
@@ -145,7 +145,7 @@ We can share the internal review notes + the ATA-spoof fix commit as an appendix
 | Item | Value |
 |---|---|
 | **Pinned commit** | Tag **`audit-2026-07-08`** (branch `devnet`; supersedes `-07-07`) — adds the **NEW-1** input-validation fix from the 2026-07-08 five-lens re-audit: `set_asset_plan`/`update_asset_plan` now reject a bequest whose mint is not a real token mint account (each distinct non-sentinel mint passed in `remaining_accounts`, validated via owner-check + Mint unpack), erroring **`InvalidPlanMint` (6044)** — closing a set-time footgun where a garbage mint could permanently block `finalize`. **45 errors now.** (`audit-2026-07-07` folded the Tier-2 hardening: **C1** MAX interval/grace bounds → 6042/6043, **C2a** `clear_asset_plan`, **G2** canonical `record_heartbeat` seeds.) Scope is frozen at this commit. Remaining planned program change: the **A1** execution-time escape-hatch (the *valid-then-closed / stuck-mint* availability class NEW-1's set-time guard cannot reach — see §5) plus the `FEE_WALLET` **constant value** (non-logic). |
-| **In-scope files** | the 32 `.rs` under `programs/dead-mans-vault/src/` (primary) + the crank's completability question (§3). |
+| **In-scope files** | the 32 `.rs` under `dead-mans-vault/programs/dead-mans-vault/src/` (primary) + the crank's completability question (§3). |
 | **Out of scope** | `tasks/*.md`, TEE/agent-key device custody, mobile UX, RPC/notify infra, economics. |
 | **Build/test** | `anchor build` (prod floors) — **mainnet must NOT set the `devnet` Cargo feature** (it lowers timing floors for tests only; CI asserts this). Tests: `yarn`/`ts-mocha` via `yarn test:devnet`. Caveat: local validator gossip port collides with another service — spec §11 has the standalone-validator recipe. |
 | **Deployment** | devnet live; mainnet reuses the same program keypair (same ID); upgrade-authority per §7. |
