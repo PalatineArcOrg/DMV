@@ -58,16 +58,39 @@ export class ClaimService {
       if (firstPass.length === 0) {
         throw new Error('This estate has already been distributed.');
       }
+      // A1 mitigation (mirrors the keeper / notify / owner cranks): a mint the issuer
+      // paused / froze / hook-switched / made non-transferable makes its
+      // transfer_checked revert. Don't let one stuck mint's tx abort the whole claim —
+      // an on-chain revert skips that tx and the loop continues, so every distributable
+      // asset still reaches the heirs; only the stuck mint's residual + rent strand
+      // (the tolerable A1 outcome). On-chain masks keep it idempotent, so a
+      // transiently-failed step re-surfaces on the next rebuild; the pass count is
+      // bounded. A *signing rejection* (heir cancels) still aborts — it propagates from
+      // signOnly, not sendConfirm.
       let pass = firstPass;
+      let firstSendError: unknown = null;
       const MAX_PASSES = 10; // safety bound; each pass strictly advances on-chain state
       for (let p = 0; p < MAX_PASSES && pass.length > 0; p += 1) {
+        let progressed = 0;
         for (const { label, tx } of pass) {
           onProgress?.(label, i, i + pass.length);
-          await ClaimService.signSend(connection, tx, heir, signTransaction);
-          i += 1;
+          const s = await ClaimService.signOnly(connection, tx, heir, signTransaction);
+          try {
+            await ClaimService.sendConfirm(connection, s);
+            i += 1;
+            progressed += 1;
+          } catch (e) {
+            if (firstSendError === null) firstSendError = e; // stuck-mint revert — skip, continue
+          }
         }
+        // A pass that advanced nothing won't advance on a rebuild either — stop
+        // retrying so a permanently-stuck mint doesn't spin the full MAX_PASSES.
+        if (progressed === 0) break;
         pass = await svc.buildClaimTransactions(heir, owner);
       }
+      // If NOTHING went through, surface the real on-chain error instead of silently
+      // reporting success (e.g. an unexpected revert, not a stuck mint).
+      if (i === 0 && firstSendError) throw firstSendError;
 
       // Best-effort cleanup: close fully-paid token dists (sweeps dust, reclaims
       // rent). The distribution is already complete if this fails.
@@ -75,8 +98,13 @@ export class ClaimService {
         const closes = await svc.buildCloseTokenDistTransactions(heir, owner);
         for (const { label, tx } of closes) {
           onProgress?.(label, i, i + closes.length);
-          await ClaimService.signSend(connection, tx, heir, signTransaction);
-          i += 1;
+          try {
+            const s = await ClaimService.signOnly(connection, tx, heir, signTransaction);
+            await ClaimService.sendConfirm(connection, s);
+            i += 1;
+          } catch {
+            // one stuck/failed close must not block the others — best-effort cleanup
+          }
         }
       } catch {
         // non-fatal — beneficiaries already received every asset
@@ -88,21 +116,36 @@ export class ClaimService {
     }
   }
 
-  private static async signSend(
+  /**
+   * Sign only (fresh blockhash + MWA prompt). Kept separate from the send so an
+   * heir *rejecting* the wallet prompt aborts the whole claim (this throws), while a
+   * later on-chain revert (a stuck mint) can be caught and skipped by the caller.
+   */
+  private static async signOnly(
     connection: ReturnType<VaultTransactionService['getConnection']>,
     tx: Transaction,
     heir: PublicKey,
     signTransaction: MwaSign,
-  ): Promise<string> {
+  ): Promise<{ signed: Transaction; blockhash: string; lastValidBlockHeight: number }> {
     tx.feePayer = heir;
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
     tx.recentBlockhash = blockhash;
     const signed = (await signTransaction(tx)) as Transaction;
-    const sig = await connection.sendRawTransaction(signed.serialize(), {
+    return { signed, blockhash, lastValidBlockHeight };
+  }
+
+  private static async sendConfirm(
+    connection: ReturnType<VaultTransactionService['getConnection']>,
+    s: { signed: Transaction; blockhash: string; lastValidBlockHeight: number },
+  ): Promise<string> {
+    const sig = await connection.sendRawTransaction(s.signed.serialize(), {
       skipPreflight: false,
       preflightCommitment: 'confirmed',
     });
-    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    await connection.confirmTransaction(
+      { signature: sig, blockhash: s.blockhash, lastValidBlockHeight: s.lastValidBlockHeight },
+      'confirmed',
+    );
     return sig;
   }
 }

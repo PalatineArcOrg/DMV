@@ -85,6 +85,17 @@ export class ExecutionService {
       const fullSol = fullU32Mask(n);
       const largestBenef = VaultTransactionService.largestShareWallet(onChainBenefs);
 
+      // A1 mitigation (mirrors keeper-bot/src/crank.js + notify-server executor.js):
+      // a mint the issuer paused / froze / hook-switched / made non-transferable makes
+      // its transfer_checked revert. Skip a stuck mint for this run instead of throwing
+      // out of the whole crank — every distributable asset still reaches the heirs; only
+      // the stuck mint's residual + rent strand (the tolerable A1 outcome, pending the
+      // program-level escape hatch — external-audit scope). On-chain masks keep this
+      // idempotent, so a transiently-stuck mint retries on the next Stage-4 pass.
+      const stuckMints = new Set<string>();
+      const markStuck = (mint: PublicKey) => stuckMints.add(mint.toString());
+      const isStuck = (mint: PublicKey) => stuckMints.has(mint.toString());
+
       // 1. begin_execution (idempotent — account already existing == done).
       let execLog = await this.txService.fetchExecutionLog(owner);
       if (!execLog) {
@@ -114,7 +125,9 @@ export class ExecutionService {
       for (const mint of mints) {
         const td = await this.txService.fetchTokenDist(owner, mint);
         if (!td) {
-          await this.txService.crankBeginTokenDist(agent, owner, mint, hasAssetPlan);
+          try {
+            await this.txService.crankBeginTokenDist(agent, owner, mint, hasAssetPlan);
+          } catch { markStuck(mint); }
         }
       }
 
@@ -131,11 +144,17 @@ export class ExecutionService {
             const a = assetPlan.assignments[j];
             const benef = benefWallets[a.beneficiaryIndex];
             const isSol = a.mint.equals(PublicKey.default);
-            await this.runStep(ownerWallet, `spec_${j}`, () =>
-              isSol
-                ? this.txService.crankExecuteSpecificSol(agent, owner, j, benef)
-                : this.txService.crankExecuteSpecificAsset(agent, owner, a.mint, j, benef),
-            );
+            // A stuck mint's earlier bequest already failed → its later ones would
+            // revert SpecificOutOfOrder anyway; skip them so the loop reaches other
+            // mints' bequests.
+            if (!isSol && isStuck(a.mint)) continue;
+            try {
+              await this.runStep(ownerWallet, `spec_${j}`, () =>
+                isSol
+                  ? this.txService.crankExecuteSpecificSol(agent, owner, j, benef)
+                  : this.txService.crankExecuteSpecificAsset(agent, owner, a.mint, j, benef),
+              );
+            } catch { if (!isSol) markStuck(a.mint); }
           }
         }
       }
@@ -166,25 +185,31 @@ export class ExecutionService {
       // 7. Token residual pro-rata per mint, batched (gated on grace only — runs
       //    after finalize).
       for (const mint of mints) {
+        if (isStuck(mint)) continue;
         const td = await this.txService.fetchTokenDist(owner, mint);
         if (!td) continue;
         const unpaid = unpaidIndices(td.paidMask, n);
-        for (const idxs of chunk(unpaid, MAX_BATCH)) {
-          await this.runBatch(ownerWallet, idxs.map((i) => `tok_${mint.toString()}_${i}`), () =>
-            this.txService.crankExecuteTokenShares(agent, owner, mint, idxs, idxs.map((i) => benefWallets[i])),
-          );
-        }
+        try {
+          for (const idxs of chunk(unpaid, MAX_BATCH)) {
+            await this.runBatch(ownerWallet, idxs.map((i) => `tok_${mint.toString()}_${i}`), () =>
+              this.txService.crankExecuteTokenShares(agent, owner, mint, idxs, idxs.map((i) => benefWallets[i])),
+            );
+          }
+        } catch { markStuck(mint); }
       }
 
       // 8. Close each TokenDist once its residual is fully paid (sweeps dust to
       //    the largest-share beneficiary, closes the ATA + TokenDist).
       for (const mint of mints) {
+        if (isStuck(mint)) continue;
         const td = await this.txService.fetchTokenDist(owner, mint);
         if (!td) continue;
         if ((td.paidMask >>> 0) === fullSol) {
-          await this.runStep(ownerWallet, `close_${mint.toString()}`, () =>
-            this.txService.crankCloseTokenDist(agent, owner, mint, largestBenef),
-          );
+          try {
+            await this.runStep(ownerWallet, `close_${mint.toString()}`, () =>
+              this.txService.crankCloseTokenDist(agent, owner, mint, largestBenef),
+            );
+          } catch { markStuck(mint); }
         }
       }
 
