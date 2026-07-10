@@ -48,8 +48,8 @@ the origin rejects non-Cloudflare source IPs. Custom bring-your-own RPC is user-
 
 Include: a description, the impact, and a proof-of-concept or reproduction (a failing
 test against the LiteSVM harness is ideal). We aim to acknowledge within a few days and
-will keep you updated on the fix and any reward. Please give us reasonable time to
-remediate before any public disclosure (coordinated disclosure).
+will keep you updated on the fix. Please give us reasonable time to remediate before any
+public disclosure (coordinated disclosure).
 
 ### In scope
 - The on-chain Anchor program (`dead-mans-vault/programs/dead-mans-vault/`) — anything that lets funds
@@ -68,12 +68,18 @@ remediate before any public disclosure (coordinated disclosure).
 - Findings requiring a compromised owner device (the agent key can only stall the
   switch, never move funds — this is by design).
 
-## Bug bounty
+## Recognition
 
-A **severity-scaled bounty** is offered for valid, previously-unreported findings,
-funded from protocol fees. Rewards weight toward anything that risks **loss or
-misdirection of user funds** or a **permanent block** of a distribution. Email first
-to coordinate scope and terms before doing any on-chain testing beyond devnet.
+DMV is an independent, self-funded open-source project — there is **no paid bug
+bounty**. What we can offer for a valid, previously-unreported finding is genuine
+credit: a named acknowledgment in `CHANGELOG.md` and the GitHub release notes (or your
+preferred anonymity), co-authorship on the fix if you'd like it, and a standing
+reference for your work. If the project is ever funded or reaches mainnet with revenue,
+past reporters of serious findings will be the first we come back to reward
+retroactively — but we won't promise money we don't have today. Findings that risk
+**loss or misdirection of user funds** or a **permanent block** of a distribution are
+the ones we care about most. Please email first before any on-chain testing beyond
+devnet.
 
 ## Safe harbor
 
