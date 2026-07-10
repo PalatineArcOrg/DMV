@@ -61,3 +61,6 @@ dead-mans-vault/app/google-services.json
 
 # Large demo videos — too big for GitHub (>100MB); host via release attachment or externally
 pitch-deck/*.mp4
+
+# Local design assets (app icon source files)
+Crypto Inheritance App Icon/
