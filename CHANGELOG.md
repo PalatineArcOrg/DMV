@@ -6,6 +6,21 @@ All notable changes to Dead Man's Vault are documented here. The format follows
 at [dmv.palatinearc.com/changelog](https://dmv.palatinearc.com/changelog.html). Network: Solana Devnet.
 Program ID `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`.
 
+## [1.13.20] — 2026-07-10 — Resilient distribution: skip a stuck token, deliver the rest
+
+- **App (v1.13.20 / versionCode 106).** Hardened the distribution crank against a hostile
+  token. If a bequeathed or held Token-2022 mint becomes unmovable during distribution — the
+  issuer paused/froze it, added a transfer hook, or made it non-transferable — its transfer
+  reverts. Previously that one stuck asset could stall distribution of **every other** asset in
+  the estate. Now the owner/agent crank and the heir claim crank skip a stuck mint and keep
+  going, matching the always-on keeper-bot and notify-server cranks: every distributable asset
+  still reaches the heirs, and only the stuck mint's own residual + rent strand (recoverable if
+  the issuer relents — on-chain masks keep it idempotent, so it retries automatically). The heir
+  claim also splits signing from submission, so a wallet rejection still aborts the claim while
+  an on-chain revert only skips that one asset. Inheritance correctness is unchanged — the
+  program still computes every payout from frozen on-chain state; this only makes the off-chain
+  crank robust to a hostile token.
+
 ## [1.13.19] — 2026-07-09 — Vault balance: token names & logos
 
 - **App (v1.13.19 / versionCode 105).** The Status screen's Vault Balance card listed the
