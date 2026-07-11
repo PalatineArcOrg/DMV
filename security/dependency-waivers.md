@@ -6,8 +6,9 @@ job runs `audit-ci` gated by `security/audit-ci.jsonc`). Every accepted advisory
 with its rationale. To accept a new one, add its GHSA id to `audit-ci.jsonc` **and** document it
 here — never re-add `|| true`.
 
-Scope note: the **mobile app** and the **Rust program** audits remain *reported* (non-blocking)
-for now — see "Not yet gated" below. This waiver file is the single record for all three.
+Scope note: the **notify-server** and the **Rust program** audits are **blocking**; the **mobile
+app** audit stays *reported* by design (native APK, build-time deps) — see the sections below.
+This waiver file is the single record for all three.
 
 ---
 
@@ -35,17 +36,34 @@ variable-length buffers into the vulnerable code paths.
 
 ---
 
-## Not yet gated (reported)
+## Also gated: Rust program (BLOCKING)
 
-- **Mobile app (`app-typecheck` job) — reported.** The shipped artifact is a **native arm64
-  APK**; `yarn audit` surfaces ~30 high advisories that are almost entirely **build-time**
-  dependencies (Metro bundler, Expo/EAS CLI, `tar` — e.g. GHSA-34x7-hfp2-rc4v node-tar — etc.)
-  that **do not run in the shipped app**. The only *runtime-reachable* highs are the same
-  `@solana/web3.js` transitive ones gated above. Gating the app on build-tool churn would be
-  noise + constant maintenance. **Revisit** when a runtime-reachable-only app audit is feasible.
-- **Rust program (`program` job) — reported.** `cargo audit` was **0 vulnerabilities / 5
-  informational** as of 2026-07-06. Enumerating current RUSTSEC ids and gating `cargo audit`
-  (via `deny.toml` / `--ignore`) is a **follow-up** slice.
+`cargo audit` in the `program` job is **blocking** (default mode: fails on **vulnerabilities**,
+passes on informational warnings). As of 2026-07-11 the tree has **0 vulnerabilities** and **5
+informational warnings** — all `unmaintained`/`unsound` notices on deep transitive Solana-stack
+deps, none an exploitable vulnerability, so `cargo audit` (default) does not fail on them:
+
+| RUSTSEC | Crate | Kind | Note |
+|---------|-------|------|------|
+| RUSTSEC-2025-0141 | `libsecp256k1` | unmaintained | transitive (Solana stack) |
+| RUSTSEC-2025-0161 | `anyhow` | unmaintained | transitive build/tooling |
+| RUSTSEC-2026-0190 | `rand` | unsound (`downcast_mut`) | transitive |
+| RUSTSEC-2026-0097 | `rand` | unsound | transitive |
+
+A future **vulnerability** (not a warning) will fail the gate. To accept one, add
+`cargo audit --ignore RUSTSEC-…` in `ci.yml` and document it here. If we ever want to fail on the
+informational warnings too, add `--deny warnings` (not done — they're non-exploitable noise here).
+
+## Not gated (reported) — FINAL decision
+
+- **Mobile app (`app-typecheck` job) — reported, and this is the settled decision.** The shipped
+  artifact is a **native arm64 APK**; `yarn audit` surfaces ~30 high advisories that are almost
+  entirely **build-time** dependencies (Metro bundler, Expo/EAS CLI, `tar` — e.g.
+  GHSA-34x7-hfp2-rc4v node-tar — etc.) that **do not run in the shipped app**. The only
+  *runtime-reachable* highs are the same `@solana/web3.js` transitive ones **already gated on the
+  notify-server** above. Gating the app on RN/Expo build-tool churn would be pure noise + constant
+  maintenance for zero shipped-app risk. **Decision: leave the app audit reported** unless a
+  runtime-reachable-only audit mechanism becomes available (no such tool today for the RN bundle).
 
 ## Review cadence
 Re-review this file **before the mainnet cutover** and on any major `@solana/web3.js` upgrade.
