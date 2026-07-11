@@ -124,12 +124,13 @@ export async function verifyNetwork(): Promise<NetworkVerification> {
   if (verifiedForRpc === activeRpcUrl) {
     return { ...base, state: 'VERIFIED' };
   }
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const received = await Promise.race<string>([
       new Connection(activeRpcUrl, 'confirmed').getGenesisHash(),
-      new Promise<string>((_, reject) =>
-        setTimeout(() => reject(new Error('genesis timeout')), GENESIS_TIMEOUT_MS),
-      ),
+      new Promise<string>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('genesis timeout')), GENESIS_TIMEOUT_MS);
+      }),
     ]);
     if (received === EXPECTED_GENESIS_HASH) {
       verifiedForRpc = activeRpcUrl;
@@ -140,5 +141,7 @@ export async function verifyNetwork(): Promise<NetworkVerification> {
   } catch {
     verifiedForRpc = null;
     return { ...base, state: 'UNKNOWN' };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

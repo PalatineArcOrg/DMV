@@ -15,8 +15,21 @@ export const FEE_WALLET = '98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp';
  *  gate (rpcConfig.verifyNetwork) checks the live RPC's genesis hash against
  *  EXPECTED_GENESIS_HASH and fails closed on mismatch — so an accidental wrong-cluster
  *  RPC cannot silently connect. */
+const RAW_EXPECTED_CLUSTER = process.env.EXPO_PUBLIC_EXPECTED_CLUSTER;
+// Fail LOUD on a misconfigured build rather than silently falling back to devnet: the
+// common footgun is setting "mainnet" (Solana's cluster is "mainnet-beta"). An empty/unset
+// value is the intended devnet default for the current phase.
+if (
+  RAW_EXPECTED_CLUSTER &&
+  RAW_EXPECTED_CLUSTER !== 'devnet' &&
+  RAW_EXPECTED_CLUSTER !== 'mainnet-beta'
+) {
+  throw new Error(
+    `Invalid EXPO_PUBLIC_EXPECTED_CLUSTER "${RAW_EXPECTED_CLUSTER}" — must be "devnet" or "mainnet-beta" (note: NOT "mainnet").`,
+  );
+}
 export const EXPECTED_CLUSTER: 'devnet' | 'mainnet-beta' =
-  process.env.EXPO_PUBLIC_EXPECTED_CLUSTER === 'mainnet-beta' ? 'mainnet-beta' : 'devnet';
+  RAW_EXPECTED_CLUSTER === 'mainnet-beta' ? 'mainnet-beta' : 'devnet';
 
 /** Canonical Solana genesis hashes per cluster — the ground truth used to verify which
  *  network an RPC is actually serving (never inferred from the URL string). */
