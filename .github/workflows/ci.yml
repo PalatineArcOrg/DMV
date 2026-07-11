@@ -4,6 +4,7 @@ on:
   push:
     branches: [devnet, main, mainnet]
   pull_request:
+  workflow_dispatch: # manual trigger for the release-tier `integration` job (below)
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -196,3 +197,64 @@ jobs:
       - run: yarn install --frozen-lockfile
       - name: Property-fuzz suite (litesvm + fast-check, prod floors via clock-warp)
         run: yarn test:fuzz
+
+  # ---- Release-tier integration suite (full validator-backed ts-mocha) ----
+  # The 39-test suite (tests/dead-mans-vault.ts) needs a REAL validator (it airdrops 500 SOL,
+  # impossible on public devnet) + ~86s of real grace waits, so it's too slow for every PR.
+  # `workflow_dispatch`-ONLY for now (manual "run the full suite before a deploy"); add
+  # main/mainnet/tag triggers once it's proven green across a couple of runs. `anchor test`
+  # starts its OWN embedded solana-test-validator (no Agora port-8000 collision in a clean
+  # runner — that collision is VPS-only). Prelude mirrors the `fuzz` job.
+  integration:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: dead-mans-vault
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: System deps (libudev for anchor-cli's hidapi)
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libudev-dev
+      - name: Cache Solana + Anchor toolchain
+        id: toolchain
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.cargo/bin/anchor
+          key: solana-3.1.10-anchor-0.32.1
+      - name: Install Solana (Agave 3.1.10) + Anchor 0.32.1 (cache miss only)
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.10/install)"
+          cargo install anchor-cli --version 0.32.1 --locked --force
+      - name: PATH
+        run: |
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Cache program build (devnet feature — separate from the fuzz job's prod build)
+        uses: actions/cache@v6
+        with:
+          path: dead-mans-vault/target
+          key: sbf-target-devnet-${{ hashFiles('dead-mans-vault/programs/**', 'dead-mans-vault/Cargo.lock', 'dead-mans-vault/Anchor.toml') }}
+      - name: Generate a local keypair (provider wallet; the embedded validator airdrops to it)
+        run: |
+          mkdir -p "$HOME/.config/solana"
+          solana-keygen new --no-bip39-passphrase --force -o "$HOME/.config/solana/id.json"
+      - run: yarn install --frozen-lockfile
+      - name: Full integration suite (anchor build --features devnet + anchor test on a local validator)
+        run: yarn test:devnet
+      - name: Upload validator + program logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: |
+            dead-mans-vault/.anchor/
+            dead-mans-vault/test-ledger/
+          if-no-files-found: ignore
