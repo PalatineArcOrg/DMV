@@ -1,0 +1,10 @@
+{
+  // Machine-readable allowlist consumed by `audit-ci` in CI (the notify-server audit gate).
+  // Fails CI on ANY new high/critical advisory; only the advisories below are accepted.
+  // Full human rationale (reachability, impact, owner, review date) is in dependency-waivers.md.
+  "high": true,
+  "allowlist": [
+    "GHSA-3gc7-fjrx-p6mg",
+    "GHSA-w5hq-g745-h8pq"
+  ]
+}
