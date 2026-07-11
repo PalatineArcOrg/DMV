@@ -16,6 +16,9 @@ export {
   explorerTx,
   maskRpc,
   loadRpcOverride,
+  verifyNetwork,
   DEFAULT_RPC_URL,
   RPC_OVERRIDE_KEY,
 } from '@app/utils/rpcConfig';
+export type { NetworkVerification, NetworkState } from '@app/utils/rpcConfig';
+export { useNetworkStore } from '@app/store/useNetworkStore';
