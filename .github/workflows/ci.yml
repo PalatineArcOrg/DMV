@@ -247,8 +247,15 @@ jobs:
           mkdir -p "$HOME/.config/solana"
           solana-keygen new --no-bip39-passphrase --force -o "$HOME/.config/solana/id.json"
       - run: yarn install --frozen-lockfile
-      - name: Full integration suite (anchor build --features devnet + anchor test on a local validator)
-        run: yarn test:devnet
+      - name: Full integration suite (anchor build --features devnet + anchor test on a LOCAL validator)
+        # Force localnet: Anchor.toml pins cluster=devnet (used for real deploys), but this suite
+        # needs a LOCAL validator (it airdrops 500 SOL, impossible on public devnet). Without the
+        # override, `anchor test` deploys to real devnet and fails "insufficient funds".
+        # --provider.cluster localnet = anchor test's standard flow: start its own
+        # solana-test-validator, fund the provider wallet, deploy locally, run the suite.
+        run: |
+          anchor build -- --features devnet
+          anchor test --skip-build --provider.cluster localnet
       - name: Upload validator + program logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
