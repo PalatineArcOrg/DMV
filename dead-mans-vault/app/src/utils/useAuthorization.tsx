@@ -140,6 +140,10 @@ export function useAuthorization() {
   );
   const authorizeSession = useCallback(
     async (wallet: AuthorizeAPI) => {
+      // NOTE: connect/authorize is intentionally NOT network-gated — it signs nothing
+      // on-chain and is needed to READ a vault (the dashboard is keyed by owner pubkey).
+      // The fail-closed guard lives on the tx-SIGNING paths (useMobileWallet.signTransaction
+      // / signAndSendTransaction), so an UNKNOWN network stays read-only, not unusable.
       const authorizationResult = await wallet.authorize({
         identity: APP_IDENTITY,
         chain: getChainIdentifier(),

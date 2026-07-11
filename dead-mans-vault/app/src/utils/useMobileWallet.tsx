@@ -7,6 +7,7 @@ import {
 } from "@solana/web3.js";
 import { useCallback, useMemo } from "react";
 import { SignInPayload } from "@solana-mobile/mobile-wallet-adapter-protocol";
+import { assertNetworkVerified } from "../store/useNetworkStore";
 
 export function useMobileWallet() {
   const { authorizeSessionWithSignIn, authorizeSession, deauthorizeSession } =
@@ -37,6 +38,9 @@ export function useMobileWallet() {
     async (
       transaction: Transaction | VersionedTransaction,
     ): Promise<Transaction | VersionedTransaction> => {
+      // Fail-closed: never sign an on-chain tx on an unverified network (the UNKNOWN
+      // "continue anyway" path). Connect/read is allowed; signing is not.
+      assertNetworkVerified("Signing a transaction");
       return await transact(async (wallet) => {
         await authorizeSession(wallet);
         const signedTransactions = await wallet.signTransactions({
@@ -53,6 +57,7 @@ export function useMobileWallet() {
       transaction: Transaction | VersionedTransaction,
       minContextSlot?: number,
     ): Promise<TransactionSignature> => {
+      assertNetworkVerified("Signing a transaction");
       return await transact(async (wallet) => {
         await authorizeSession(wallet);
         const signatures = await wallet.signAndSendTransactions({

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { ClaimService } from '../lib/core';
+import { ClaimService, isNetworkVerified } from '../lib/core';
 
 export interface ClaimState {
   running: boolean;
@@ -27,6 +27,11 @@ export function useClaim() {
     async (ownerAddress: string) => {
       if (!publicKey || !signTransaction) {
         setState({ ...IDLE, error: 'Connect a wallet first.' });
+        return;
+      }
+      // Fail-closed: no claim writes on an unverified network (web UNKNOWN "continue" path).
+      if (!isNetworkVerified()) {
+        setState({ ...IDLE, error: 'Network not verified — reload and verify the network before claiming.' });
         return;
       }
       let owner: PublicKey;

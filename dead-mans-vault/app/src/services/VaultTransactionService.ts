@@ -273,6 +273,11 @@ export class VaultTransactionService {
     ownerPubkey: PublicKey,
     method: 'activeTap' | 'biometricConfirm' | 'onChainActivity' | 'pinChallenge' | 'hardwareSwitch',
   ): Promise<string> {
+    // NOTE: deliberately NOT network-gated. The heartbeat is a liveness signal that moves
+    // no funds — it must fail OPEN. Blocking it on an unverified-but-possibly-fine network
+    // (the UNKNOWN "continue anyway" path) looks exactly like death and could drive the
+    // dead-man's switch to a premature, irreversible execution. Fund-moving writes fail
+    // closed (see assertNetworkVerified call sites); the heartbeat must not.
     const program = this.getProgram(agentKeypair);
     const [vaultPda] = this.getVaultPDA(ownerPubkey);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);

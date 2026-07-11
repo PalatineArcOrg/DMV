@@ -7,6 +7,9 @@
 // This module is the single source of truth for the RPC URL + Helius endpoints/key;
 // all consumers (connections, DAS, tx-history, DeFi, explorer links) read these getters.
 
+import { Connection } from '@solana/web3.js';
+import { EXPECTED_CLUSTER, EXPECTED_GENESIS_HASH } from './constants';
+
 const ENV_RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
 
 export const DEFAULT_RPC_URL = ENV_RPC_URL;
@@ -82,8 +85,63 @@ export async function loadRpcOverride(
 ): Promise<void> {
   try {
     const v = (await getSetting(RPC_OVERRIDE_KEY))?.trim();
-    if (v) activeRpcUrl = v;
+    if (v && v !== activeRpcUrl) {
+      activeRpcUrl = v;
+      verifiedForRpc = null; // a new RPC must be re-verified against its genesis hash
+    }
   } catch {
     // keep the env default
+  }
+}
+
+// --- Fail-closed network verification ------------------------------------------------
+// The network is verified against the RPC's on-chain genesis hash, NOT the URL string
+// (isDevnet() is only a display heuristic). VERIFIED = genesis matches the cluster this
+// build expects. MISMATCH = wrong cluster → hard block. UNKNOWN = RPC unreachable / check
+// failed → the caller degrades to a retry (read-only), never a silent proceed.
+
+export type NetworkState = 'VERIFIED' | 'MISMATCH' | 'UNKNOWN';
+
+export interface NetworkVerification {
+  state: NetworkState;
+  expectedCluster: string;
+  expectedGenesis: string;
+  receivedGenesis?: string;
+}
+
+const GENESIS_TIMEOUT_MS = 8000;
+
+// Cache a VERIFIED result keyed to the RPC it was verified against, so reads don't re-hit
+// the RPC. Cleared whenever the active RPC changes (loadRpcOverride, above).
+let verifiedForRpc: string | null = null;
+
+export async function verifyNetwork(): Promise<NetworkVerification> {
+  const base: NetworkVerification = {
+    state: 'UNKNOWN',
+    expectedCluster: EXPECTED_CLUSTER,
+    expectedGenesis: EXPECTED_GENESIS_HASH,
+  };
+  if (verifiedForRpc === activeRpcUrl) {
+    return { ...base, state: 'VERIFIED' };
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const received = await Promise.race<string>([
+      new Connection(activeRpcUrl, 'confirmed').getGenesisHash(),
+      new Promise<string>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('genesis timeout')), GENESIS_TIMEOUT_MS);
+      }),
+    ]);
+    if (received === EXPECTED_GENESIS_HASH) {
+      verifiedForRpc = activeRpcUrl;
+      return { ...base, state: 'VERIFIED', receivedGenesis: received };
+    }
+    verifiedForRpc = null;
+    return { ...base, state: 'MISMATCH', receivedGenesis: received };
+  } catch {
+    verifiedForRpc = null;
+    return { ...base, state: 'UNKNOWN' };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
