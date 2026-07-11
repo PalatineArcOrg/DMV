@@ -1,5 +1,13 @@
 # Security Audit — Scope & Brief
 
+> **Forward-note (2026-07-11, not part of the frozen scope):** the body below is frozen at tag
+> **`audit-2026-07-10`** and describes the *program* to audit (unchanged — byte-identical). Since
+> then, **WP1 Track A** landed on `devnet` (client-only / CI / build-tooling, **no `.rs` changes**):
+> a fail-closed genesis-hash network gate (addresses the "mainnet config fails open" concern), the
+> integration suite (now **39 tests**) is CI-gated, and dependency audits are CI-blocking — so the
+> "29 tests" / "not CI-gated" phrasing below is stale relative to HEAD but correct for the pinned
+> program snapshot. The on-chain audit scope is unaffected.
+
 **Project:** Dead Man's Vault (DMV) — a non-custodial **crypto inheritance** protocol on Solana. An owner deposits assets into a vault PDA and proves liveness via periodic heartbeats. When heartbeats stop and a grace period elapses, the program distributes the assets to pre-set beneficiaries. **Execution is permissionless** — the program computes every payout from frozen on-chain state, and *any* signer can submit the distribution transactions; no privileged executor, no protocol-held keys.
 
 **Why we're auditing:** the program moves a user's **entire estate**, irreversibly, and its core promise is that *funds will reach beneficiaries when the owner dies*. Both **theft** (misdirected funds) **and permanent-block DoS** (funds that can never be inherited) are Critical for this design. We want an independent audit before a mainnet-beta launch with real funds.
