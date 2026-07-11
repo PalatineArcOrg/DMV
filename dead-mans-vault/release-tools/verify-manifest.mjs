@@ -44,7 +44,7 @@ check('programId: notify IDL address', manifest.programId, idlAddress('notify-se
 check('programId: keeper IDL address', manifest.programId, idlAddress('keeper-bot/idl/dead_mans_vault.json'));
 
 // FEE_WALLET (baked into bytecode via the on-chain `address =` constraint — must match the client)
-check('feeWallet: rust constants.rs', manifest.feeWallet, match1('dead-mans-vault/programs/dead-mans-vault/src/constants.rs', /FEE_WALLET[\s\S]*?pubkey!\("([^"]+)"\)/));
+check('feeWallet: rust constants.rs', manifest.feeWallet, match1('dead-mans-vault/programs/dead-mans-vault/src/constants.rs', /pub const FEE_WALLET[\s\S]*?pubkey!\("([^"]+)"\)/));
 check('feeWallet: app constants.ts', manifest.feeWallet, match1('dead-mans-vault/app/src/utils/constants.ts', /export const FEE_WALLET = '([^']+)'/));
 
 // IDL hash-equality: all 3 copies == manifest (catches a hand-sync drift)

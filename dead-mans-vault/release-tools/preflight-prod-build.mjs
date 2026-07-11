@@ -6,6 +6,10 @@
 // Also run scripts/verify-manifest.mjs (source-constant drift) — they are complementary.
 // NB: the Cargo `devnet` feature (program build) is enforced separately by `build:prod` /
 // the cutover runbook, not here — this guards the CLIENT build env.
+// This is a convenience/sanity check: `looksNonMainnet` can REJECT an obviously-devnet RPC but
+// can't PROVE a URL is mainnet (a cluster-agnostic endpoint slips through). The authoritative
+// wrong-cluster block is the RUNTIME genesis-hash gate (WP1-T1/T3), which verifies the real
+// chain at boot. Keep both.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
