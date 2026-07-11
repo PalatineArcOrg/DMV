@@ -1,0 +1,12 @@
+{
+  "_comment": "Canonical release constants — the single source of truth cross-checked against source by scripts/verify-manifest.mjs (run in CI + before a build). Current values = the DEVNET phase. At mainnet cutover, update ALL fields together (expectedCluster, expectedGenesisHash, programId if it changes, feeWallet, notifyApi, webUrl, versionCode) and re-run verify-manifest. See MAINNET-CUTOVER-RUNBOOK.",
+  "expectedCluster": "devnet",
+  "expectedGenesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "programId": "GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb",
+  "feeWallet": "98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp",
+  "notifyApi": "https://notify.palatinearc.com",
+  "webUrl": "https://dmvapp.palatinearc.com",
+  "appVersion": "1.13.20",
+  "versionCode": 106,
+  "idlSha256": "970d83fc07ecd448b459e44cbeee77a62cf427c65dfc956d3b3cef19ce558273"
+}

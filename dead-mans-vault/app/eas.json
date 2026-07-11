@@ -7,17 +7,26 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_EXPECTED_CLUSTER": "devnet"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_EXPECTED_CLUSTER": "devnet"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
+      "env": {
+        "EXPO_PUBLIC_EXPECTED_CLUSTER": "mainnet-beta"
+      },
       "android": {
         "buildType": "apk"
       }
