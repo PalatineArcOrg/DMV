@@ -194,6 +194,21 @@ jobs:
           key: sbf-target-${{ hashFiles('dead-mans-vault/programs/**', 'dead-mans-vault/Cargo.lock', 'dead-mans-vault/Anchor.toml') }}
       - name: Build program (PROD floors) → .so + IDL + types
         run: anchor build
+      - name: Build attestation (.so + IDL sha256) + program-id check
+        # Publishes the prod-build hashes (verify on-chain == audited source on a deploy commit)
+        # and asserts the freshly-built IDL's program id matches the release manifest.
+        run: |
+          sha256sum target/deploy/dead_mans_vault.so target/idl/dead_mans_vault.json | tee build-hashes.txt
+          BUILT=$(node -e "process.stdout.write(require('./target/idl/dead_mans_vault.json').address)")
+          WANT=$(node -e "process.stdout.write(require('./release.manifest.json').programId)")
+          echo "built IDL program id: $BUILT  (manifest: $WANT)"
+          test "$BUILT" = "$WANT" || { echo "::error::built program id ($BUILT) != manifest ($WANT)"; exit 1; }
+      - name: Upload build attestation
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-attestation
+          path: dead-mans-vault/build-hashes.txt
+          if-no-files-found: warn
       - run: yarn install --frozen-lockfile
       - name: Property-fuzz suite (litesvm + fast-check, prod floors via clock-warp)
         run: yarn test:fuzz
@@ -206,7 +221,12 @@ jobs:
   # starts its OWN embedded solana-test-validator (no Agora port-8000 collision in a clean
   # runner — that collision is VPS-only). Prelude mirrors the `fuzz` job.
   integration:
-    if: github.event_name == 'workflow_dispatch'
+    # Runs on a manual dispatch AND on a push to a release branch (main/mainnet) — i.e. when
+    # devnet is promoted toward a deploy. Stays OFF devnet PRs/pushes (too slow: ~8min).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/mainnet'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     defaults:
