@@ -51,6 +51,21 @@ jobs:
       - name: Dependency audit (high/critical)
         run: yarn npm audit --severity high || yarn audit --level high || true
 
+  # ---- Release-manifest drift guard (cross-component constants) ----
+  # Cross-checks release.manifest.json against SOURCE on every PR: PROGRAM_ID (5 sites),
+  # FEE_WALLET (rust + app), the 3 hand-synced IDL copies (sha256 equality), and app
+  # version/versionCode. Pure node (fs/crypto) — no install, no deps. A drifted constant
+  # or an out-of-sync IDL copy fails the PR instead of shipping.
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Verify release manifest matches source
+        run: node dead-mans-vault/release-tools/verify-manifest.mjs
+
   # ---- Anchor program: prod-safe build + devnet tests ----
   # Deterministic, host-only program checks (no Solana/Anchor toolchain needed).
   # The prod-floor guard is the load-bearing mainnet-safety gate. The 9-property
