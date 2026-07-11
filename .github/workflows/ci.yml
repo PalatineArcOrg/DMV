@@ -30,7 +30,9 @@ jobs:
       # @solana/web3.js, low-reachability) are allowlisted in security/audit-ci.jsonc, with
       # full rationale in security/dependency-waivers.md. To accept a new one, add it there.
       - name: Dependency audit (high/critical — BLOCKING; waivers in security/)
-        run: npx --yes audit-ci@7 --config ../security/audit-ci.jsonc
+        # Exact-pinned (not @7) so a patch release can't shift the gate's behavior. Run via
+        # npx (not a devDependency) so audit-ci's own deps stay OUT of the audited tree.
+        run: npx --yes audit-ci@7.1.0 --config ../security/audit-ci.jsonc
 
   # ---- Mobile app: TypeScript typecheck ----
   app-typecheck:
