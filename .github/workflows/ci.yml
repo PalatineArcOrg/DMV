@@ -135,12 +135,20 @@ jobs:
       - name: devnet feature asserts the demo floors (10s / 30s)
         run: cargo test -p dead-mans-vault --lib --features devnet
 
-      # Reported (not blocking) this slice; cargo advisories tracked in security/dependency-waivers.md
-      # (0 vuln / 5 informational as of 2026-07-06). Gating RUSTSEC via deny.toml is a follow-up.
-      - name: cargo audit (reported — see security/dependency-waivers.md)
-        run: |
-          cargo install cargo-audit --locked || true
-          cargo audit || true
+      # BLOCKING: `cargo audit` (default) fails on VULNERABILITIES, passes on informational
+      # warnings (unmaintained/unsound) — currently 0 vulns / 5 warnings, documented in
+      # security/dependency-waivers.md. Cache the binary so the ~2-3min compile isn't paid each run.
+      - name: Cache cargo-audit
+        id: cargo-audit-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22
+      - name: Install cargo-audit (cache miss only)
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --locked
+      - name: cargo audit (BLOCKING — fails on vulnerabilities; see security/dependency-waivers.md)
+        run: cargo audit
 
   # ---- Property-fuzz suite (litesvm + fast-check) ----
   # Runs the 9 money-math fuzz properties (`yarn test:fuzz`) so a program or
