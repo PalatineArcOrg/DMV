@@ -34,6 +34,25 @@ jobs:
         # npx (not a devDependency) so audit-ci's own deps stay OUT of the audited tree.
         run: npx --yes audit-ci@7.1.0 --config ../security/audit-ci.jsonc
 
+  # ---- Keeper-bot: install + syntax/import smoke ----
+  # No unit tests. index.js self-executes (the crank loop) so it is only syntax-checked,
+  # never imported; crank.js is exports-only and gets an import smoke.
+  keeper-bot:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: keeper-bot
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm ci
+      - name: Syntax check (all src)
+        run: for f in src/*.js; do node --check "$f"; done
+      - name: Import smoke (crank.js — exports only, no crank side effect)
+        run: node -e "import('./src/crank.js').then(() => console.log('crank.js imports OK'))"
+
   # ---- Mobile app: TypeScript typecheck ----
   app-typecheck:
     runs-on: ubuntu-latest
@@ -55,6 +74,29 @@ jobs:
       # runtime-reachable ones match notify-server's (gated there). See security/dependency-waivers.md.
       - name: Dependency audit (app — reported; see security/dependency-waivers.md)
         run: yarn npm audit --severity high || yarn audit --level high || true
+
+  # ---- Web console: typecheck + build ----
+  # The web app reuses the mobile app's src via the `@app` alias, so it needs BOTH the app's
+  # deps (yarn) and its own (npm ci) installed to typecheck/build.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install app deps (needed by @app-aliased modules)
+        working-directory: dead-mans-vault/app
+        run: yarn install --frozen-lockfile
+      - name: Install web deps
+        working-directory: web
+        run: npm ci
+      - name: Type-check
+        working-directory: web
+        run: npm run typecheck
+      - name: Build
+        working-directory: web
+        run: npm run build
 
   # ---- Release-manifest drift guard (cross-component constants) ----
   # Cross-checks release.manifest.json against SOURCE on every PR: PROGRAM_ID (5 sites),
