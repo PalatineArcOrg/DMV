@@ -65,6 +65,13 @@ Making RN source run in a browser needs a few seams:
   itself carries no cluster).
 - **Bring-your-own RPC**: users can set their own endpoint in **Settings → Network** (persists
   in `localStorage`, "restart to apply").
+- **Fail-closed network gate** (`src/BootGate.tsx`): before the app mounts, `verifyNetwork()`
+  (reused from `@app`) checks the RPC's on-chain **genesis hash** against `VITE_EXPECTED_CLUSTER`
+  (default `devnet`). **VERIFIED** → app mounts; **MISMATCH** → hard block (wrong-cluster RPC can't
+  connect); **UNKNOWN** (RPC unreachable) → read-only with retry/continue (owner + heir writes are
+  gated off). A **mainnet** web deploy MUST set `VITE_EXPECTED_CLUSTER=mainnet-beta`, and the RPC/proxy
+  must answer `getGenesisHash` with the mainnet hash. The genesis check is the authority — the
+  `?cluster=devnet` URL hint is now only for labels/explorer links.
 - **Token / NFT names + logos** come from Helius DAS `getAssetsByOwner` through the same proxy.
   ⚠ DAS through this proxy needs **named-object** params (`params: { ownerAddress }`), not the
   array-wrapped form.
