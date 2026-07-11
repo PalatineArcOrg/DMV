@@ -1,9 +1,35 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { createHash } from 'node:crypto';
-import { config } from './config.js';
+import { config, GENESIS_HASHES } from './config.js';
 
 const connection = new Connection(config.rpcUrl, 'confirmed');
 const PROGRAM_ID = new PublicKey(config.programId);
+
+// Fail-closed network check: confirm the live RPC serves the cluster this deploy expects, by
+// its on-chain genesis hash (not the URL string). Throws on mismatch OR unreachable so the
+// daemon refuses to boot — blocking the executor + all writes against a wrong/unknown cluster.
+// A server should fail hard here (systemd restarts + retries); no read-only degrade like the app.
+export async function assertGenesisHash() {
+  const expected = GENESIS_HASHES[config.expectedCluster];
+  let timer;
+  let received;
+  try {
+    received = await Promise.race([
+      connection.getGenesisHash(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('genesis timeout (RPC unreachable?)')), 8000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (received !== expected) {
+    throw new Error(
+      `Genesis mismatch: RPC served ${received}, expected ${expected} for cluster ` +
+        `"${config.expectedCluster}". Refusing to start.`,
+    );
+  }
+}
 
 // Anchor 8-byte account discriminator = sha256("account:VaultConfig")[..8].
 // Verified before parsing so a foreign or attacker-crafted account cannot be

@@ -25,6 +25,12 @@ const ONCE = process.argv.includes('--once');
 // devnet, where the close window is only 60s and an always-on keeper would
 // otherwise sweep an owner's own rent before they can reclaim it.
 const CLOSE_EXECUTED = process.env.CLOSE_EXECUTED !== '0';
+// The cluster this keeper expects; the genesis-hash gate below verifies the RPC serves it.
+const EXPECTED_CLUSTER = process.env.EXPECTED_CLUSTER || 'devnet';
+const GENESIS_HASHES = {
+  devnet: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG',
+  'mainnet-beta': '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+};
 
 if (!RPC_URL || !KEYPAIR_PATH) {
   console.error('Usage: RPC_URL=<url> KEYPAIR_PATH=<keypair.json> node src/index.js [--once]');
@@ -108,6 +114,28 @@ async function tick() {
     `[keeper] tick: ${vaults.length} vaults, ${due} due, ${cleaned} closed, ` +
       `balance ${bal.toFixed(4)} SOL (${Date.now() - started}ms)`,
   );
+}
+
+// Fail-closed: verify the RPC serves the expected cluster (genesis hash) before cranking
+// anything — a wrong-cluster keeper would waste fees and mislead monitoring.
+const expectedGenesis = GENESIS_HASHES[EXPECTED_CLUSTER];
+if (!expectedGenesis) {
+  console.error(`[keeper] invalid EXPECTED_CLUSTER "${EXPECTED_CLUSTER}" — must be devnet or mainnet-beta`);
+  process.exit(1);
+}
+let genesis;
+try {
+  genesis = await Promise.race([
+    connection.getGenesisHash(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
+  ]);
+} catch (e) {
+  console.error(`[keeper] genesis check failed (RPC unreachable?): ${e?.message ?? e}. Refusing to start.`);
+  process.exit(1);
+}
+if (genesis !== expectedGenesis) {
+  console.error(`[keeper] genesis mismatch: RPC served ${genesis}, expected ${expectedGenesis} (${EXPECTED_CLUSTER}). Refusing to start.`);
+  process.exit(1);
 }
 
 console.log(`[keeper] ${keeper.publicKey.toBase58()} watching program ${program.programId.toBase58()} (${CLOSE_EXECUTED ? 'crank + rent-close' : 'CRANK-ONLY, no rent-close'})`);

@@ -14,7 +14,7 @@ import {
 import { fcmReady } from './fcm.js';
 import { startPoller, pollOnce } from './poller.js';
 import { executorReady, crankerPubkey, runExecutor } from './executor.js';
-import { readVaultState, verifyVaultForOwner } from './solana.js';
+import { readVaultState, verifyVaultForOwner, assertGenesisHash } from './solana.js';
 import { validateRegister, validateDeregister, SIG_WINDOW_SEC } from './registerAuth.js';
 
 const app = express();
@@ -354,6 +354,9 @@ process.on('uncaughtException', (err) => {
 });
 
 assertSecureConfig(); // fail-closed: refuse to boot with open write endpoints in prod
+// fail-closed: verify the RPC serves the expected cluster (genesis hash) before listening —
+// blocks the executor + all writes against a wrong/unknown cluster. Top-level await (ESM).
+await assertGenesisHash();
 
 app.listen(config.port, '127.0.0.1', () => {
   // eslint-disable-next-line no-console
