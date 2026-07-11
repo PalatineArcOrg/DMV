@@ -9,6 +9,25 @@ export const FEE_WALLET = '98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp';
 // RPC URL + Helius endpoints/key now live in ./rpcConfig (runtime-overridable via the
 // Settings → NETWORK custom-RPC field). Import the getters from there, not constants.
 
+/** The Solana cluster this build is meant to run against. Sourced from the build-time
+ *  EXPO_PUBLIC_EXPECTED_CLUSTER (set per EAS profile). Defaults to 'devnet' for the
+ *  current devnet-only phase; a mainnet build must set it to 'mainnet-beta'. The network
+ *  gate (rpcConfig.verifyNetwork) checks the live RPC's genesis hash against
+ *  EXPECTED_GENESIS_HASH and fails closed on mismatch — so an accidental wrong-cluster
+ *  RPC cannot silently connect. */
+export const EXPECTED_CLUSTER: 'devnet' | 'mainnet-beta' =
+  process.env.EXPO_PUBLIC_EXPECTED_CLUSTER === 'mainnet-beta' ? 'mainnet-beta' : 'devnet';
+
+/** Canonical Solana genesis hashes per cluster — the ground truth used to verify which
+ *  network an RPC is actually serving (never inferred from the URL string). */
+export const GENESIS_HASHES = {
+  devnet: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG',
+  'mainnet-beta': '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+} as const;
+
+/** The genesis hash the live RPC must return for this build to proceed. */
+export const EXPECTED_GENESIS_HASH = GENESIS_HASHES[EXPECTED_CLUSTER];
+
 // DMV push-notification server (FCM relay). Empty = push registration disabled.
 export const NOTIFY_URL = process.env.EXPO_PUBLIC_NOTIFY_URL || '';
 
