@@ -1,4 +1,5 @@
 import { Connection, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { assertNetworkVerified } from './core';
 
 type Sign = (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
 
@@ -14,6 +15,9 @@ export async function signSendOwnerTx(
   owner: PublicKey,
   signTransaction: Sign,
 ): Promise<string> {
+  // Fail-closed: never sign+send an owner tx on an unverified network (the web UNKNOWN
+  // "continue anyway" path). MISMATCH is already hard-blocked at boot by BootGate.
+  assertNetworkVerified('This owner action');
   tx.feePayer = owner;
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   tx.recentBlockhash = blockhash;

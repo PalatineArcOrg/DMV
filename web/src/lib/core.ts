@@ -21,4 +21,4 @@ export {
   RPC_OVERRIDE_KEY,
 } from '@app/utils/rpcConfig';
 export type { NetworkVerification, NetworkState } from '@app/utils/rpcConfig';
-export { useNetworkStore } from '@app/store/useNetworkStore';
+export { useNetworkStore, isNetworkVerified, assertNetworkVerified } from '@app/store/useNetworkStore';
