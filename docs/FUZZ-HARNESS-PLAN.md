@@ -8,9 +8,9 @@ of the mainnet community-review route (`MAINNET-READINESS.md` §1.1): free tooli
 substitutes for the "did the money math miss an edge case" part of a paid audit. **No
 program bug found across any phase.**
 
-## Why (vs the existing 29 tests)
+## Why (vs the existing 39 tests)
 
-The 29-test suite proves *hand-picked* scenarios pass. A fuzzer explores *randomised*
+The 39-test suite proves *hand-picked* scenarios pass. A fuzzer explores *randomised*
 inputs + orderings and, after every run, asserts the **invariants** still hold — then
 shrinks any failure to a minimal reproducer. This is exactly the shape of DMV's risk:
 Stage-4 execution is permissionless, concurrent, resumable, and order-independent, so

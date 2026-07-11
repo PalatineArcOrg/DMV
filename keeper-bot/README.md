@@ -55,6 +55,7 @@ Environment:
 | `KEYPAIR_PATH` | yes | — | JSON keypair array; pays fees, receives rewards |
 | `POLL_MS` | no | `30000` | scan interval |
 | `CLOSE_EXECUTED` | no | `1` | `0` = **crank-only**: still distributes expired vaults, but never closes an executed vault to collect its rents (leaves them for the owner). Recommended on **devnet**, where the close window is only 60s and an always-on keeper would otherwise sweep an owner's own rent before they can reclaim it. Leave on (`1`) for mainnet, where the 24h window gives owners a fair shot and the rents are the keeper's incentive. |
+| `EXPECTED_CLUSTER` | no | `devnet` | Cluster the keeper expects (`devnet` \| `mainnet-beta`), verified against the RPC's **genesis hash** at boot. **Fail-closed:** the keeper `exit(1)`s and cranks nothing on a genesis mismatch, an invalid cluster value, or an unreachable RPC (8s timeout). A mainnet keeper MUST set `mainnet-beta`. |
 
 Program ID (devnet): `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`
 (baked into `idl/dead_mans_vault.json`; swap the IDL to target another deployment).
@@ -107,7 +108,7 @@ a mode-600 unit, or an `EnvironmentFile`), never commit it to source.
 
 ## What one tick does
 
-1. `program.account.vaultConfig.all()` — discriminator-filtered scan of every vault.
+1. Discriminator scan of every `VaultConfig` — a manual per-account decode (`scanVaults()`), NOT Anchor's `.all()` (which dies on devnet's legacy-layout vaults).
 2. For each **active, un-executed** vault: read its heartbeat, compute
    `deadline = last_heartbeat + interval + grace`; if passed, run the full crank
    (begin → token snapshots → specific bequests → SOL shares → **finalize (bounty

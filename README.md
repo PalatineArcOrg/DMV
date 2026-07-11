@@ -21,7 +21,7 @@ Vault creation charges a one-time **0.01 SOL fee**, collected on-chain by `initi
 
 - **Website**: [dmv.palatinearc.com](https://dmv.palatinearc.com)
 - **Web app** (claim + manage in a browser): [dmvapp.palatinearc.com](https://dmvapp.palatinearc.com)
-- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.19)
+- **Download APK**: [GitHub Releases](https://github.com/Romulus-Sol/DMV/releases/latest) (latest: v1.13.20)
 - **Program on Explorer**: [GXCu5964...soEb (Devnet)](https://explorer.solana.com/address/GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb?cluster=devnet)
 
 ### Device Compatibility
@@ -217,7 +217,7 @@ Beyond the reviews, the program's money-math and state machine are **property-fu
 
 Three complementary layers, all green — and the fuzzing + stress harnesses found **no program bug**.
 
-**Integration suite (29/29).** A *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof, wrong fee recipient), owner Token-2022 withdrawal, idempotency/resume, the post-grace freeze, the permissionless close (blocked inside the owner window; rents → cranker + dust → largest beneficiary after it), and all setup/owner paths. Run: `anchor test` (or `yarn test:devnet`).
+**Integration suite (39/39).** A *random keypair* drives the full permissionless flow end-to-end (SOL pro-rata, specific SOL + SPL + NFT bequests, Token-2022, dust→largest beneficiary, keeper bounty carved out + paid to the finalize cranker), plus theft-attempt rejections (wrong beneficiary, substituted ATA, out-of-order bequest, ATA spoof, wrong fee recipient), owner Token-2022 withdrawal, idempotency/resume, the post-grace freeze, the permissionless close (blocked inside the owner window; rents → cranker + dust → largest beneficiary after it), and all setup/owner paths. Run: `anchor test` (or `yarn test:devnet`). Now **CI-gated** on a local validator (the `integration` job, `workflow_dispatch` + release branches).
 
 **Property-based fuzzing (`yarn test:fuzz`).** A [litesvm](https://github.com/LiteSVM/litesvm) + [fast-check](https://fast-check.dev/) suite (in-process, no validator; clock-warped so it exercises the **real production floors**, not demo timings) throws randomized inputs and instruction orderings at the program and asserts the invariants after every step. 9 properties: SOL conservation, idempotency, specific-bequest carve-out, a **theft-must-revert battery** (wrong beneficiary wallet/ATA, spoofed non-canonical vault ATA, out-of-order bequest, double-pay — each asserting the exact error code), the post-deadline **freeze** (every owner mutation reverts), a **Token-2022 transfer-fee sticky-close** regression (proving the harvest-before-close fix), whole-NFT bequest + 0-residual close, residual dust-at-scale (up to 20 beneficiaries), and a **stateful instruction-sequence fuzzer** (random orderings by random signers vs 7 global invariants). See [`docs/FUZZ-HARNESS-PLAN.md`](docs/FUZZ-HARNESS-PLAN.md).
 

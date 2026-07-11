@@ -38,11 +38,18 @@ sudo chmod 600 /opt/dmv/notify-server/.env
 Set `NODE_ENV=production` and a long random `REGISTER_SECRET` — the server
 **refuses to boot** in production without a secret (fail-closed). Rotate the
 secret periodically; note it also ships inside the app bundle, so it is weak
-authenticity only (registration is additionally owner-signed + on-chain verified).
+authenticity only (registration is additionally on-chain ownership-proofed; the
+owner-signed path exists in-code but is dormant). Set **`EXPECTED_CLUSTER`** to the
+cluster you're deploying (`devnet`/`mainnet-beta`) — the server verifies the RPC's
+**genesis hash** at boot and **refuses to start (exit 1) on a mismatch or an
+unreachable RPC**.
 
 ### Cranker keypair — mode 600
 Only needed if `EXECUTOR_ENABLED=1`. Fund it with a little SOL; it pays fees/rent
-and is **not** a vault authority.
+and is **not** a vault authority. On `EXPECTED_CLUSTER=mainnet-beta` the server
+**won't boot with the executor off** unless you explicitly set `ALLOW_NO_EXECUTOR=1`
+(a deliberate notify-only mainnet that delegates cranking to the keeper-bot) — so a
+crankerless mainnet can't ship by accident.
 ```bash
 sudo -u dmv chmod 600 /opt/dmv/notify-server/cranker.json
 ```

@@ -79,6 +79,15 @@ Hardened for mainnet (see the repo CHANGELOG "Security hardening" entry):
   leave the write endpoints open. The secret is compared in constant time. Note the secret
   ships inside the app bundle and is therefore extractable — it provides weak authenticity
   only, which is why registration is **additionally ownership-proofed on-chain**.
+- **Fail-closed network gate.** At boot (`assertGenesisHash`, awaited in `server.js` before
+  `app.listen`) the server verifies the RPC actually serves the cluster it expects, by the
+  chain's **genesis hash** (canonical values hardcoded — never inferred from the URL). On a
+  mismatch or an unreachable RPC it exits non-zero (systemd restarts + retries), so the
+  executor + all writes + the `/rpc` proxy can never run against a wrong/unknown cluster. On
+  mainnet, `assertSecureConfig` also refuses to boot with the executor off (unless
+  `ALLOW_NO_EXECUTOR=1`) so the switch always has a cranker. Rejects the `mainnet` vs
+  `mainnet-beta` typo. Dependency audit is now CI-blocking (`audit-ci`; see
+  `security/dependency-waivers.md`).
 - **Registration ownership proof.** `/register` derives the canonical vault PDA from `owner`
   and requires it equals the submitted `vault`, then checks the account is program-owned,
   carries the `VaultConfig` discriminator, and its stored owner matches. This blocks
@@ -120,7 +129,9 @@ Copy `.env.example` → `.env` (mode `600`) and fill it in. Key vars:
 - `NODE_ENV` — set to `production` in deployment. Anything other than `development` is treated
   as production and **fail-closes**: the server refuses to boot without `REGISTER_SECRET`.
 - `RPC_URL` — use a **Helius devnet URL** (`https://devnet.helius-rpc.com/?api-key=...`) to avoid public-RPC 429s during cranks.
+- `EXPECTED_CLUSTER` — `devnet` (default) | `mainnet-beta`. At boot the server verifies the RPC's on-chain **genesis hash** against it and **refuses to start (exit 1) on a mismatch or an unreachable RPC** (fail-closed network gate — never inferred from the URL string). A mainnet deploy MUST set `mainnet-beta`.
 - `EXECUTOR_ENABLED` — `1` to enable autonomous execution.
+- `ALLOW_NO_EXECUTOR` — `0` (default). On `EXPECTED_CLUSTER=mainnet-beta` the server **requires `EXECUTOR_ENABLED=1`** (else it exits at startup), so a crankerless mainnet can't ship by accident. Set `1` to deliberately run **notify-only** on mainnet (cranking delegated to the independent keeper-bot).
 - `CRANKER_KEYPAIR` — absolute path to a `solana-keygen` JSON keypair, funded with a little devnet SOL. **Gitignored.** Only pays fees/rent. Monitor its balance (the executor caps per-vault spend, but running the crank still costs fees/rent).
 - `REGISTER_SECRET` — **required in production** (the server won't start without it). Long random string; the app sends it as `x-dmv-secret`. Extractable from the app bundle, so treated as weak auth — registration is additionally ownership-proofed on-chain.
 - `RPC_ALLOWED_ORIGIN` — *optional* (default `https://dmvapp.palatinearc.com`). The CORS origin allowed to use `POST /rpc`.
