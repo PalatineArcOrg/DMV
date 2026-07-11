@@ -124,14 +124,17 @@ if (!expectedGenesis) {
   process.exit(1);
 }
 let genesis;
+let genesisTimer;
 try {
   genesis = await Promise.race([
     connection.getGenesisHash(),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
+    new Promise((_, rej) => { genesisTimer = setTimeout(() => rej(new Error('timeout')), 8000); }),
   ]);
 } catch (e) {
   console.error(`[keeper] genesis check failed (RPC unreachable?): ${e?.message ?? e}. Refusing to start.`);
   process.exit(1);
+} finally {
+  if (genesisTimer) clearTimeout(genesisTimer);
 }
 if (genesis !== expectedGenesis) {
   console.error(`[keeper] genesis mismatch: RPC served ${genesis}, expected ${expectedGenesis} (${EXPECTED_CLUSTER}). Refusing to start.`);

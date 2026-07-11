@@ -355,8 +355,17 @@ process.on('uncaughtException', (err) => {
 
 assertSecureConfig(); // fail-closed: refuse to boot with open write endpoints in prod
 // fail-closed: verify the RPC serves the expected cluster (genesis hash) before listening —
-// blocks the executor + all writes against a wrong/unknown cluster. Top-level await (ESM).
-await assertGenesisHash();
+// blocks the executor + all writes against a wrong/unknown cluster. MUST exit(1) explicitly:
+// a top-level-await throw is swallowed by the uncaughtException handler above and would exit
+// 0, which `Restart=on-failure` does NOT restart → a transient-RPC-blip boot failure would
+// leave the daemon permanently dead (also downing the web app's /rpc proxy). exit(1) → systemd
+// restarts + retries, matching the keeper.
+try {
+  await assertGenesisHash();
+} catch (e) {
+  console.error(`[boot] network gate failed: ${e?.message || e}`);
+  process.exit(1);
+}
 
 app.listen(config.port, '127.0.0.1', () => {
   // eslint-disable-next-line no-console
