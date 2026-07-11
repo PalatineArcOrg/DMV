@@ -15,6 +15,7 @@ import { toUint8Array } from "js-base64";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { isDevnet } from "./rpcConfig";
+import { assertNetworkVerified } from "../store/useNetworkStore";
 
 const CHAIN = "solana";
 // Cluster follows the active RPC URL (devnet today, mainnet on a mainnet build)
@@ -140,6 +141,10 @@ export function useAuthorization() {
   );
   const authorizeSession = useCallback(
     async (wallet: AuthorizeAPI) => {
+      // Fail-closed: no wallet authorization (the prelude to every owner-signed tx) on an
+      // unverified network. MISMATCH never reaches here (blocked at boot); this guards the
+      // UNKNOWN "continue anyway" path.
+      assertNetworkVerified("Connecting your wallet");
       const authorizationResult = await wallet.authorize({
         identity: APP_IDENTITY,
         chain: getChainIdentifier(),
@@ -152,6 +157,7 @@ export function useAuthorization() {
   );
   const authorizeSessionWithSignIn = useCallback(
     async (wallet: AuthorizeAPI, signInPayload: SignInPayload) => {
+      assertNetworkVerified("Connecting your wallet");
       const authorizationResult = await wallet.authorize({
         identity: APP_IDENTITY,
         chain: getChainIdentifier(),

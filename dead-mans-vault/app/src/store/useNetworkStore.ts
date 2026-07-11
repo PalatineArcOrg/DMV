@@ -31,3 +31,20 @@ export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
     }),
   isVerified: () => get().state === 'VERIFIED',
 }));
+
+/**
+ * Non-hook accessors for write-gating from services (outside React). The network is only
+ * ever non-VERIFIED on the "continue anyway" path from an UNKNOWN gate (MISMATCH hard-blocks
+ * at boot). Reads stay allowed; writes must go through `assertNetworkVerified`.
+ */
+export function isNetworkVerified(): boolean {
+  return useNetworkStore.getState().state === 'VERIFIED';
+}
+
+export function assertNetworkVerified(action = 'This action'): void {
+  if (!isNetworkVerified()) {
+    throw new Error(
+      `${action} is blocked: the Solana network could not be verified. Retry from the network screen or set a working RPC in Settings.`,
+    );
+  }
+}

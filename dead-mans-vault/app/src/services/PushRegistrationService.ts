@@ -5,6 +5,7 @@ import { Buffer } from 'buffer';
 import { NOTIFY_URL, NOTIFY_SECRET } from '../utils/constants';
 import { registerMessage, deregisterMessage } from '../utils/notifyAuth';
 import { getSetting, setSetting } from '../db/settingsRepo';
+import { isNetworkVerified } from '../store/useNetworkStore';
 
 /** Signs a raw message with the owner wallet (MWA `signMessage`). */
 export type SignMessage = (message: Uint8Array) => Promise<Uint8Array>;
@@ -72,6 +73,8 @@ export class PushRegistrationService {
     stages: { stage1: number; stage2: number; stage3: number },
   ): Promise<boolean> {
     if (!NOTIFY_URL) return false;
+    // Fail-closed: don't register a vault with the notify server from an unverified network.
+    if (!isNetworkVerified()) return false;
     try {
       const deviceToken = await PushRegistrationService.getDeviceToken();
       if (!deviceToken) return false;
