@@ -14,7 +14,7 @@ import {
 import { fcmReady } from './fcm.js';
 import { startPoller, pollOnce } from './poller.js';
 import { executorReady, crankerPubkey, runExecutor } from './executor.js';
-import { readVaultState, verifyVaultForOwner } from './solana.js';
+import { readVaultState, verifyVaultForOwner, assertGenesisHash } from './solana.js';
 import { validateRegister, validateDeregister, SIG_WINDOW_SEC } from './registerAuth.js';
 
 const app = express();
@@ -353,7 +353,20 @@ process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err?.message || err);
 });
 
-assertSecureConfig(); // fail-closed: refuse to boot with open write endpoints in prod
+// Fail-closed boot checks. Both MUST run inside this try/catch → process.exit(1): a throw here
+// (sync from assertSecureConfig, OR from the top-level await) is otherwise swallowed by the
+// uncaughtException handler above → the process exits 0, which `Restart=on-failure` does NOT
+// restart, leaving the daemon silently dead (and downing the web app's /rpc proxy). exit(1) →
+// systemd restarts + retries, matching the keeper.
+//   - assertSecureConfig: open write endpoints / invalid cluster / crankerless mainnet.
+//   - assertGenesisHash: the RPC must actually serve the expected cluster (genesis hash).
+try {
+  assertSecureConfig();
+  await assertGenesisHash();
+} catch (e) {
+  console.error(`[boot] ${e?.message || e}`);
+  process.exit(1);
+}
 
 app.listen(config.port, '127.0.0.1', () => {
   // eslint-disable-next-line no-console
