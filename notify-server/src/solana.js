@@ -6,29 +6,48 @@ const connection = new Connection(config.rpcUrl, 'confirmed');
 const PROGRAM_ID = new PublicKey(config.programId);
 
 // Fail-closed network check: confirm the live RPC serves the cluster this deploy expects, by
-// its on-chain genesis hash (not the URL string). Throws on mismatch OR unreachable so the
-// daemon refuses to boot — blocking the executor + all writes against a wrong/unknown cluster.
-// A server should fail hard here (systemd restarts + retries); no read-only degrade like the app.
-export async function assertGenesisHash() {
+// its on-chain genesis hash (not the URL string). Two distinct failures, handled differently:
+//   - MISMATCH (RPC reachable, wrong hash = wrong cluster) → throw immediately, never retry.
+//   - UNREACHABLE (timeout/network error) → retry with backoff, so a transient RPC blip at
+//     deploy/restart doesn't take the daemon down (which would cascade to the web app's /rpc
+//     proxy + the read endpoints). Only if still unreachable after all retries does it throw.
+// The caller exits(1) on throw → systemd restarts + retries. No read-only degrade like the app
+// (a wrong-cluster server must serve nothing; and reads that need the RPC fail anyway when it's
+// down, so the marginal value of a degraded boot is low — retrying the blip is the better fix).
+export async function assertGenesisHash({ retries = 4, backoffMs = 2000 } = {}) {
   const expected = GENESIS_HASHES[config.expectedCluster];
-  let timer;
-  let received;
-  try {
-    received = await Promise.race([
-      connection.getGenesisHash(),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('genesis timeout (RPC unreachable?)')), 8000);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-  if (received !== expected) {
+  let lastErr = 'unknown error';
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) {
+      const wait = backoffMs * attempt; // 2s, 4s, 6s, 8s
+      console.warn(`[net] RPC unverifiable (${lastErr}); retry ${attempt}/${retries} in ${wait}ms`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    let timer;
+    let received;
+    try {
+      received = await Promise.race([
+        connection.getGenesisHash(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('timeout (RPC unreachable?)')), 8000);
+        }),
+      ]);
+    } catch (e) {
+      lastErr = e?.message || String(e); // unreachable/timeout → retry
+      continue;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    // RPC answered. A wrong hash is a wrong cluster — fail hard, do NOT retry.
+    if (received === expected) return; // VERIFIED
     throw new Error(
       `Genesis mismatch: RPC served ${received}, expected ${expected} for cluster ` +
         `"${config.expectedCluster}". Refusing to start.`,
     );
   }
+  throw new Error(
+    `Genesis unverifiable after ${retries + 1} attempts (${lastErr}). Refusing to start.`,
+  );
 }
 
 // Anchor 8-byte account discriminator = sha256("account:VaultConfig")[..8].
