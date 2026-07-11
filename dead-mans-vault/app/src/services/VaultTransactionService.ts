@@ -32,7 +32,6 @@ import { idl, DeadMansVault } from '../utils/idl';
 import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS, FEE_WALLET } from '../utils/constants';
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
-import { assertNetworkVerified } from '../store/useNetworkStore';
 import { range, chunk, unpaidIndices, fullU32Mask } from '../utils/crankMath';
 import type { PriorityFeeEstimateResult } from '../types/api';
 import type { AssetAssignment } from '../types/vault';
@@ -274,9 +273,11 @@ export class VaultTransactionService {
     ownerPubkey: PublicKey,
     method: 'activeTap' | 'biometricConfirm' | 'onChainActivity' | 'pinChallenge' | 'hardwareSwitch',
   ): Promise<string> {
-    // Fail-closed: the agent key signs record_heartbeat directly (no MWA authorize gate),
-    // so guard the on-chain heartbeat explicitly on an unverified network.
-    assertNetworkVerified('Recording your heartbeat');
+    // NOTE: deliberately NOT network-gated. The heartbeat is a liveness signal that moves
+    // no funds — it must fail OPEN. Blocking it on an unverified-but-possibly-fine network
+    // (the UNKNOWN "continue anyway" path) looks exactly like death and could drive the
+    // dead-man's switch to a premature, irreversible execution. Fund-moving writes fail
+    // closed (see assertNetworkVerified call sites); the heartbeat must not.
     const program = this.getProgram(agentKeypair);
     const [vaultPda] = this.getVaultPDA(ownerPubkey);
     const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);

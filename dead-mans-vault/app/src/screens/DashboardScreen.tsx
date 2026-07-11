@@ -350,11 +350,14 @@ export function DashboardScreen() {
 
   const lastOnChainTxRef = useRef<string | null>(null);
   const [lastOnChainTx, setLastOnChainTx] = useState<string | null>(null);
+  const [onChainBeatError, setOnChainBeatError] = useState(false);
 
   const handleHeartbeat = useCallback(async () => {
     try {
       await confirmHeartbeat('active_tap');
-      // Also record on-chain via agent key (best-effort)
+      // Also record on-chain via the agent key. This is the AUTHORITATIVE liveness proof
+      // the notify-server + keeper watch; if it silently fails the on-chain clock keeps
+      // aging toward execution while the UI looks healthy — so surface any failure.
       try {
         const keyManager = KeyManager.getInstance();
         const keypair = await keyManager.getKeypair();
@@ -363,8 +366,10 @@ export function DashboardScreen() {
           const sig = await txService.recordHeartbeatOnChain(keypair, publicKey, 'activeTap');
           lastOnChainTxRef.current = sig;
           setLastOnChainTx(sig);
+          setOnChainBeatError(false);
         }
       } catch {
+        setOnChainBeatError(true);
       }
       await loadVaultState();
     } catch {
@@ -480,17 +485,27 @@ export function DashboardScreen() {
             </View>
           </View>
 
-          {/* Last on-chain tx */}
-          {lastOnChainTx && (
-            <TouchableOpacity
-              style={styles.onChainTxRow}
-              onPress={() => Linking.openURL(explorerTx(lastOnChainTx))}
-            >
-              <MaterialCommunityIcons name="open-in-new" size={10} color={COLORS.accent} />
-              <Text style={styles.onChainTxText}>
-                Last tx: {lastOnChainTx.slice(0, 8)}...{lastOnChainTx.slice(-4)}
+          {/* On-chain heartbeat failed — liveness NOT recorded on-chain. Surface it so the
+              owner knows to retry (a silent failure lets the on-chain clock keep aging). */}
+          {onChainBeatError ? (
+            <View style={styles.onChainTxRow}>
+              <MaterialCommunityIcons name="alert" size={10} color={COLORS.warning} />
+              <Text style={[styles.onChainTxText, { color: COLORS.warning }]}>
+                On-chain heartbeat didn't record — liveness not updated. Check your network and tap again.
               </Text>
-            </TouchableOpacity>
+            </View>
+          ) : (
+            lastOnChainTx && (
+              <TouchableOpacity
+                style={styles.onChainTxRow}
+                onPress={() => Linking.openURL(explorerTx(lastOnChainTx))}
+              >
+                <MaterialCommunityIcons name="open-in-new" size={10} color={COLORS.accent} />
+                <Text style={styles.onChainTxText}>
+                  Last tx: {lastOnChainTx.slice(0, 8)}...{lastOnChainTx.slice(-4)}
+                </Text>
+              </TouchableOpacity>
+            )
           )}
         </View>
       )}
