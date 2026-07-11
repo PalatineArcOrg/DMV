@@ -26,11 +26,13 @@ jobs:
       - run: npm install
       - name: Unit tests (owner-signed register/deregister, etc.)
         run: npm test
-      # Reported, non-blocking: the remaining high-severity findings are transitive
-      # via @solana/web3.js (bigint-buffer, uuid) and only resolve with a major
-      # Solana-stack upgrade — tracked, not a per-PR blocker.
-      - name: Dependency audit (prod deps; reported)
-        run: npm audit --omit=dev || true
+      # BLOCKING: fails on any NEW high/critical. Accepted advisories (transitive via
+      # @solana/web3.js, low-reachability) are allowlisted in security/audit-ci.jsonc, with
+      # full rationale in security/dependency-waivers.md. To accept a new one, add it there.
+      - name: Dependency audit (high/critical — BLOCKING; waivers in security/)
+        # Exact-pinned (not @7) so a patch release can't shift the gate's behavior. Run via
+        # npx (not a devDependency) so audit-ci's own deps stay OUT of the audited tree.
+        run: npx --yes audit-ci@7.1.0 --config ../security/audit-ci.jsonc
 
   # ---- Mobile app: TypeScript typecheck ----
   app-typecheck:
@@ -48,7 +50,10 @@ jobs:
         run: npx tsc --noEmit
       - name: Unit tests (raw account parsers, etc.)
         run: yarn test
-      - name: Dependency audit (high/critical)
+      # Reported (not blocking): the app ships as a native arm64 APK — its ~30 high advisories
+      # are almost all build-time Metro/Expo/EAS/tar dev deps that don't run in the APK; the
+      # runtime-reachable ones match notify-server's (gated there). See security/dependency-waivers.md.
+      - name: Dependency audit (app — reported; see security/dependency-waivers.md)
         run: yarn npm audit --severity high || yarn audit --level high || true
 
   # ---- Release-manifest drift guard (cross-component constants) ----
@@ -87,7 +92,9 @@ jobs:
       - name: devnet feature asserts the demo floors (10s / 30s)
         run: cargo test -p dead-mans-vault --lib --features devnet
 
-      - name: cargo audit (reported)
+      # Reported (not blocking) this slice; cargo advisories tracked in security/dependency-waivers.md
+      # (0 vuln / 5 informational as of 2026-07-06). Gating RUSTSEC via deny.toml is a follow-up.
+      - name: cargo audit (reported — see security/dependency-waivers.md)
         run: |
           cargo install cargo-audit --locked || true
           cargo audit || true
