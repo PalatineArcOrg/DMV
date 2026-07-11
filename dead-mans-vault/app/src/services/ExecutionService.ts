@@ -51,6 +51,12 @@ export class ExecutionService {
     this.keyManager = KeyManager.getInstance();
   }
 
+  // NOTE: the Stage-4 crank is intentionally NOT network-gated (unlike fund-moving owner
+  // writes, which fail closed via assertNetworkVerified). Like the heartbeat, it must not be
+  // blocked on an UNKNOWN-but-possibly-fine network: MISMATCH is already hard-blocked at app
+  // boot (this never mounts on a confirmed-wrong cluster), execution is permissionless and
+  // computed on-chain, and a blocked crank would only delay a distribution any keeper/server
+  // completes anyway.
   async execute(): Promise<void> {
     if (globalExecutionInProgress) return;
     globalExecutionInProgress = true;
