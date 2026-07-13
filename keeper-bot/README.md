@@ -55,7 +55,7 @@ Environment:
 | `KEYPAIR_PATH` | yes | — | JSON keypair array; pays fees, receives rewards |
 | `POLL_MS` | no | `30000` | scan interval |
 | `CLOSE_EXECUTED` | no | `1` | `0` = **crank-only**: still distributes expired vaults, but never closes an executed vault to collect its rents (leaves them for the owner). Recommended on **devnet**, where the close window is only 60s and an always-on keeper would otherwise sweep an owner's own rent before they can reclaim it. Leave on (`1`) for mainnet, where the 24h window gives owners a fair shot and the rents are the keeper's incentive. |
-| `EXPECTED_CLUSTER` | no | `devnet` | Cluster the keeper expects (`devnet` \| `mainnet-beta`), verified against the RPC's **genesis hash** at boot. **Fail-closed:** the keeper `exit(1)`s and cranks nothing on a genesis mismatch, an invalid cluster value, or an unreachable RPC (8s timeout). A mainnet keeper MUST set `mainnet-beta`. |
+| `EXPECTED_CLUSTER` | no | `devnet` | Cluster the keeper expects (`devnet` \| `mainnet-beta`), verified against the RPC's **genesis hash** each tick. **Two distinct outcomes:** a positive **genesis MISMATCH** or an **invalid cluster / config** is FATAL → the keeper `exit(1)`s and cranks nothing (systemd restarts). An **unreachable / timed-out RPC (8s)** is NOT fatal → DEGRADED: it does not crank, backs off, and retries (a transient outage must not crash-loop the keeper). A mainnet keeper MUST set `mainnet-beta`. |
 
 Program ID (devnet): `GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb`
 (baked into `idl/dead_mans_vault.json`; swap the IDL to target another deployment).
@@ -118,3 +118,21 @@ a mode-600 unit, or an `EnvironmentFile`), never commit it to source.
    TokenDist sticks (`open_token_dists > 0`), blocking the vault close.
 3. For each **executed** vault: attempt `close_executed_vault` — succeeds only
    after the 24 h window, paying the core-PDA rents to you.
+
+## Operational readiness (Phase 2)
+
+Before every crank the keeper evaluates a readiness gate (pure logic in `src/readiness.js`, unit-tested — no crank import):
+
+- **Genesis MISMATCH** (RPC serves the wrong cluster) or a **definite program failure** (not found /
+  not executable on a verified network) → **fatal**, exit non-zero. The keeper *is* the executor, so
+  there is nothing to keep alive.
+- **Transient/UNKNOWN network** (timeout/429/DNS), a transient program/balance lookup, or a **balance
+  below `MIN_KEEPER_BALANCE_SOL`** → **degraded**: stay alive, **do not crank**, retry with bounded
+  exponential backoff + jitter. A transient RPC blip never causes a crash/restart loop.
+- **VERIFIED + executable program + balance ≥ min** → crank.
+
+Also fail-closed at startup: missing/malformed keypair, invalid `EXPECTED_CLUSTER`, invalid `POLL_MS`
+or balance thresholds. Thresholds: `MIN_KEEPER_BALANCE_SOL` / `WARN_KEEPER_BALANCE_SOL` (`.env.example`;
+mainnet 0.05/0.10, devnet 0.02/0.05). The keeper never cranks until the network is VERIFIED, logs
+readiness transitions with redacted reason codes, and has process-level crash guards. No HTTP server —
+structured logs + exported pure readiness functions only. Run `npm test` for the readiness unit tests.

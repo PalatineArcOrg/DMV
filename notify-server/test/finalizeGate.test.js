@@ -55,6 +55,16 @@ test('already completed → never re-finalize', () => {
   );
 });
 
+// A stuck mint (a failed begin_token_dist that never opened its TokenDist) must BLOCK finalize even when
+// SOL + plan masks are full — otherwise the vault is marked executed and that mint's residual strands
+// (executed-vault cleanup only re-cranks when open_token_dists > 0, which a failed begin leaves at 0).
+test('a stuck mint blocks finalize even with full SOL + plan masks', () => {
+  const full = { completed: false, solPaidMask: 0b11, planPaidMask: 0b11, benCount: 2, hasPlan: true, assignmentCount: 2 };
+  assert.equal(shouldFinalize({ ...full, stuckCount: 0 }), true, 'no stuck mint → finalize');
+  assert.equal(shouldFinalize({ ...full, stuckCount: 1 }), false, 'a stuck begin_token_dist withholds finalize');
+  assert.equal(shouldFinalize(full), true, 'stuckCount defaults to 0 (backward compatible)');
+});
+
 test('SOL mask not yet full → wait', () => {
   assert.equal(
     shouldFinalize({ completed: false, solPaidMask: 0b01, planPaidMask: 0b11, benCount: 2, hasPlan: true, assignmentCount: 2 }),

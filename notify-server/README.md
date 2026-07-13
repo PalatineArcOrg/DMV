@@ -161,3 +161,50 @@ Stack: Express · better-sqlite3 · `@coral-xyz/anchor` + `@solana/spl-token` (e
 > Liveness redundancy: this server is one of **two independent crankers** — the standalone
 > `keeper-bot/` discovers vaults directly on-chain and cranks them too. Either alone fires
 > every vault; losing this server never endangers an inheritance.
+
+## Operational readiness (Phase 2)
+
+Seven independent readiness domains, exposed at `/health`:
+
+| Domain | Meaning |
+|---|---|
+| `apiReady` | HTTP listener up + static config valid |
+| `fcmReady` | Firebase push transport usable |
+| `networkVerified` | RPC positively serves the expected cluster (genesis hash) |
+| `programReady` | configured DMV program account exists and satisfies the executable-account policy (mandatory, non-waivable — health is never `READY` without it) |
+| `pollerReady` | on-chain state currently readable (a healthy poll cycle / program probe) |
+| `executorReady` | cranker key + funded balance + executable program + RPC usable |
+| `escalationReady` | `= fcmReady && networkVerified && pollerReady` — **excludes `executorReady`** |
+
+**An executor problem never silences escalation.** A missing/underfunded/unusable cranker flips only
+`executorReady` (execution is blocked) while escalation pushes keep flowing — the whole point of Phase 2.
+
+### Health states
+`/health` returns `status: READY | DEGRADED | NOT_READY`, every boolean, the network state
+(`VERIFIED`/`MISMATCH`/`UNKNOWN`), machine-readable reason codes, last verified/attempted timestamps,
+cranker balance (SOL), program executability and poller state — and **no secrets, keypairs, or
+unredacted RPC URL**. HTTP 503 only when `NOT_READY`; `DEGRADED` still serves 200.
+
+### Static-fatal vs transient-degraded
+- **Fatal (exit non-zero → systemd retries), all validated LOCALLY before `app.listen`:** invalid
+  cluster, invalid `PROGRAM_ID`, invalid numeric thresholds, missing `REGISTER_SECRET` (prod), the
+  mainnet crankerless contradiction, **`REQUIRE_PROGRAM_EXECUTABLE=0` on mainnet** (the executability
+  check may not be relaxed on mainnet), a **positive genesis MISMATCH at boot**; a **missing / unreadable /
+  malformed required executor keypair** (when `EXECUTOR_ENABLED=1`) or an **`EXPECTED_CRANKER_PUBKEY`
+  mismatch**; and a **missing or invalid unwaived mainnet FCM service account** (malformed JSON,
+  incomplete/empty/non-string fields, invalid PEM, a non-RSA key, or a key that can't produce an RS256
+  signature — unless `ALLOW_NO_FCM=1`).
+- **Degraded (start/stay up, retry):** transient/UNKNOWN network (timeout/429/DNS), a program/balance
+  lookup timeout, a **low cranker balance**, a **runtime FCM provider/token endpoint failure after a
+  valid static credential**, and other **runtime** executor-readiness failures that are not broken
+  local static config. Poller + executor stay OFF until the network re-VERIFIES; a background monitor
+  re-checks with bounded exponential backoff + jitter. A **runtime** MISMATCH disables all transaction
+  producers and raises a critical alert **without switching endpoint** — it never silently degrades
+  execution onto the wrong cluster.
+
+### Thresholds, recovery, alerts
+`MIN_CRANKER_BALANCE_SOL` / `WARN_CRANKER_BALANCE_SOL` (`.env.example`; the mainnet floor must not
+block the live devnet keeper). Below MIN → `executorReady=false`, no submission. FCM + network recover
+**without a process restart**. Alert lines: `[net] CRITICAL …`, `[exec] not ready / balance low`,
+`[net] UNKNOWN … DEGRADED`. Readiness logic is pure + unit-tested (`test/readiness.test.js`,
+`test/config.test.js`); `npm test`.

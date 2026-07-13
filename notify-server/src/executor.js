@@ -23,7 +23,8 @@ import {
   getTransferFeeAmount,
   createHarvestWithheldTokensToMintInstruction,
 } from '@solana/spl-token';
-import { config } from './config.js';
+import { config, crankerLamports } from './config.js';
+import { validateExecutorStaticConfig, checkExecutorRuntimeReadiness, checkProgramAccount } from './readiness.js';
 import { CU, cuIxs, getPriorityFee } from './computeBudget.js';
 
 const idl = JSON.parse(
@@ -46,11 +47,18 @@ function getCtx() {
   if (cached) return cached;
   if (!config.executorEnabled || !config.crankerKeypairPath) return null;
   let cranker;
-  try {
-    const secret = JSON.parse(readFileSync(config.crankerKeypairPath, 'utf8'));
-    cranker = Keypair.fromSecretKey(Uint8Array.from(secret));
-  } catch {
-    return null;
+  if (staticKeypair) {
+    cranker = staticKeypair; // sign with the EXACT keypair validated at boot (immune to a post-boot file swap)
+  } else {
+    // Fallback (boot validation didn't run — e.g. a direct call in a test): read + verify the reload
+    // against the validated pubkey so a swapped file can't sign with an unpinned replacement.
+    try {
+      const secret = JSON.parse(readFileSync(config.crankerKeypairPath, 'utf8'));
+      cranker = Keypair.fromSecretKey(Uint8Array.from(secret));
+    } catch {
+      return null;
+    }
+    if (staticCranker && cranker.publicKey.toBase58() !== staticCranker) return null;
   }
   const connection = new Connection(config.rpcUrl, 'confirmed');
   const provider = new AnchorProvider(connection, new Wallet(cranker), {
@@ -63,6 +71,64 @@ function getCtx() {
 
 export function executorReady() {
   return !!getCtx();
+}
+
+// A dedicated connection for readiness probes (balance/program), so a keypair that FAILS to load
+// (getCtx → null) can still be diagnosed precisely without a cached ctx.
+let readinessConn = null;
+function readinessConnection() {
+  if (!readinessConn) readinessConn = new Connection(config.rpcUrl, 'confirmed');
+  return readinessConn;
+}
+
+let staticCranker = null;
+let staticKeypair = null; // the EXACT Keypair validated at boot — getCtx signs with THIS, not a re-read
+
+const loadCrankerKeypair = (p) => {
+  const secret = JSON.parse(readFileSync(p, 'utf8'));
+  const kp = Keypair.fromSecretKey(Uint8Array.from(secret));
+  staticKeypair = kp; // pin it so a file swap after boot can't make signing diverge from the validated key
+  return { publicKey: kp.publicKey.toBase58() };
+};
+
+/**
+ * STATIC executor config validation (Phase 2, §2.3). LOCAL only — no RPC. A fatal result (missing/
+ * unreadable/malformed keypair, invalid key, or expected-pubkey mismatch when the executor is
+ * ENABLED) means the caller must exit non-zero BEFORE listening. A disabled executor requires no key.
+ * Caches the validated cranker pubkey for the runtime check.
+ */
+export function executorStaticConfig() {
+  const res = validateExecutorStaticConfig({
+    enabled: config.executorEnabled,
+    keypairPath: config.crankerKeypairPath,
+    expectedPubkey: config.expectedCrankerPubkey || null,
+    loadKeypair: loadCrankerKeypair,
+  });
+  if (res.cranker) staticCranker = res.cranker;
+  return res;
+}
+
+/**
+ * RUNTIME executor readiness (Phase 2, §2.6). The REMOTE checks only (program account + balance) —
+ * every failure is DEGRADED, never fatal (execution blocked; API + escalation stay alive). Static
+ * key validation happens once at boot (executorStaticConfig). Returns safe metadata (cranker pubkey,
+ * balanceSol) — never key bytes or an RPC URL.
+ */
+export async function checkExecutorRuntime() {
+  if (!config.executorEnabled) return { ready: false, disabled: true, reason: 'executor_disabled' };
+  const { min, warn } = crankerLamports();
+  return checkExecutorRuntimeReadiness({
+    cranker: staticCranker,
+    minLamports: min,
+    warnLamports: warn,
+    checkProgram: () =>
+      checkProgramAccount(
+        (pk) => readinessConnection().getAccountInfo(new PublicKey(pk)),
+        config.programId,
+        { requireExecutable: config.requireProgramExecutable },
+      ),
+    getBalance: (cranker) => readinessConnection().getBalance(new PublicKey(cranker)),
+  });
 }
 
 export function crankerPubkey() {
@@ -92,8 +158,13 @@ const fullMask = (n) => (1n << BigInt(n)) - 1n;
  * immediately before calling this; the helper is pure + exported so that contract is
  * unit-tested (test/finalizeGate.test.js).
  */
-export function shouldFinalize({ completed, solPaidMask, planPaidMask, benCount, hasPlan, assignmentCount }) {
+export function shouldFinalize({ completed, solPaidMask, planPaidMask, benCount, hasPlan, assignmentCount, stuckCount = 0 }) {
   if (completed) return false;
+  // Never finalize while a mint is stuck: a failed begin_token_dist never opened its TokenDist
+  // (open_token_dists stays 0), so finalizing would mark the vault executed and STRAND that mint's
+  // residual — the executed-vault cleanup only re-cranks when open_token_dists > 0. Leaving the vault
+  // non-executed lets the next run re-attempt begin_token_dist.
+  if (stuckCount > 0) return false;
   const solFull = bigMask(solPaidMask) === fullMask(benCount);
   const planFull = !hasPlan || bigMask(planPaidMask) === fullMask(assignmentCount);
   return solFull && planFull;
@@ -134,7 +205,11 @@ async function getAccountInfoRetry(connection, pubkey, tries = 4) {
     try {
       const acc = await connection.getAccountInfo(pubkey);
       if (acc) return acc;
-    } catch { /* transient RPC error — retry */ }
+    } catch (e) {
+      // Only a recognized OPERATIONAL RPC failure is retryable — a programming fault must ESCAPE, not
+      // be retried away and returned as null (which would silently drop a plan mint from the tick).
+      if (!isOperationalExecutorError(e)) throw e;
+    }
     if (i < tries - 1) await new Promise((r) => setTimeout(r, 200 * (i + 1)));
   }
   return null;
@@ -198,9 +273,13 @@ async function collectMints(connection, vault, plan) {
 }
 
 /** Create a beneficiary ATA if missing (cranker pays the rent). */
-async function ensureAta(ctx, ata, mint, owner, programId) {
+async function ensureAta(ctx, ata, mint, owner, programId, guard) {
   const info = await ctx.connection.getAccountInfo(ata);
   if (info) return;
+  // THIS run's own readiness guard, passed in explicitly (never read from the shared cached ctx) —
+  // concurrent cranks for different vaults must not borrow each other's guard. Fail-closed: an omitted
+  // guard throws (a TypeError, which the classifier treats as fatal) rather than submitting unguarded.
+  guard();
   const ix = createAssociatedTokenAccountIdempotentInstruction(
     ctx.cranker.publicKey,
     ata,
@@ -217,9 +296,76 @@ async function ensureAta(ctx, ata, mint, owner, programId) {
  * Run the crank for one vault. Idempotent; returns an {action} describing the
  * furthest state reached this tick. Safe to call every poll tick.
  */
+// Live readiness guard for in-flight cranks (Phase 2). runExecutorInner calls guard() immediately
+// before EVERY transaction submission (including ATA creation); if readiness is revoked mid-crank
+// (e.g. a runtime genesis MISMATCH clears executorReady), guard() throws and the remaining
+// submissions are suppressed — the crank aborts cleanly.
+export const READINESS_REVOKED = '__READINESS_REVOKED__';
+// Fail-closed fault classification (parity with keeper-bot/src/crank.js isOperationalCrankError). A
+// token-path failure may be treated as an operationally-stuck asset (skip, continue) ONLY if it is a
+// recognized Anchor/web3 transaction or RPC failure; an UNKNOWN fault (a native programming error,
+// malformed decoded state, invariant violation) must ESCAPE — never masquerade as a stuck mint.
+export function isOperationalExecutorError(e) {
+  const m = (e?.message || '').toLowerCase();
+  const code = String(e?.cause?.code ?? e?.code ?? '').toLowerCase();
+  // A `withTimeout`-produced TimeoutError (bounded scan / heartbeat / account-info / ATA lookup) is
+  // ALWAYS a transient operational timeout — recognise it by its explicit name (unambiguous, unlike the
+  // bare word "timeout" which a coder fault could contain), so a bounded RPC hang degrades/retries.
+  if (e?.name === 'TimeoutError') return true;
+  // Step 1 — TIGHTLY-CONSTRAINED transport recognition BEFORE the type check. Node surfaces an
+  // unreachable RPC as a `TypeError('fetch failed')` whose message is EXACTLY `fetch failed`, usually
+  // with a transport cause.code. Recognise ONLY that exact message (not a substring — so an ordinary
+  // `Error('unexpected fetch failed validation state')` is NOT reclassified as operational) OR an
+  // explicit transport error code — never a generic word like network/socket/timeout, which can appear
+  // in a programming fault's message or property name. So an outage degrades while a coder fault reaches
+  // the fatal guard.
+  if (m.trim() === 'fetch failed') return true;
+  if (/^(econnrefused|econnreset|enotfound|eai_again|etimedout|epipe|und_err)/.test(code)) return true;
+  // Step 2 — native programming-error TYPES are NEVER operational — fail closed (rethrow).
+  if (e instanceof TypeError || e instanceof ReferenceError || e instanceof RangeError || e instanceof SyntaxError) {
+    return false;
+  }
+  // Step 3 — operational MESSAGE matching for ordinary Error objects only. Prefer recognised error
+  // CLASSES + program logs, then SPECIFIC web3/Anchor/RPC message shapes. Deliberately NOT the bare
+  // generic words `transaction`/`instruction`/`network`/`socket`/`timeout`/`dns`/`rpc`/`signature`/
+  // `insufficient`/`blockhash`/`simulat`: those false-positive on a coder fault (e.g. `Error('blockhash
+  // cache invariant violated')`, `Error('simulation decoder invariant violated')`) and would mask it as
+  // a skippable RPC blip. Only concrete transport/RPC/library shapes are kept (`blockhash not found`,
+  // `transaction simulation failed`, `insufficient funds`, `signature verification`, `block height
+  // exceeded`, `network error`, explicit transport codes, …).
+  const name = e?.name || '';
+  if (name === 'SendTransactionError' || name === 'AnchorError' || name === 'ProgramError') return true;
+  if (Array.isArray(e?.logs)) return true; // web3.js tx simulate/send failure carries program logs
+  return /blockhash not found|transaction simulation failed|simulation failed|preflight|custom program error|timed out|request timed out|timeout of|429|too many requests|rate limit|econnrefused|econnreset|enotfound|eai_again|getaddrinfo|etimedout|epipe|und_err|network error|socket hang up|node is behind|insufficient funds|insufficient lamports|closedelaynotelapsed|already been processed|not been confirmed|not confirmed in|block height exceeded|signature verification|account (does not|not) exist|accountnotinitialized/.test(m);
+}
+
+// Fail-closed guard: a MISSING canSubmit (a wiring bug), one returning false, one that THROWS, OR one
+// that returns a Promise (an ASYNC guard this synchronous guard cannot await) all convert to
+// READINESS_REVOKED — so an omitted/throwing/async guard can never silently degrade to "always submit"
+// NOR escape as an arbitrary error that a token catch would misclassify as a stuck mint. A thenable is
+// truthy, so without the explicit check an async guard would pass here even when it resolves false.
+export function makeSubmitGuard(canSubmit) {
+  return () => {
+    let v;
+    try {
+      v = typeof canSubmit === 'function' ? canSubmit() : false;
+    } catch {
+      throw new Error(READINESS_REVOKED); // a throwing readiness check is fail-closed, not a stuck mint
+    }
+    if (v && typeof v.then === 'function') throw new Error(READINESS_REVOKED); // async guard unsupported here → fail closed
+    if (!v) throw new Error(READINESS_REVOKED);
+  };
+}
+
 const inFlight = new Set(); // vaults currently being cranked (in-process lock)
 
-export async function runExecutor(vaultStr) {
+export async function runExecutor(vaultStr, { canSubmit } = {}) {
+  // canSubmit is MANDATORY. Every production caller (poll tick, /execute-now) must pass a live
+  // fail-closed guard; a caller that forgets it is a wiring bug and must fail loudly here rather than
+  // crank with no readiness enforcement. (makeSubmitGuard is also fail-closed as defense-in-depth.)
+  if (typeof canSubmit !== 'function') {
+    throw new Error('runExecutor requires a canSubmit readiness guard (fail-closed)');
+  }
   const ctx = getCtx();
   if (!ctx) return { action: 'executor_disabled' };
   // In-process per-vault lock: /execute-now must not race a poll tick for the
@@ -228,14 +374,23 @@ export async function runExecutor(vaultStr) {
   if (inFlight.has(vaultStr)) return { action: 'busy' };
   inFlight.add(vaultStr);
   try {
-    return await runExecutorInner(ctx, vaultStr);
+    return await runExecutorInner(ctx, vaultStr, canSubmit);
+  } catch (e) {
+    if (e?.message === READINESS_REVOKED) return { action: 'aborted_readiness_revoked' };
+    throw e;
   } finally {
     inFlight.delete(vaultStr);
   }
 }
 
-async function runExecutorInner(ctx, vaultStr) {
+// Exported for token-path guard tests (revocation must ABORT the crank, not be swallowed by a
+// stuck-token catch). Production calls it via runExecutor (which owns getCtx + the in-flight lock).
+export async function runExecutorInner(ctx, vaultStr, canSubmit) {
   const { connection, program, cranker } = ctx;
+  // Live readiness guard — checked immediately before every submission below (and passed into ensureAta
+  // per-call). It is a LOCAL closure for THIS run, never stored on the shared cached ctx (two vaults
+  // can crank concurrently; a shared ctx.guard would let one run borrow the other's guard).
+  const guard = makeSubmitGuard(canSubmit);
   // Best-effort priority fee, fetched once per crank; every tx below prepends a
   // ComputeBudget CU-limit + price so it lands under mainnet congestion.
   ctx.priorityFee = await getPriorityFee(connection, ctx.rpcUrl);
@@ -276,6 +431,7 @@ async function runExecutorInner(ctx, vaultStr) {
   // 1. begin_execution (snapshot SOL residual). Existence proves grace downstream.
   let execLog = await program.account.executionLog.fetchNullable(execPda);
   if (!execLog) {
+    guard();
     await program.methods
       .beginExecution()
       .accountsPartial({
@@ -308,8 +464,9 @@ async function runExecutorInner(ctx, vaultStr) {
       // the (empty) vault ATA first so begin_token_dist can snapshot it as 0 and the
       // specific bequest pays 0 — instead of throwing AccountNotInitialized and
       // stalling the whole distribution (which would freeze the owner out post-grace).
-      await ensureAta(ctx, vaultAta, mint, vault, programId);
-      await program.methods
+      await ensureAta(ctx, vaultAta, mint, vault, programId, guard);
+      guard();
+    await program.methods
         .beginTokenDist()
         .accountsPartial({
           payer,
@@ -323,7 +480,11 @@ async function runExecutorInner(ctx, vaultStr) {
         })
         .preInstructions(cuIxs(CU.beginTokenDist, ctx.priorityFee))
         .rpc();
-    } catch { markStuck(mint, 'begin_token_dist'); }
+    } catch (e) {
+      if (e?.message === READINESS_REVOKED) throw e; // a revocation must abort, never be reclassified as stuck
+      if (!isOperationalExecutorError(e)) throw e; // a programming/unknown fault escapes, never "stuck"
+      markStuck(mint, 'begin_token_dist');
+    }
   }
 
   // 3. specific bequests, in ascending index order (the program enforces per-mint order).
@@ -340,7 +501,8 @@ async function runExecutorInner(ctx, vaultStr) {
       try {
         // Specific-SOL bequest (zero-pubkey sentinel) → dedicated lamport ix, no ATAs.
         if (isSol) {
-          await program.methods
+          guard();
+    await program.methods
             .executeSpecificSol(j)
             .accountsPartial({
               payer,
@@ -358,8 +520,9 @@ async function runExecutorInner(ctx, vaultStr) {
         const programId = mintInfo ? mintInfo.programId : TOKEN_PROGRAM_ID;
         const vaultAta = getAssociatedTokenAddressSync(a.mint, vault, true, programId);
         const benAta = getAssociatedTokenAddressSync(a.mint, benWallet, false, programId);
-        await ensureAta(ctx, benAta, a.mint, benWallet, programId);
-        await program.methods
+        await ensureAta(ctx, benAta, a.mint, benWallet, programId, guard);
+        guard();
+    await program.methods
           .executeSpecificAsset(j)
           .accountsPartial({
             payer,
@@ -374,7 +537,9 @@ async function runExecutorInner(ctx, vaultStr) {
           })
           .preInstructions(cuIxs(CU.executeSpecificAsset, ctx.priorityFee))
           .rpc();
-      } catch {
+      } catch (e) {
+        if (e?.message === READINESS_REVOKED) throw e; // abort the crank; do not reclassify as stuck
+        if (!isOperationalExecutorError(e)) throw e; // programming/unknown fault escapes, never "stuck"
         if (isSol) skipped.push({ mint: 'SOL', step: 'execute_specific_sol' });
         else markStuck(a.mint, 'execute_specific_asset');
       }
@@ -387,6 +552,7 @@ async function runExecutorInner(ctx, vaultStr) {
     .map((_, i) => i)
     .filter((i) => !bitSet(execLog.solPaidMask, i));
   for (const part of chunk(unpaidSol, BATCH)) {
+    guard();
     await program.methods
       .executeSolShares(Buffer.from(part))
       .accountsPartial({ payer, vaultConfig: vault, executionLog: execPda })
@@ -410,7 +576,9 @@ async function runExecutorInner(ctx, vaultStr) {
     benCount,
     hasPlan,
     assignmentCount: hasPlan ? plan.assignments.length : 0,
+    stuckCount: stuckMints.size, // a stuck begin_token_dist must block finalize (else its residual strands)
   })) {
+    guard();
     await program.methods
       .finalizeExecution()
       .accountsPartial({
@@ -436,17 +604,22 @@ async function runExecutorInner(ctx, vaultStr) {
         const remaining = [];
         for (const i of part) {
           const benAta = getAssociatedTokenAddressSync(mint, beneficiaries[i].wallet, false, programId);
-          await ensureAta(ctx, benAta, mint, beneficiaries[i].wallet, programId);
+          await ensureAta(ctx, benAta, mint, beneficiaries[i].wallet, programId, guard);
           remaining.push({ pubkey: benAta, isWritable: true, isSigner: false });
         }
-        await program.methods
+        guard();
+    await program.methods
           .executeTokenShares(Buffer.from(part))
           .accountsPartial({ payer, vaultConfig: vault, tokenDist: tdPda, mint, vaultAta, tokenProgram: programId })
           .remainingAccounts(remaining)
           .preInstructions(cuIxs(CU.executeTokenShares, ctx.priorityFee))
           .rpc();
       }
-    } catch { markStuck(mint, 'execute_token_shares'); }
+    } catch (e) {
+      if (e?.message === READINESS_REVOKED) throw e;
+      if (!isOperationalExecutorError(e)) throw e;
+      markStuck(mint, 'execute_token_shares');
+    }
   }
 
   // 7. close each TokenDist once its residual mask is full (dust → largest benef).
@@ -470,13 +643,20 @@ async function runExecutorInner(ctx, vaultStr) {
         const acc = await getAccount(connection, vaultAta, 'confirmed', programId);
         dust = acc.amount;
         withheld = getTransferFeeAmount(acc)?.withheldAmount ?? 0n;
-      } catch {
+      } catch (e) {
+        // Only an EXPECTED missing/foreign ATA is "no dust". A transient RPC error is best-effort
+        // (dust 0, close still attempts); a programming/unknown fault must ESCAPE, not be silently
+        // read as zero dust (mirrors keeper crank.js).
+        const name = e?.name || '';
+        if (name !== 'TokenAccountNotFoundError' && name !== 'TokenInvalidAccountOwnerError' && !isOperationalExecutorError(e)) {
+          throw e;
+        }
         dust = 0n;
       }
       let dustAta = null;
       if (dust > 0n) {
         dustAta = getAssociatedTokenAddressSync(mint, maxWallet, false, programId);
-        await ensureAta(ctx, dustAta, mint, maxWallet, programId);
+        await ensureAta(ctx, dustAta, mint, maxWallet, programId, guard);
       }
       // Transfer-fee mints leave WITHHELD fees in the vault ATA (e.g. the deposit fee);
       // Token-2022 refuses to CloseAccount while fees are withheld, which sticks
@@ -485,7 +665,8 @@ async function runExecutorInner(ctx, vaultStr) {
       const preIxs = withheld > 0n
         ? [createHarvestWithheldTokensToMintInstruction(mint, [vaultAta], programId)]
         : [];
-      await program.methods
+      guard();
+    await program.methods
         .closeTokenDist()
         .accountsPartial({
           payer,
@@ -499,7 +680,11 @@ async function runExecutorInner(ctx, vaultStr) {
         })
         .preInstructions([...cuIxs(CU.closeTokenDist, ctx.priorityFee), ...preIxs])
         .rpc();
-    } catch { markStuck(mint, 'close_token_dist'); }
+    } catch (e) {
+      if (e?.message === READINESS_REVOKED) throw e;
+      if (!isOperationalExecutorError(e)) throw e;
+      markStuck(mint, 'close_token_dist');
+    }
   }
 
   const finalCfg = await program.account.vaultConfig.fetch(vault);

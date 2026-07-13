@@ -99,3 +99,22 @@ curl -s https://notify.example.com/health   # { ok, executorReady, ... rpc api-k
 ```
 
 Run the test suite before deploying: `npm test` (from `notify-server/`).
+
+## Operational readiness (Phase 2)
+
+The service now boots into a classified readiness model (see `notify-server/README.md`):
+
+- A **transient RPC outage at boot no longer crash-loops** — the server starts `DEGRADED` (API +
+  `/health` up, poller/executor OFF) and recovers to `READY` automatically when the RPC returns, with
+  no restart. A **positive genesis MISMATCH** at boot is still fatal (`exit 1` → systemd retries).
+- Monitor `/health` for `status: READY | DEGRADED | NOT_READY`. Treat `NOT_READY` (503) and a
+  `network.state == "MISMATCH"` or `[net] CRITICAL …` log line as **page-worthy**; `DEGRADED` with an
+  UNKNOWN network / low cranker balance is a warning. An **executor problem never sets `NOT_READY` by
+  itself** and never stops escalation.
+- New env (see `.env.example`): `MIN_CRANKER_BALANCE_SOL`, `WARN_CRANKER_BALANCE_SOL`, `ALLOW_NO_FCM`,
+  `REQUIRE_PROGRAM_EXECUTABLE`, `EXPECTED_CRANKER_PUBKEY`, `POLL_MAX_FAILURE_RATIO`, `POLL_MAX_FAILURE_ABS`,
+  and **`ALLOW_NO_EXECUTOR`**. Defaults are safe for the existing devnet deploy (the mainnet balance
+  floor does not apply on devnet). **`ALLOW_NO_EXECUTOR=1` is REQUIRED for a deliberate mainnet
+  notify-only deploy** (executor delegated to a separate keeper-bot) — a mainnet server with
+  `EXECUTOR_ENABLED=0` refuses to boot without it. `POLL_MAX_FAILURE_RATIO`/`POLL_MAX_FAILURE_ABS` tune
+  the poll-cycle health thresholds (raise the abs cap for a large fleet).
