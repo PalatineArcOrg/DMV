@@ -92,6 +92,8 @@ jobs:
       - name: Install web deps
         working-directory: web
         run: npm ci
+      - name: Web env-precedence tests (Vite loadEnv parity)
+        run: node --test dead-mans-vault/release-tools/preflight-web-env.test.mjs
       - name: Type-check
         working-directory: web
         run: npm run typecheck
@@ -113,6 +115,12 @@ jobs:
           node-version: '24'
       - name: Verify release manifest matches source
         run: node dead-mans-vault/release-tools/verify-manifest.mjs
+      - name: Preflight self-tests (surface-aware bad-config matrix)
+        run: node --test dead-mans-vault/release-tools/preflight-prod-build.test.mjs
+      - name: Preflight — app surface against the current manifest
+        # web surface needs vite's loadEnv (installed only in the `web` job, which runs it via the
+        # `npm run build` prebuild + the env-precedence tests below).
+        run: node dead-mans-vault/release-tools/preflight-prod-build.mjs --surface app
 
   # ---- Anchor program: prod-safe build + devnet tests ----
   # Deterministic, host-only program checks (no Solana/Anchor toolchain needed).

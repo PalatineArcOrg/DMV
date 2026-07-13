@@ -377,15 +377,25 @@ anchor test
 
 ### Build App (APK)
 
+The **authoritative** production APK path is the release wrapper — it runs the fail-closed
+manifest + preflight checks, records provenance, and writes a release-attestation file:
+
 ```bash
 cd dead-mans-vault/app
-yarn install
-npx tsc --noEmit          # Type check (0 errors expected)
-npx expo prebuild --platform android --clean
-cd android && ./gradlew assembleRelease
+yarn install && npx tsc --noEmit          # deps + type check (0 errors expected)
+
+# PRODUCTION release APK (devnet build shown; for mainnet set EXPO_PUBLIC_EXPECTED_CLUSTER=mainnet-beta
+# plus the mainnet EXPO_PUBLIC_RPC_URL / EXPO_PUBLIC_NOTIFY_URL / EXPO_PUBLIC_PROGRAM_ID):
+EXPO_PUBLIC_EXPECTED_CLUSTER=devnet \
+  bash ../release-tools/build-android-release.sh        # relative to dead-mans-vault/app
+# or, from dead-mans-vault/app:  npm run build:production
 ```
 
-APK output: `android/app/build/outputs/apk/release/app-release.apk`
+APK output: `android/app/build/outputs/apk/release/app-release.apk` (+ `release-attestation.json`).
+
+> `npx expo prebuild --platform android --clean` and `./gradlew assembleRelease` are the internal
+> steps the wrapper runs — use them **directly only for local development/troubleshooting**, never as
+> a standalone production-release path (they skip the preflight + attestation).
 
 ---
 

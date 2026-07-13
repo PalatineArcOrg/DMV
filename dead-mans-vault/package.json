@@ -6,7 +6,9 @@
     "build:prod": "anchor build",
     "build:devnet": "anchor build -- --features devnet",
     "verify:manifest": "node release-tools/verify-manifest.mjs",
-    "preflight:prod": "node release-tools/preflight-prod-build.mjs",
+    "preflight:prod": "node release-tools/preflight-prod-build.mjs --surface app",
+    "preflight:web": "node release-tools/preflight-prod-build.mjs --surface web",
+    "test:preflight": "node --test release-tools/preflight-prod-build.test.mjs",
     "test:devnet": "anchor build -- --features devnet && anchor test --skip-build",
     "test:fuzz": "NODE_OPTIONS='--max-old-space-size=2048 --expose-gc' bash -c 'for f in tests/fuzz/*.fuzz.ts; do echo \"→ $f\"; ts-mocha -p ./tests/fuzz/tsconfig.json -t 300000 \"$f\" || exit 1; done'"
   },

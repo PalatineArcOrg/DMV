@@ -6,6 +6,7 @@
   "description": "Dead Man's Vault — web heir claim portal (Phase 1)",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node ../dead-mans-vault/release-tools/verify-manifest.mjs && node ../dead-mans-vault/release-tools/preflight-prod-build.mjs --surface web",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json"
