@@ -7,9 +7,11 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "build": "npx eas build --profile preview --platform android",
-    "build:local": "npx eas build --profile preview --platform android --local",
-    "build:dev": "npx eas build --profile development --platform android",
+    "build:eas:preview": "npx eas build --profile preview --platform android",
+    "build:eas:preview:local": "npx eas build --profile preview --platform android --local",
+    "build:eas:dev": "npx eas build --profile development --platform android",
+    "preflight:release": "node ../release-tools/verify-manifest.mjs && node ../release-tools/preflight-prod-build.mjs --surface app",
+    "build:production": "bash ../release-tools/build-android-release.sh",
     "test": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {

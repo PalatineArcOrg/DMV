@@ -248,16 +248,25 @@ yarn install
 
 ### Build the App
 
-```bash
-# Option A: EAS Cloud Build
-cd app
-npx eas build --platform android --profile preview
+**Production APK — authoritative path.** The local release wrapper is the only supported way to
+produce a release APK; it runs the fail-closed manifest + preflight checks and writes an attestation:
 
-# Option B: Local Build (arm64-v8a, for Seeker / arm64 Android)
+```bash
 cd app
-npx expo prebuild --platform android --clean
-cd android && ./gradlew assembleRelease
-# → android/app/build/outputs/apk/release/app-release.apk
+EXPO_PUBLIC_EXPECTED_CLUSTER=devnet \
+  bash ../release-tools/build-android-release.sh    # or: npm run build:production
+# → android/app/build/outputs/apk/release/app-release.apk (+ release-attestation.json)
+# For mainnet: EXPO_PUBLIC_EXPECTED_CLUSTER=mainnet-beta + the mainnet RPC/notify/program env.
+```
+
+Non-authoritative helpers (development/troubleshooting only — they **skip** the preflight/attestation,
+so never use them as a production-release path):
+
+```bash
+# EAS cloud preview/dev builds:
+npm run build:eas:preview      # (or build:eas:dev)
+# Raw native steps the wrapper runs internally:
+npx expo prebuild --platform android --clean && (cd android && ./gradlew assembleRelease)
 ```
 
 ### Program Development (optional)
