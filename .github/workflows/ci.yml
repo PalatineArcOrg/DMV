@@ -36,8 +36,8 @@ jobs:
         run: npx --yes audit-ci@7.1.0 --config ../security/audit-ci.jsonc
 
   # ---- Keeper-bot: install + syntax/import smoke ----
-  # No unit tests. index.js self-executes (the crank loop) so it is only syntax-checked,
-  # never imported; crank.js is exports-only and gets an import smoke.
+  # Runs the pure readiness/crank/guard unit tests (npm test). index.js self-executes (the crank loop),
+  # so it is only syntax-checked, never imported; crank.js is exports-only and gets an import smoke.
   keeper-bot:
     runs-on: ubuntu-latest
     defaults:
@@ -53,6 +53,8 @@ jobs:
         run: for f in src/*.js; do node --check "$f"; done
       - name: Import smoke (crank.js — exports only, no crank side effect)
         run: node -e "import('./src/crank.js').then(() => console.log('crank.js imports OK'))"
+      - name: Readiness unit tests (pure; does NOT import the crank)
+        run: npm test
 
   # ---- Mobile app: TypeScript typecheck ----
   app-typecheck:

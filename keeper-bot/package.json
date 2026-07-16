@@ -6,7 +6,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "once": "node src/index.js --once"
+    "once": "node src/index.js --once",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
