@@ -4,9 +4,9 @@ Public status tracker for the pre-mainnet hardening + protocol-redesign work. Th
 sanitized companion to a private authoritative implementation plan (see **Plan authority** below).
 It intentionally contains **no exploit mechanics** — only phase/branch/status information.
 
-**Overall status:** IN PROGRESS — Phase 1 complete (merged to `devnet`, `6255e18`); Phases 2–10 not started.
+**Overall status:** IN PROGRESS — Phases 1–2 complete (merged to `devnet`); Phases 3–10 not started.
 **Mainnet:** NO-GO until the Track B phases (6–10) ship and pass an external implementation review.
-**Last updated:** 2026-07-13.
+**Last updated:** 2026-07-16.
 
 ---
 
@@ -35,7 +35,7 @@ remediation log. This file is updated as phases complete.
 | # | Phase | Branch | Track | Status | Tests |
 |---|-------|--------|-------|--------|-------|
 | 1 | Production build preflight enforcement | `wp1-production-preflight-enforcement` | A | ✅ **Complete** — merged to `devnet` `6255e18` ([PR #39](https://github.com/Romulus-Sol/DMV/pull/39)) | CI green ([run 29279995835](https://github.com/Romulus-Sol/DMV/actions/runs/29279995835)) |
-| 2 | Server & keeper operational-readiness | `wp1-operational-readiness` | A | Not started | — |
+| 2 | Server & keeper operational-readiness | `wp1-operational-readiness` | A | ✅ **Complete** — merged to `devnet` `2beba3f` ([PR #41](https://github.com/Romulus-Sol/DMV/pull/41)) | CI green ([run 29501916126](https://github.com/Romulus-Sol/DMV/actions/runs/29501916126)); notify-server 183 + keeper-bot 86 unit tests |
 | 3 | Owner-signed notification registration | `wp1-signed-notification-auth` | A | Not started | — |
 | 4 | Verified heartbeat transport | `wp1-heartbeat-verified-fallback` | A | Not started | — |
 | 5 | Release artifact & IDL provenance | `wp1-release-provenance` | A | Not started | — |
