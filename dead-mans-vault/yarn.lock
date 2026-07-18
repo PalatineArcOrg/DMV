@@ -1282,51 +1282,51 @@ json5@^1.0.2:
   dependencies:
     minimist "^1.2.0"
 
-litesvm-darwin-arm64@1.2.1:
-  version "1.2.1"
-  resolved "https://registry.yarnpkg.com/litesvm-darwin-arm64/-/litesvm-darwin-arm64-1.2.1.tgz#67988dfc5dbd4a6c5e69557ee8ce43b3e7fda368"
-  integrity sha512-Ws6xkcKOOu5qY67dFG/bUm9HvPe2YoP7/or/FWESeU0hUj7756Z7+Y02zeGmGitGMm+A7rBPNfuPROnUz/+CQg==
+litesvm-darwin-arm64@1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/litesvm-darwin-arm64/-/litesvm-darwin-arm64-1.3.0.tgz#88c3cb9516457d1de92fbeb7cf39d3d2ffde85bf"
+  integrity sha512-fj6cV/ofjMXdl5CwjyyLTQnZObfVH5HYDScQ6O44iRqxASmgEyEh4sC8a7M0YZ1rcli9nu2cWl5ARGura89I7Q==
 
-litesvm-darwin-x64@1.2.1:
-  version "1.2.1"
-  resolved "https://registry.yarnpkg.com/litesvm-darwin-x64/-/litesvm-darwin-x64-1.2.1.tgz#46b9835b19bdee05e53954718daa58c2add02050"
-  integrity sha512-V/rBwLnUdIXEGIBbjyVm5WjcVQTQdB0V08mUyOBl6in4PHj8d81nWK2L4DE58dulEkV40oNmXkeuX3lBTaVilQ==
+litesvm-darwin-x64@1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/litesvm-darwin-x64/-/litesvm-darwin-x64-1.3.0.tgz#baf7c298f6fe91984375da80297f24977a68d03c"
+  integrity sha512-ZYEddnc+tAn8sVYpzvww0oHFiekbCSv+0OZiA6eUDtcSx9uzeRDmPPQ9eI6vgyews2LefBDSENmUb70GHY6Cqg==
 
-litesvm-linux-arm64-gnu@1.2.1:
-  version "1.2.1"
-  resolved "https://registry.yarnpkg.com/litesvm-linux-arm64-gnu/-/litesvm-linux-arm64-gnu-1.2.1.tgz#c08ce1549d1b5bcb4487e151a6c83dd3a4b4b826"
-  integrity sha512-RxSjDrseyVmWrNqu44b8xb3V7cVV1PCUarRGS3WaEawt1YduDVuyk8T/G12N8c7XptSjoxSjH+Xdhm7bbbLgNw==
+litesvm-linux-arm64-gnu@1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/litesvm-linux-arm64-gnu/-/litesvm-linux-arm64-gnu-1.3.0.tgz#3c7c62732dc7ce32fceb47904e1efb6f6568c701"
+  integrity sha512-kmmKeef96pJI4AJGCvjzMCW6QHuzFrMF1i6dE6OcrtWHaz0Ag+TFaKOU35H1bjH/fDBwoJUV9UbaIbdWht81tA==
 
-litesvm-linux-arm64-musl@1.2.1:
-  version "1.2.1"
-  resolved "https://registry.yarnpkg.com/litesvm-linux-arm64-musl/-/litesvm-linux-arm64-musl-1.2.1.tgz#61228bef3acb5f42fd7fa1cebee8cd61a1da71d7"
-  integrity sha512-HM/Q8D52fLzhaXYoaRWZK/KlhMOgR/hVpM+UgurnD8cVwNB8a6xw+2ucESXsWNSJFidBWySi3Kh6nrUR+ICHCw==
+litesvm-linux-arm64-musl@1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/litesvm-linux-arm64-musl/-/litesvm-linux-arm64-musl-1.3.0.tgz#0eb5ce86c652d557a2bc3fe26ffcd9611835085e"
+  integrity sha512-FO9p6rx+/3h7R3CU7lkOebL+jy8UEDngSrENHu7pj9EOr78QVyE3Fm0O+WMnwXpMoCSgW0XLhu1cI9NHAbzCTA==
 
-litesvm-linux-x64-gnu@1.2.1:
-  version "1.2.1"
-  resolved "https://registry.yarnpkg.com/litesvm-linux-x64-gnu/-/litesvm-linux-x64-gnu-1.2.1.tgz#5d09433913226cbc17d6224f42ec7cabac7efbb0"
-  integrity sha512-ZkmdoGRhhPvNSAOQ1gzHshjf30Iq68g81Am1YTbbQyu8mGt054OtZBJKkH7fLUXZlNz8L9azUVG3LAjp3XIixw==
+litesvm-linux-x64-gnu@1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/litesvm-linux-x64-gnu/-/litesvm-linux-x64-gnu-1.3.0.tgz#c6d66077f567361e0195ec9610f7c4abade03033"
+  integrity sha512-yXC8ZAdIei9JQ2xw5/BocOTu/7EqZuFPyhgENQ1mYDhjNpoyUbIuGCWnqtria14mDda0aV9yVev8plGUrUpjUw==
 
-litesvm-linux-x64-musl@1.2.1:
-  version "1.2.1"
-  resolved "https://registry.yarnpkg.com/litesvm-linux-x64-musl/-/litesvm-linux-x64-musl-1.2.1.tgz#8315f74e62774c83fff06e1e2662e6bb62243c39"
-  integrity sha512-Sdtle1h+Ij1LDqs5Uz7m6ug1Jo3ViXYS4YTXacQE9mNxtr/3bbl+4gVYQls0LHvhiXQ0aQXva0cm17gMX1F9+w==
+litesvm-linux-x64-musl@1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/litesvm-linux-x64-musl/-/litesvm-linux-x64-musl-1.3.0.tgz#c4aebe7b00da9fd27204eb5e8acdf8ef3cc92ad5"
+  integrity sha512-oedromp1gTjShXmKmxZ1FYtnfM824vRcrPSPvGM0CrqJqKK61m1+tFwNRAVsDlpmWKvO/zsz90ctbgAUo/3TXg==
 
-litesvm@^1.2.1:
-  version "1.2.1"
-  resolved "https://registry.yarnpkg.com/litesvm/-/litesvm-1.2.1.tgz#6f8f36d3261fd70b02ee7a0a7a81f07d13e2e8a7"
-  integrity sha512-naz4Orq26cgYl39/FYhz2kCnNN/5BMtc3fdeaWo2Gc2ak5qKKrbD3nf62h+HIYZ3fQ0O2KO0hxAZBqXF4Ncz5w==
+litesvm@^1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/litesvm/-/litesvm-1.3.0.tgz#a0a89466dd30c945370123f1090d98ac0cb5d08a"
+  integrity sha512-tMu9sBIqSbF1gQluXEUtGmXPfZlMc10tOoBVeDokgK77nl/CcuC506sEoFKM5Rq58Dkb070lBMVBLc43TbMUzQ==
   dependencies:
     "@solana-program/system" "^0.12.2"
     "@solana-program/token" "^0.14.0"
     "@solana/kit" "^6.10.0"
   optionalDependencies:
-    litesvm-darwin-arm64 "1.2.1"
-    litesvm-darwin-x64 "1.2.1"
-    litesvm-linux-arm64-gnu "1.2.1"
-    litesvm-linux-arm64-musl "1.2.1"
-    litesvm-linux-x64-gnu "1.2.1"
-    litesvm-linux-x64-musl "1.2.1"
+    litesvm-darwin-arm64 "1.3.0"
+    litesvm-darwin-x64 "1.3.0"
+    litesvm-linux-arm64-gnu "1.3.0"
+    litesvm-linux-arm64-musl "1.3.0"
+    litesvm-linux-x64-gnu "1.3.0"
+    litesvm-linux-x64-musl "1.3.0"
 
 locate-path@^6.0.0:
   version "6.0.0"
