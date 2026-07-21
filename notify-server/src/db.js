@@ -37,6 +37,10 @@ const upsertStmt = db.prepare(`
     updated_at = excluded.updated_at
 `);
 
+// @internal — raw legacy upsert, NOT signed-row-stickiness aware, and with no route
+// caller (the /register handler uses applyLegacyRegistration, which refuses signed
+// rows). Kept for internal/test use only; do NOT wire this to an external route — it
+// would sidestep signed-row stickiness (PR review INFO-A3).
 export function upsertRegistration({ vault, owner, deviceToken, stage1, stage2, stage3 }) {
   const now = Math.floor(Date.now() / 1000);
   upsertStmt.run({ vault, owner, device_token: deviceToken, stage1, stage2, stage3, now });
@@ -47,6 +51,9 @@ export function deleteRegistration(vault) {
   return deleteStmt.run(vault).changes;
 }
 
+// @internal — raw owner-wide delete, NOT stickiness-aware, and with no route caller
+// (the dev legacy path uses deleteLegacyRegistrationsByOwner, which skips signed
+// rows). Internal/test use only; do NOT wire to an external route (PR review INFO-A3).
 const deleteByOwnerStmt = db.prepare('DELETE FROM registrations WHERE owner = ?');
 export function deleteRegistrationsByOwner(owner) {
   return deleteByOwnerStmt.run(owner).changes;

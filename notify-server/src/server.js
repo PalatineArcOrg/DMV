@@ -19,8 +19,11 @@ import { probeFcm, setFcmObserver, tokFingerprint } from './fcm.js';
 import { startPoller, pollOnce } from './poller.js';
 import { executorReady, crankerPubkey, runExecutor, executorStaticConfig, checkExecutorRuntime } from './executor.js';
 import { readVaultState, verifyVaultForOwner, getConnection, classifyNetwork, checkProgram } from './solana.js';
-import { SIG_WINDOW_SEC } from './registerAuth.js';
-import { authorizeRegisterV2, authorizeDeregisterV2, makeOwnershipVerifier } from './registerAuthV2.js';
+// SIG_WINDOW_SEC comes from the V2 authorizer: the used_nonces are V2
+// signed-registration nonces, so the prune horizon must track the V2 freshness
+// window (PR review LOW-A1) — coupling it to V1's would let a future independent
+// V2-window increase prune a still-fresh nonce and reopen a replay gap.
+import { authorizeRegisterV2, authorizeDeregisterV2, makeOwnershipVerifier, SIG_WINDOW_SEC } from './registerAuthV2.js';
 import { sha256Hex } from './authMessage.js';
 import { makeRegistrationHandlers } from './registrationRoutes.js';
 import { makeLegacySecretCheck, makeAdminGate } from './secretGate.js';
@@ -83,6 +86,10 @@ setInterval(() => {
   const now = Date.now();
   for (const [ip, b] of rateBuckets) if (now >= b.resetAt) rateBuckets.delete(ip);
   for (const [k, v] of vaultCache) if (now - v.at >= VAULT_CACHE_TTL_MS) vaultCache.delete(k);
+  // Prune the write-endpoint rate-limiter's fixed-window buckets (PR review INFO-B1):
+  // the in-hit prune only fires when a map exceeds its cap, so sweep expired buckets
+  // here too to keep memory bounded under a sustained distinct-key flood.
+  try { writeLimiter.sweep(); } catch { /* non-fatal */ }
   // Used nonces older than 2× the signature window can be dropped — a replay that
   // old is already rejected by the timestamp check.
   try {

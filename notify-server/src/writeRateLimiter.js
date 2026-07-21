@@ -7,6 +7,17 @@
 // signature verification / RPC / DB access; the owner/vault/tokenHash facet windows
 // are consumed BEFORE RPC / DB mutation. Legacy and signed attempts SHARE the
 // owner/vault/token buckets.
+//
+// DELIBERATE tradeoff (PR review LOW-B1): the owner/vault facet windows are charged
+// from any syntactically-valid owner/vault pubkey BEFORE signature verification, so
+// they bound work per owner/vault regardless of the auth outcome. Consequence: a
+// caller who knows a victim's PUBLIC owner/vault pubkey can consume up to
+// OWNER_MAX/VAULT_MAX of that facet with garbage-signed requests, briefly (≤ the
+// 10-min FACET_WINDOW) 429-ing the victim's own registration. This is
+// availability-only, bounded, and never touches heartbeats, escalation delivery for
+// already-registered vaults, or execution. Charging AFTER signature verification
+// would instead let unauthenticated floods reach the crypto/RPC step — the worse
+// tradeoff. Raise OWNER_MAX/VAULT_MAX or split authenticated accounting if needed.
 
 const IP_WINDOW_MS = 60_000;
 const IP_MAX = 30;
