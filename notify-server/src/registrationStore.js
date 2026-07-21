@@ -30,6 +30,8 @@ export const RESULT = Object.freeze({
   SIGNED_NOT_ENABLED: 'signed_not_enabled',
   SIGNED_REQUIRED: 'signed_required',
   RATE_LIMITED: 'rate_limited',
+  // WP4 transition code.
+  LEGACY_WINDOW_EXPIRED: 'legacy_window_expired',
 });
 
 // The additive V2 columns and their DDL. `auth_version`/`registration_revision`/
@@ -327,4 +329,27 @@ export function deleteLegacyRegistrationsByOwner(db, owner) {
   } catch {
     return { ok: false, code: RESULT.DATABASE_ERROR };
   }
+}
+
+/**
+ * Aggregate migration counts (WP4) — a single SQL aggregate, no row data returned
+ * and no mutation. `signed` = auth_version>=2 AND migration_status='signed';
+ * `legacy` = auth_version<2 AND migration_status='legacy'; `anomalous` = any row in
+ * neither consistent state. Safe on an empty/migrated DB.
+ */
+export function migrationCounts(db) {
+  const row = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS total,
+         SUM(CASE WHEN auth_version >= 2 AND migration_status = 'signed' THEN 1 ELSE 0 END) AS signed,
+         SUM(CASE WHEN auth_version < 2 AND migration_status = 'legacy' THEN 1 ELSE 0 END) AS legacy
+       FROM registrations`,
+    )
+    .get();
+  const total = row.total || 0;
+  const signed = row.signed || 0;
+  const legacy = row.legacy || 0;
+  const anomalous = total - signed - legacy;
+  return { total, legacy, signed, anomalous };
 }

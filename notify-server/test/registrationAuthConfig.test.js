@@ -6,8 +6,12 @@ import assert from 'node:assert/strict';
 
 const KEYS = [
   'REGISTRATION_AUTH_MODE', 'ADMIN_SECRET', 'REGISTER_SECRET', 'EXPECTED_CLUSTER',
-  'PROGRAM_ID', 'NODE_ENV', 'RPC_URL',
+  'PROGRAM_ID', 'NODE_ENV', 'RPC_URL', 'REGISTRATION_LEGACY_ACCEPT_UNTIL',
 ];
+// Fixed injected clock + a valid future cutoff (dual requires one under WP4).
+const NOW = 1780000000;
+const FUT = String(NOW + 3600);
+const at = { now: () => NOW };
 let seq = 0;
 async function load(env) {
   const keys = [...new Set([...KEYS, ...Object.keys(env)])];
@@ -53,8 +57,8 @@ test('dev legacy → accepted', async () => {
   assert.doesNotThrow(() => c.assertRegistrationAuthConfig());
 });
 test('devnet dual → accepted', async () => {
-  const c = await load({ ...prod, REGISTRATION_AUTH_MODE: 'dual' });
-  assert.doesNotThrow(() => c.assertRegistrationAuthConfig());
+  const c = await load({ ...prod, REGISTRATION_AUTH_MODE: 'dual', REGISTRATION_LEGACY_ACCEPT_UNTIL: FUT });
+  assert.doesNotThrow(() => c.assertRegistrationAuthConfig(at));
 });
 test('devnet signed → accepted', async () => {
   const c = await load({ NODE_ENV: 'production', EXPECTED_CLUSTER: 'devnet', ADMIN_SECRET: ADM, REGISTRATION_AUTH_MODE: 'signed' });
@@ -91,8 +95,8 @@ test('equal admin and register secrets → fatal', async () => {
   assert.throws(() => c.assertRegistrationAuthConfig(), /ADMIN_SECRET must not equal REGISTER_SECRET/);
 });
 test('distinct secrets → accepted', async () => {
-  const c = await load({ ...prod, REGISTRATION_AUTH_MODE: 'dual' });
-  assert.doesNotThrow(() => c.assertRegistrationAuthConfig());
+  const c = await load({ ...prod, REGISTRATION_AUTH_MODE: 'dual', REGISTRATION_LEGACY_ACCEPT_UNTIL: FUT });
+  assert.doesNotThrow(() => c.assertRegistrationAuthConfig(at));
 });
 test('malformed PROGRAM_ID → fatal', async () => {
   const c = await load({ ...prod, REGISTRATION_AUTH_MODE: 'dual', PROGRAM_ID: 'not-a-pubkey!' });
@@ -110,4 +114,61 @@ test('no secret value leaks into any thrown message', async () => {
   } catch (e) {
     assert.equal(e.message.includes('SUPERSECRET1'), false);
   }
+});
+
+// ── WP4: legacy-acceptance cutoff matrix ────────────────────────────────────
+const dualBase = { ...prod, REGISTRATION_AUTH_MODE: 'dual' };
+test('dual with missing cutoff → fatal', async () => {
+  const c = await load({ ...dualBase });
+  assert.throws(() => c.assertRegistrationAuthConfig(at), /REGISTRATION_LEGACY_ACCEPT_UNTIL is required/);
+});
+for (const [label, val] of [
+  ['malformed', 'soon'],
+  ['date-string', '2030-01-01'],
+  ['fractional', '1780000000.5'],
+  ['exponent', '1.78e9'],
+  ['leading-zero', '01780000000'],
+  ['signed', '+1780000000'],
+  ['whitespace', ' 1780000000'],
+  ['zero', '0'],
+]) {
+  test(`dual with ${label} cutoff → fatal`, async () => {
+    const c = await load({ ...dualBase, REGISTRATION_LEGACY_ACCEPT_UNTIL: val });
+    assert.throws(() => c.assertRegistrationAuthConfig(at), /REGISTRATION_LEGACY_ACCEPT_UNTIL/);
+  });
+}
+test('dual with an unsafe-integer cutoff → fatal', async () => {
+  const c = await load({ ...dualBase, REGISTRATION_LEGACY_ACCEPT_UNTIL: '99999999999999999999' });
+  assert.throws(() => c.assertRegistrationAuthConfig(at), /REGISTRATION_LEGACY_ACCEPT_UNTIL/);
+});
+test('dual with a future cutoff within 30 days → accepted', async () => {
+  const c = await load({ ...dualBase, REGISTRATION_LEGACY_ACCEPT_UNTIL: String(NOW + 29 * 86400) });
+  assert.doesNotThrow(() => c.assertRegistrationAuthConfig(at));
+});
+test('dual with a future cutoff over 30 days → fatal', async () => {
+  const c = await load({ ...dualBase, REGISTRATION_LEGACY_ACCEPT_UNTIL: String(NOW + 31 * 86400) });
+  assert.throws(() => c.assertRegistrationAuthConfig(at), /at most 30 days/);
+});
+test('dual with an already-expired cutoff → accepted (boots effective signed-only)', async () => {
+  const c = await load({ ...dualBase, REGISTRATION_LEGACY_ACCEPT_UNTIL: String(NOW - 10) });
+  assert.doesNotThrow(() => c.assertRegistrationAuthConfig(at));
+});
+test('signed mode with a cutoff configured → fatal', async () => {
+  const c = await load({ NODE_ENV: 'production', EXPECTED_CLUSTER: 'devnet', ADMIN_SECRET: ADM, REGISTRATION_AUTH_MODE: 'signed', REGISTRATION_LEGACY_ACCEPT_UNTIL: FUT });
+  assert.throws(() => c.assertRegistrationAuthConfig(at), /must be absent/);
+});
+test('dev legacy mode with a cutoff configured → fatal', async () => {
+  const c = await load({ ...dev, REGISTRATION_AUTH_MODE: 'legacy', REGISTRATION_LEGACY_ACCEPT_UNTIL: FUT });
+  assert.throws(() => c.assertRegistrationAuthConfig(at), /must be absent/);
+});
+test('dev dual follows the same cutoff requirement (missing → fatal; present → ok)', async () => {
+  const miss = await load({ ...dev, REGISTRATION_AUTH_MODE: 'dual' });
+  assert.throws(() => miss.assertRegistrationAuthConfig(at), /REGISTRATION_LEGACY_ACCEPT_UNTIL is required/);
+  const ok = await load({ ...dev, REGISTRATION_AUTH_MODE: 'dual', REGISTRATION_LEGACY_ACCEPT_UNTIL: FUT });
+  assert.doesNotThrow(() => ok.assertRegistrationAuthConfig(at));
+});
+test('no secret leaks in a cutoff-related throw', async () => {
+  const c = await load({ NODE_ENV: 'production', EXPECTED_CLUSTER: 'devnet', REGISTER_SECRET: 'SECRETVAL9', ADMIN_SECRET: 'ADMINVAL9', REGISTRATION_AUTH_MODE: 'dual', REGISTRATION_LEGACY_ACCEPT_UNTIL: 'bad' });
+  try { c.assertRegistrationAuthConfig(at); assert.fail('should throw'); }
+  catch (e) { assert.equal(/SECRETVAL9|ADMINVAL9/.test(e.message), false); }
 });

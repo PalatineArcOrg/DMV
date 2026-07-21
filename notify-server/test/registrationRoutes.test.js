@@ -17,6 +17,8 @@ import {
 import { makeRegistrationHandlers } from '../src/registrationRoutes.js';
 import { makeWriteRateLimiter } from '../src/writeRateLimiter.js';
 import { makeLegacySecretCheck } from '../src/secretGate.js';
+import { makeTransitionController } from '../src/transitionState.js';
+import { makeAuthMetrics } from '../src/authMetrics.js';
 import { AUTH_MODE } from '../src/config.js';
 
 const PID = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
@@ -81,13 +83,21 @@ function res() {
 
 function harness(mode, over = {}) {
   const db = new Database(':memory:'); ensureSchema(db);
-  const verifyOwnership = over.verifyOwnership || (async () => ({ ok: true }));
-  const legacyOwnerVerify = over.legacyOwnerVerify || (async () => ({ ok: true }));
+  const nowVal = over.now ?? NOW;
+  const now = () => nowVal;
+  // Default: a far-future cutoff so legacy stays accepting (existing WP3 tests
+  // unaffected). Override via over.legacyAcceptUntil to test expiry.
+  const until = over.legacyAcceptUntil !== undefined ? over.legacyAcceptUntil : mode === 'dual' ? NOW + 1_000_000 : null;
+  const metrics = makeAuthMetrics({ now });
+  const transition = makeTransitionController({ mode, legacyAcceptUntil: until, now, onFirstExpiry: (ts) => metrics.legacyExpiryObserved(ts) });
+  const spies = { legacyOwnerVerify: 0, verifyOwnership: 0, getRegistration: 0 };
+  const verifyOwnership = async (...a) => { spies.verifyOwnership += 1; return (over.verifyOwnership || (async () => ({ ok: true })))(...a); };
+  const legacyOwnerVerify = async (...a) => { spies.legacyOwnerVerify += 1; return (over.legacyOwnerVerify || (async () => ({ ok: true })))(...a); };
   const handlers = makeRegistrationHandlers({
     mode,
     expected: { cluster: CLUSTER, programId: PID, audience: NOTIFY_AUDIENCE },
     authorizeRegisterV2, authorizeDeregisterV2, verifyOwnership,
-    getRegistration: (v) => storeGet(db, v),
+    getRegistration: (v) => { spies.getRegistration += 1; return storeGet(db, v); },
     applySignedRegistration: over.applySignedRegistration || ((c) => storeSignedReg(db, c)),
     applySignedDeregistration: (c) => storeSignedDereg(db, c),
     applyLegacyRegistration: (c) => storeLegacyReg(db, c),
@@ -95,17 +105,31 @@ function harness(mode, over = {}) {
     deleteLegacyRegistrationsByOwner: (ownerKey) => storeLegacyDelByOwner(db, ownerKey),
     legacyOwnerVerify,
     legacySecretOk: makeLegacySecretCheck(LEGACY_SECRET),
-    limiter: makeWriteRateLimiter({ now: () => NOW * 1000 }),
+    limiter: makeWriteRateLimiter({ now: () => nowVal * 1000 }),
     clientIp: (r) => r.ip,
-    now: () => NOW,
+    now,
     logger: { log() {} },
     tokFingerprint: () => 'tok#xxxxxxxx',
     sha256Hex, isPubkey,
+    transition, metrics,
   });
-  return { db, handlers };
+  return { db, handlers, metrics, transition, spies };
 }
 const call = async (fn, r) => { const rs = res(); await fn(r, rs); return rs; };
 const secret = { 'x-dmv-secret': LEGACY_SECRET };
+
+// ── Fail-closed construction guard (WP4 review LOW-1) ────────────────────────
+const minimalDeps = (mode) => ({
+  mode, isPubkey, clientIp: (r) => r.ip, now: () => NOW,
+  limiter: makeWriteRateLimiter({ now: () => 0 }),
+});
+test('makeRegistrationHandlers FAILS CLOSED: dual mode without a transition controller throws', () => {
+  assert.throws(() => makeRegistrationHandlers(minimalDeps(AUTH_MODE.DUAL_ACCEPT)), /transition controller/);
+});
+test('makeRegistrationHandlers does not require a transition controller for signed/legacy modes', () => {
+  assert.doesNotThrow(() => makeRegistrationHandlers(minimalDeps(AUTH_MODE.SIGNED_REQUIRED)));
+  assert.doesNotThrow(() => makeRegistrationHandlers(minimalDeps(AUTH_MODE.LEGACY_ONLY)));
+});
 
 // ── Mode / classification ───────────────────────────────────────────────────
 test('pure legacy register — legacy mode → 200 {ok:true}', async () => {
@@ -278,6 +302,89 @@ test('owner-wide legacy deregistration (dev) does NOT delete a signed row (stick
   assert.equal(d._s, 200);
   assert.equal(d._j.removed, 0, 'signed row not force-deleted');
   assert.equal(getRegistrationCount(db), 1, 'signed row survives owner-wide legacy delete');
+});
+
+// ── WP4: dual-mode legacy transition window (§14) ───────────────────────────
+const expired = (over = {}) => harness(AUTH_MODE.DUAL_ACCEPT, { legacyAcceptUntil: NOW - 1, now: NOW, ...over });
+const open = (over = {}) => harness(AUTH_MODE.DUAL_ACCEPT, { legacyAcceptUntil: NOW + 100, now: NOW, ...over });
+
+test('dual legacy register BEFORE cutoff → 200 {ok:true}', async () => {
+  const o = owner(); const { handlers, db } = open();
+  const r = await call(handlers.register, req(legacyReg(o), secret));
+  assert.equal(r._s, 200); assert.deepEqual(r._j, { ok: true });
+  assert.equal(getRegistrationCount(db), 1);
+});
+test('dual legacy deregister BEFORE cutoff → 200 (WP3 rules)', async () => {
+  const o = owner(); const { handlers } = open();
+  await call(handlers.register, req(legacyReg(o), secret));
+  const d = await call(handlers.deregister, req({ vault: deriveVaultPda(o.owner, PID) }, secret));
+  assert.equal(d._s, 200); assert.equal(d._j.removed, 1);
+});
+test('dual legacy register AT cutoff → 410 legacy_window_expired', async () => {
+  const o = owner(); const { handlers } = harness(AUTH_MODE.DUAL_ACCEPT, { legacyAcceptUntil: NOW, now: NOW });
+  const r = await call(handlers.register, req(legacyReg(o), secret));
+  assert.equal(r._s, 410); assert.deepEqual(r._j, { error: 'legacy registration window expired', code: 'legacy_window_expired' });
+});
+test('dual legacy deregister AFTER cutoff → 410', async () => {
+  const o = owner(); const { handlers } = expired();
+  const d = await call(handlers.deregister, req({ vault: deriveVaultPda(o.owner, PID) }, secret));
+  assert.equal(d._s, 410); assert.equal(d._j.code, 'legacy_window_expired');
+});
+test('a VALID legacy secret cannot bypass expiry; no RPC / no DB read / no mutation', async () => {
+  const o = owner(); const { handlers, db, spies } = expired();
+  const r = await call(handlers.register, req(legacyReg(o), secret)); // valid secret
+  assert.equal(r._s, 410);
+  assert.equal(spies.legacyOwnerVerify, 0, 'no ownership RPC');
+  assert.equal(spies.getRegistration, 0, 'no DB read');
+  assert.equal(getRegistrationCount(db), 0, 'no mutation');
+});
+test('an INVALID legacy secret is not evaluated after expiry (still 410, no oracle)', async () => {
+  const o = owner(); const { handlers, spies } = expired();
+  const r = await call(handlers.register, req(legacyReg(o), { 'x-dmv-secret': 'wrong-secret' }));
+  assert.equal(r._s, 410);
+  assert.equal(spies.legacyOwnerVerify, 0);
+});
+test('signed register SUCCEEDS after expiry', async () => {
+  const o = owner(); const { handlers } = expired();
+  const r = await call(handlers.register, req(signedReg(o)));
+  assert.equal(r._s, 201); assert.deepEqual(r._j, { ok: true, result: 'created', revision: 1 });
+});
+test('signed deregister SUCCEEDS after expiry', async () => {
+  const o = owner(); const { handlers } = expired();
+  await call(handlers.register, req(signedReg(o)));
+  const d = await call(handlers.deregister, req(signedDereg(o, { nonce: 'nd' })));
+  assert.equal(d._s, 200); assert.deepEqual(d._j, { ok: true, removed: 1 });
+});
+test('malformed signed attempt after expiry uses SIGNED validation, not the window (401 not 410)', async () => {
+  const o = owner(); const { handlers } = expired();
+  const r = await call(handlers.register, req({ ...signedReg(o), signature: bs58.encode(Buffer.alloc(64, 1)) }));
+  assert.equal(r._s, 401); assert.equal(r._j.code, 'invalid_signature');
+});
+test('V1 signed payload after expiry is a signed attempt (400), not a legacy 410', async () => {
+  const o = owner();
+  const vault = deriveVaultPda(o.owner, PID);
+  const msg = registerMessage({ owner: o.owner, vault, deviceTokenHash: sha256Hex(TOKEN), stage1: 1, stage2: 2, stage3: 3, timestamp: NOW, nonce: 'v1nonce9' });
+  const body = { owner: o.owner, vault, deviceToken: TOKEN, stage1: 1, stage2: 2, stage3: 3, timestamp: NOW, nonce: 'v1nonce9', signature: bs58.encode(o.sign(msg)) };
+  const { handlers } = expired();
+  const r = await call(handlers.register, req(body, secret));
+  assert.equal(r._s, 400); assert.equal(r._j.code, 'invalid_request');
+});
+test('the write rate limit precedes the transition check (IP over → 429, not 410)', async () => {
+  const o = owner(); const { handlers } = expired();
+  let last;
+  for (let i = 0; i < 31; i++) last = await call(handlers.register, req(legacyReg(o), secret));
+  assert.equal(last._s, 429); // 30 legacy-expired 410s, then the 31st is rate-limited
+});
+test('metrics reflect a signed create + a legacy-expiry via the route', async () => {
+  const o1 = owner(); const o2 = owner(); const { handlers, metrics } = expired();
+  await call(handlers.register, req(signedReg(o1)));         // signed created
+  await call(handlers.register, req(legacyReg(o2), secret)); // legacy expired
+  const s = metrics.snapshot();
+  assert.equal(s.register.signedCreated, 1);
+  assert.equal(s.register.legacyAttempts, 1);
+  assert.equal(s.register.legacyExpired, 1);
+  assert.equal(s.register.legacyRejected, 1);
+  assert.ok(s.timestamps.firstLegacyExpiryAt != null);
 });
 
 function getRegistrationCount(db) { return db.prepare('SELECT COUNT(*) AS n FROM registrations').get().n; }

@@ -10,6 +10,7 @@ import {
   deleteLegacyRegistration as storeDeleteLegacyRegistration,
   deleteLegacyRegistrationsByOwner as storeDeleteLegacyRegistrationsByOwner,
   getRegistration as storeGetRegistration,
+  migrationCounts as storeMigrationCounts,
 } from './registrationStore.js';
 
 mkdirSync(dirname(config.dbPath), { recursive: true });
@@ -102,4 +103,7 @@ export function deleteLegacyRegistration(args) {
 }
 export function deleteLegacyRegistrationsByOwner(owner) {
   return storeDeleteLegacyRegistrationsByOwner(db, owner);
+}
+export function migrationCounts() {
+  return storeMigrationCounts(db);
 }

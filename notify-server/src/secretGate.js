@@ -35,12 +35,18 @@ export function makeLegacySecretCheck(secret) {
  * admin-attempt rate limit bounds secret-guessing. In explicit development with no
  * admin secret configured, a deliberate local bypass is allowed.
  */
-export function makeAdminGate({ adminSecret, isDev, limiter, clientIp }) {
+export function makeAdminGate({ adminSecret, isDev, limiter, clientIp, onAuthFailure }) {
+  const authFailed = (res) => {
+    // Optional metrics hook (WP4). Never throws into the request; never sees the secret.
+    try { onAuthFailure?.(); } catch { /* metrics must never break auth */ }
+    return res.status(401).json({ error: 'unauthorized' });
+  };
   return (req, res, next) => {
     if (limiter) {
       const ip = clientIp ? clientIp(req) : req.ip || 'unknown';
       const rl = limiter.checkAdminIp(ip);
       if (!rl.ok) {
+        // A rate-limit rejection is NOT an auth failure — do not fire onAuthFailure.
         res.set('retry-after', String(rl.retryAfter));
         return res.status(429).json({ error: 'rate limited' });
       }
@@ -49,9 +55,9 @@ export function makeAdminGate({ adminSecret, isDev, limiter, clientIp }) {
       // Deliberate local-dev bypass ONLY; production boot requires ADMIN_SECRET
       // (assertRegistrationAuthConfig), so this branch is unreachable in prod.
       if (isDev) return next();
-      return res.status(401).json({ error: 'unauthorized' });
+      return authFailed(res);
     }
     if (constantTimeEqual(req.get('x-dmv-admin-secret'), adminSecret)) return next();
-    return res.status(401).json({ error: 'unauthorized' });
+    return authFailed(res);
   };
 }

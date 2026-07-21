@@ -44,6 +44,10 @@ export const config = {
   adminSecret: process.env.ADMIN_SECRET || '',
   // The V2 signed-message audience is a FIXED constant, never an env-controlled value.
   expectedAudience: NOTIFY_AUDIENCE,
+  // Time-bounded legacy-acceptance cutoff (WP4), Unix seconds. Raw here; parsed +
+  // validated (mode-specific) in assertRegistrationAuthConfig. Governs only pure
+  // legacy register/deregister in dual mode.
+  legacyAcceptUntilRaw: process.env.REGISTRATION_LEGACY_ACCEPT_UNTIL ?? '',
   fcmProjectId: process.env.FCM_PROJECT_ID || '',
   fcmServiceAccountPath: process.env.FCM_SERVICE_ACCOUNT || '',
   // Permissionless executor: keyless crank that distributes a vault's assets
@@ -248,13 +252,32 @@ export function resolveAuthMode() {
   return raw;
 }
 
+// Max future legacy-acceptance window: 30 days (WP4). A longer window is refused so
+// a stale transition config can't keep legacy writes open indefinitely.
+const MAX_LEGACY_WINDOW_SEC = 30 * 24 * 60 * 60;
+
+/**
+ * Parse REGISTRATION_LEGACY_ACCEPT_UNTIL (WP4). Returns null when absent/empty,
+ * otherwise a canonical positive Unix-seconds integer. Rejects leading-zero, sign,
+ * whitespace, fraction, exponent, date-string, and unsafe-integer forms — no
+ * trimming/coercion/repair. Throws on a malformed value.
+ */
+export function parseLegacyAcceptUntil(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new Error('Invalid REGISTRATION_LEGACY_ACCEPT_UNTIL — must be a canonical positive Unix-seconds integer.');
+  }
+  return Number(raw);
+}
+
 /**
  * Fail-closed boot validation of the registration-auth surface. Called at boot
  * AFTER assertSecureConfig()/executor static config (so pre-existing static faults
- * surface first). Enforces the full mode/cluster/secret matrix. Throws (→ exit 1)
- * on any violation. Error messages never contain a secret value.
+ * surface first). Enforces the full mode/cluster/secret matrix + the WP4 legacy
+ * window. Throws (→ exit 1) on any violation. Error messages never contain a
+ * secret value. `now()` (Unix seconds) is injectable for tests.
  */
-export function assertRegistrationAuthConfig() {
+export function assertRegistrationAuthConfig({ now = () => Math.floor(Date.now() / 1000) } = {}) {
   const mode = resolveAuthMode();
 
   // legacy is a development-only convenience — never a production posture.
@@ -289,6 +312,26 @@ export function assertRegistrationAuthConfig() {
   }
   if (config.expectedAudience !== NOTIFY_AUDIENCE) {
     throw new Error('Registration auth audience must equal the approved constant.');
+  }
+
+  // ── WP4: legacy-acceptance window (mode-specific) ──────────────────────────
+  // Ordered LAST so the WP3 boot/config faults above always surface first.
+  if (mode === AUTH_MODE.DUAL_ACCEPT) {
+    const until = parseLegacyAcceptUntil(config.legacyAcceptUntilRaw); // throws on malformed
+    if (until === null) {
+      throw new Error('REGISTRATION_LEGACY_ACCEPT_UNTIL is required for REGISTRATION_AUTH_MODE=dual.');
+    }
+    const t = now();
+    if (until > t && until - t > MAX_LEGACY_WINDOW_SEC) {
+      throw new Error('REGISTRATION_LEGACY_ACCEPT_UNTIL must be at most 30 days in the future.');
+    }
+    // An already-expired cutoff is allowed: the server boots effective signed-only.
+  } else {
+    // signed + (dev) legacy must NOT carry a cutoff — a non-empty value is a stale
+    // transition config and is fatal.
+    if (config.legacyAcceptUntilRaw !== '') {
+      throw new Error(`REGISTRATION_LEGACY_ACCEPT_UNTIL must be absent for REGISTRATION_AUTH_MODE=${mode}.`);
+    }
   }
 }
 

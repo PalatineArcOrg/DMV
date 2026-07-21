@@ -365,3 +365,80 @@ Resolved / accepted:
   acknowledged as weak auth. The write routes rely on the in-handler per-IP limiter
   (30/60s) plus Caddy/Cloudflare as the outer bound (malformed JSON is rejected by
   the body parser before the handler), matching the pre-WP3 posture.
+
+# Dual-mode transition controls + observability (WP4)
+
+Status: **server-only.** WP4 adds a time-bounded legacy-acceptance window for
+production `dual` mode, privacy-safe migration observability, and an admin-only
+status endpoint. No app change, no auth-mode auto-switch, no devnet deployment.
+Mainnet remains NO-GO.
+
+## `REGISTRATION_LEGACY_ACCEPT_UNTIL`
+
+An absolute Unix timestamp (whole seconds) governing ONLY pure legacy
+register/deregister in `dual` mode. It never affects signed requests, admin routes,
+the internal poller, the executor, notification delivery, or public reads.
+
+- Format: a **canonical positive integer** — no fraction, exponent, sign, leading
+  zero, whitespace, or date string (rejected fail-closed at boot).
+- `dual`: **required** (dev too). A future cutoff must be **≤ 30 days** ahead; an
+  already-expired cutoff boots fine with legacy writes disabled (effective
+  signed-only). `signed` / (dev) `legacy`: the variable must be **absent**.
+
+## Effective mode + one-way latch
+
+A clock-injected controller derives `{ configuredMode, effectiveMode,
+legacyAccepting, legacyAcceptUntil, legacyWindowExpired, secondsUntilLegacyClose }`.
+Legacy is accepted only while `serverNow < legacyAcceptUntil`; at
+`serverNow === legacyAcceptUntil` the window is **expired**. A **one-way in-process
+latch** means once expiry is observed, legacy stays closed for the life of the
+process — a backward clock jump cannot reopen it. A restart re-evaluates the
+absolute cutoff and remains expired if real time is beyond it. The latch is never
+persisted to the registration DB.
+
+## Legacy request at expiry
+
+In `dual` after the window closes, a pure legacy register/deregister returns:
+
+```json
+{ "error": "legacy registration window expired", "code": "legacy_window_expired" }
+```
+
+with HTTP **410 Gone** — evaluated **before** `REGISTER_SECRET`, the ownership RPC,
+and any DB read/mutation/nonce. So a valid secret cannot bypass expiry, a wrong
+secret is no oracle, and no state changes. Signed requests bypass the window
+entirely and keep working. Dev `legacy` mode is not governed by the window. The IP
+write-rate limit still precedes the transition check.
+
+## Aggregate migration counts
+
+A single SQL aggregate (no row data, no mutation): `signed` = `auth_version>=2 AND
+migration_status='signed'`; `legacy` = `auth_version<2 AND migration_status='legacy'`;
+`anomalous` = any row in neither consistent state. `signedPercent` is computed in
+the response layer only (`total===0 ? 100 : signed/total*100`), never stored.
+
+## Metrics (process-local, fixed cardinality)
+
+An in-memory collector tracks fixed register/deregister/security counters, a
+**fixed** failure-code allowlist (+ `other` for anything unknown — a metric key is
+never derived from an error string), and last-event timestamps. Methods are
+synchronous + no-throw (a metrics failure never alters route behaviour). Counters
+**reset on process restart** (not persisted).
+
+## Admin status endpoint
+
+`GET /admin/registration-auth/status` — behind the `ADMIN_SECRET` gate
+(`x-dmv-admin-secret`) + the admin IP limiter; `x-dmv-secret` is never accepted. It
+returns the transition state, aggregate counts + `signedPercent`, a fixed metrics
+snapshot, and cutover readiness — and performs **no mutation** and exposes **no**
+row/owner/vault/token/hash/nonce/signature/secret/RPC-URL. `readyForSignedMode` is
+true only when `legacy === 0 && anomalous === 0`; the fixed blockers are
+`legacy_registrations_remaining` / `anomalous_registration_metadata`. A still-open
+dual window is not itself a blocker once all rows are signed.
+
+## Public health
+
+Public `/health` adds only `registrationAuthEffectiveMode`,
+`legacyRegistrationAccepting`, and `legacyRegistrationAcceptUntil` — no counts,
+metrics, blockers, or secrets. **Window expiry is an intended security transition,
+not a health degradation:** readiness status and HTTP code are unaffected.

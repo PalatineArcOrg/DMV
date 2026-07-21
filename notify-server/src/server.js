@@ -1,6 +1,8 @@
 import express from 'express';
 import { PublicKey } from '@solana/web3.js';
-import { config, isDev, assertSecureConfig, assertRegistrationAuthConfig, resolveAuthMode } from './config.js';
+import {
+  config, isDev, assertSecureConfig, assertRegistrationAuthConfig, resolveAuthMode, parseLegacyAcceptUntil,
+} from './config.js';
 import {
   deleteLegacyRegistrationsByOwner,
   countRegistrations,
@@ -11,6 +13,7 @@ import {
   applySignedDeregistration,
   applyLegacyRegistration,
   deleteLegacyRegistration,
+  migrationCounts,
 } from './db.js';
 import { probeFcm, setFcmObserver, tokFingerprint } from './fcm.js';
 import { startPoller, pollOnce } from './poller.js';
@@ -22,6 +25,9 @@ import { sha256Hex } from './authMessage.js';
 import { makeRegistrationHandlers } from './registrationRoutes.js';
 import { makeLegacySecretCheck, makeAdminGate } from './secretGate.js';
 import { makeWriteRateLimiter } from './writeRateLimiter.js';
+import { makeTransitionController } from './transitionState.js';
+import { makeAuthMetrics } from './authMetrics.js';
+import { makeRegistrationAuthStatusHandler } from './adminStatusRoute.js';
 import { readiness, NET, HEALTH, nextBackoff, bootDecision } from './readiness.js';
 import { makeExecuteNowHandler, makePollNowHandler } from './routes.js';
 import { installFatalGuards, sanitize } from './fatalGuards.js';
@@ -127,6 +133,30 @@ try {
   process.exit(1);
 }
 
+// ── WP4: registration-auth transition controller + metrics ────────────────────
+// The legacy-acceptance cutoff was validated by assertRegistrationAuthConfig above;
+// parse it (non-throwing here). The controller holds a one-way in-process expiry
+// latch (dual only); metrics are fixed-cardinality + process-local.
+const nowSec = () => Math.floor(Date.now() / 1000);
+const legacyAcceptUntil = parseLegacyAcceptUntil(config.legacyAcceptUntilRaw);
+const authMetrics = makeAuthMetrics({ now: nowSec });
+const transition = makeTransitionController({
+  mode: authMode,
+  legacyAcceptUntil,
+  now: nowSec,
+  onFirstExpiry: (ts) => {
+    console.log('[registration-auth] legacy acceptance window expired; signed requests remain enabled');
+    authMetrics.legacyExpiryObserved(ts);
+  },
+});
+{
+  const bs = transition.get();
+  console.log(
+    `[registration-auth] configured ${authMode} effective ${bs.effectiveMode} legacyAccepting ${bs.legacyAccepting}` +
+      (authMode === 'dual' ? ` until ${bs.legacyAcceptUntil}` : ''),
+  );
+}
+
 // Write-endpoint rate limiter (register/deregister/admin). Separate from the
 // public-read + RPC limiters. Clock-injected so it is unit-testable.
 const writeLimiter = makeWriteRateLimiter({ now: () => Date.now() });
@@ -155,22 +185,30 @@ const registrationHandlers = makeRegistrationHandlers({
   legacySecretOk: makeLegacySecretCheck(config.registerSecret),
   limiter: writeLimiter,
   clientIp,
-  now: () => Math.floor(Date.now() / 1000),
+  now: nowSec,
   logger: console,
   tokFingerprint,
   sha256Hex,
   isPubkey,
+  transition,
+  metrics: authMetrics,
 });
 
 // Admin gate for the operational routes — a DEDICATED admin secret + header,
 // separate from legacy registration auth.
 const adminGate = makeAdminGate({ adminSecret: config.adminSecret, isDev, limiter: writeLimiter, clientIp });
+// A scoped admin gate for the status endpoint that also counts auth failures.
+const statusAdminGate = makeAdminGate({
+  adminSecret: config.adminSecret, isDev, limiter: writeLimiter, clientIp,
+  onAuthFailure: () => authMetrics.adminAuthFailure(),
+});
 
 // Readiness/health: READY | DEGRADED | NOT_READY with per-domain booleans, machine-readable reason
 // codes, verification timestamps and the cranker balance — but NO secrets, keypairs, or RPC URL.
 // 503 only when NOT_READY (listener down or a confirmed cluster MISMATCH); DEGRADED still serves 200.
 app.get('/health', (req, res) => {
   const snap = readiness.snapshot();
+  const ts = transition.get();
   res.status(snap.status === HEALTH.NOT_READY ? 503 : 200).json({
     ...snap,
     cranker: crankerPubkey(),
@@ -178,7 +216,13 @@ app.get('/health', (req, res) => {
     programId: config.programId,
     cluster: config.expectedCluster,
     registrationAuthMode: authMode,
-    // NB: the RPC URL / secrets are intentionally NOT exposed here — /health is public via Caddy.
+    // WP4: minimal transition visibility. Window expiry is an intended security
+    // transition, NOT a health degradation — status/HTTP code are unaffected.
+    registrationAuthEffectiveMode: ts.effectiveMode,
+    legacyRegistrationAccepting: ts.legacyAccepting,
+    legacyRegistrationAcceptUntil: ts.legacyAcceptUntil,
+    // NB: migration counts / metrics / blockers / RPC URL / secrets are NOT exposed
+    // here — /health is public via Caddy. See the admin-only status endpoint.
   });
 });
 
@@ -236,6 +280,15 @@ app.get('/inheritances', rateLimit, async (req, res) => {
 // path (stickiness). See registrationRoutes.js / registerAuthV2.js.
 app.post('/register', registrationHandlers.register);
 app.post('/deregister', registrationHandlers.deregister);
+
+// Admin-only registration-auth status (WP4): transition state + aggregate
+// migration counts + fixed metrics snapshot + cutover readiness. Read-only; no row
+// data / token / secret. ADMIN_SECRET gate + admin IP limiter (statusAdminGate).
+app.get(
+  '/admin/registration-auth/status',
+  statusAdminGate,
+  makeRegistrationAuthStatusHandler({ transition, migrationCounts, metrics: authMetrics, now: nowSec }),
+);
 
 // Manual trigger for testing. Refuses unless the network is positively VERIFIED.
 app.post('/poll-now', adminGate, makePollNowHandler({ readiness, pollOnce }));
