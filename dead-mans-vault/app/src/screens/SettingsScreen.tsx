@@ -22,10 +22,15 @@ import { useDemoStore } from '../store/useDemoStore';
 import { useVaultStore } from '../store/useVaultStore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useAuthStore } from '../store/useAuthStore';
-import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS } from '../utils/constants';
+import * as Crypto from 'expo-crypto';
+import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS, NOTIFY_URL } from '../utils/constants';
 import { truncateAddress, formatDuration } from '../utils/formatting';
-import { RPC_OVERRIDE_KEY, explorerAddress, explorerTx, getRpcUrl, isCustomRpc, maskRpc, networkLabel } from '../utils/rpcConfig';
+import { RPC_OVERRIDE_KEY, explorerAddress, explorerTx, getRpcUrl, isCustomRpc, isDevnet, maskRpc, networkLabel } from '../utils/rpcConfig';
 import { getSetting, setSetting, deleteSetting } from '../db/settingsRepo';
+import { attemptSignedRegistration, successKey, mapRegistrationError } from '../services/NotificationRegistrationService';
+import { DEV_ESCALATION } from '../hooks/useHeartbeat';
+import { registerMessageV2, generateNonceV2 } from '../utils/notifyAuth';
+import { PushRegistrationService } from '../services/PushRegistrationService';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
 
@@ -38,7 +43,7 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
-  const { publicKey, connected, connect, disconnect, signTransaction } = useWallet();
+  const { publicKey, connected, connect, disconnect, signTransaction, signMessage } = useWallet();
   const { isDemoMode, setDemoMode, incrementTap } = useDemoStore();
   const { beneficiaries, vaultConfig } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
@@ -53,6 +58,8 @@ export function SettingsScreen() {
   const [rpcSaved, setRpcSaved] = useState<string | null>(null);
   const [rpcTesting, setRpcTesting] = useState(false);
   const [rpcTestResult, setRpcTestResult] = useState<string | null>(null);
+  // WP5: deliberate signed notification-registration state (this device).
+  const [notifReg, setNotifReg] = useState<{ state: 'not_enabled' | 'registering' | 'enabled' | 'failed'; message: string | null }>({ state: 'not_enabled', message: null });
 
   useFocusEffect(
     useCallback(() => {
@@ -122,6 +129,85 @@ export function SettingsScreen() {
     setRpcTestResult(null);
     Alert.alert('Reset', 'Reverted to the default RPC. Restart the app to apply.');
   }, []);
+
+  // WP5: reflect (read-only) whether this device already has a signed registration.
+  // This NEVER triggers signing or a network request — it only reads local state.
+  useFocusEffect(useCallback(() => {
+    if (!publicKey) return;
+    const ownerB58 = publicKey.toBase58();
+    const vaultB58 = PublicKey.findProgramAddressSync([Buffer.from('vault'), publicKey.toBuffer()], new PublicKey(PROGRAM_ID))[0].toBase58();
+    const cluster = isDevnet() ? 'devnet' : 'mainnet-beta';
+    getSetting(successKey({ cluster, programId: PROGRAM_ID, owner: ownerB58, vault: vaultB58 }))
+      .then((rec) => setNotifReg((s) => (s.state === 'registering' ? s : { state: rec ? 'enabled' : 'not_enabled', message: null })))
+      .catch(() => {});
+  }, [publicKey]));
+
+  // WP5: DELIBERATE owner-signed registration. Runs ONLY from an explicit tap.
+  const handleEnableSignedNotifications = useCallback(async () => {
+    if (notifReg.state === 'registering') return; // single-flight; no duplicate submit
+    if (!publicKey) {
+      setNotifReg({ state: 'failed', message: 'Connect your wallet first.' });
+      return;
+    }
+    setNotifReg({ state: 'registering', message: null });
+    // Register the SAME stage durations the app's escalation actually uses
+    // (demo/dev = 30s each; otherwise the production defaults) so server-side
+    // escalation timing matches the device.
+    const useDevTimers = __DEV__ || isDemoMode;
+    const stages = useDevTimers
+      ? { stage1: DEV_ESCALATION.stage1Duration, stage2: DEV_ESCALATION.stage2Duration, stage3: DEV_ESCALATION.stage3Duration }
+      : { stage1: ESCALATION_DEFAULTS.stage1, stage2: ESCALATION_DEFAULTS.stage2, stage3: ESCALATION_DEFAULTS.stage3 };
+    let result: Awaited<ReturnType<typeof attemptSignedRegistration>>;
+    try {
+      result = await attemptSignedRegistration(
+      {
+        owner: publicKey.toBase58(),
+        stages,
+      },
+      {
+        cluster: isDevnet() ? 'devnet' : 'mainnet-beta',
+        programId: PROGRAM_ID,
+        deriveVault: (o: string) => PublicKey.findProgramAddressSync([Buffer.from('vault'), new PublicKey(o).toBuffer()], new PublicKey(PROGRAM_ID))[0].toBase58(),
+        getDeviceToken: () => PushRegistrationService.getDeviceToken(),
+        getSetting,
+        setSetting,
+        signMessage,
+        buildRegisterMessage: registerMessageV2,
+        generateNonce: generateNonceV2,
+        sha256Hex: (t: string) => Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, t),
+        postRegister: async (body) => {
+          const res = await fetch(`${NOTIFY_URL}/register`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          let code: string | undefined;
+          try {
+            code = (await res.json())?.code;
+          } catch {
+            /* no/invalid JSON body — status alone drives the outcome */
+          }
+          return { status: res.status, code, retryAfter: res.headers.get('retry-after') };
+        },
+        nowSec: () => Math.floor(Date.now() / 1000),
+        nowMs: () => Date.now(),
+      },
+      );
+    } catch {
+      // A coordinator throw must never wedge the UI at "Registering…".
+      setNotifReg({ state: 'failed', message: 'Registration failed. Please try again.' });
+      return;
+    }
+    if (result.ok) {
+      setNotifReg({ state: 'enabled', message: null });
+    } else if (result.stage === 'wallet') {
+      // Wallet cancellation/rejection returns to a safe, non-enabled state (no error, no claim of success).
+      setNotifReg({ state: 'not_enabled', message: null });
+    } else {
+      const mapped = mapRegistrationError(result.code || result.stage);
+      setNotifReg({ state: 'failed', message: mapped.message });
+    }
+  }, [notifReg.state, publicKey, signMessage]);
 
   useFocusEffect(useCallback(() => {
     Notifications.getPermissionsAsync().then(({ status }) => {
@@ -343,6 +429,36 @@ export function SettingsScreen() {
               value={notifStatus}
             />
           </TouchableOpacity>
+          <View style={styles.rowDivider} />
+          <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14 }}>
+            <Text style={{ color: COLORS.textSecondary, fontFamily: FONTS.primaryMedium, fontSize: 13, lineHeight: 18, marginBottom: 10 }}>
+              A wallet signature authorizes escalation notifications to this device. It does not move funds.
+              {vaultPda ? `  Vault ${truncateAddress(vaultPda.toBase58(), 4)}.` : ''}
+            </Text>
+            <TouchableOpacity
+              disabled={notifReg.state === 'registering' || !connected}
+              onPress={handleEnableSignedNotifications}
+              style={[styles.netBtn, (notifReg.state === 'registering' || !connected) && { opacity: 0.5 }]}
+            >
+              <Text style={styles.netBtnText}>
+                {notifReg.state === 'registering'
+                  ? 'Registering…'
+                  : notifReg.state === 'enabled'
+                    ? 'Update notification registration'
+                    : 'Enable notifications (signed)'}
+              </Text>
+            </TouchableOpacity>
+            {notifReg.state === 'enabled' ? (
+              <Text style={{ color: COLORS.accent, fontFamily: FONTS.primaryMedium, fontSize: 12, marginTop: 8 }}>
+                Signed registration enabled on this device.
+              </Text>
+            ) : null}
+            {notifReg.state === 'failed' && notifReg.message ? (
+              <Text style={{ color: COLORS.critical, fontFamily: FONTS.primaryMedium, fontSize: 12, marginTop: 8 }}>
+                {notifReg.message}
+              </Text>
+            ) : null}
+          </View>
         </View>
       </View>
 

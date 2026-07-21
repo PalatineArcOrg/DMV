@@ -24,10 +24,12 @@ const REG_FINGERPRINT_KEY = 'notify_reg_fingerprint';
  * so the rest of the app is unaffected.
  *
  * ── Registration auth ──────────────────────────────────────────────────────
- * The ACTIVE path is `register`/`deregister` — a plain unsigned POST. Integrity
- * is provided server-side by the deployed on-chain OWNERSHIP PROOF (`/register`
- * verifies the vault is the canonical PDA for `owner` and reads the real
- * on-chain VaultConfig), so a fake/foreign vault can't be registered.
+ * As of WP5 the app registers via a DELIBERATE owner-signed V2 flow
+ * (`NotificationRegistrationService.attemptSignedRegistration`, wired from the
+ * Settings screen) — NOT this unsigned path. `register`/`deregister` below are
+ * the legacy unsigned methods (a plain `x-dmv-secret` POST + server-side on-chain
+ * ownership proof); they have NO active call site in the app anymore and are kept
+ * only for backwards compatibility / isolated tests. Do not re-wire them.
  *
  * `registerSigned`/`deregisterSigned` are the DORMANT owner-signed variants (an
  * MWA signMessage over a canonical `notifyAuth` message). They exist so mainnet

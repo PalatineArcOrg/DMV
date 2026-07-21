@@ -9,7 +9,9 @@ import { useEscalationStore } from '../store/useEscalationStore';
 import { useVaultStore } from '../store/useVaultStore';
 import { useDemoStore } from '../store/useDemoStore';
 import { NotificationService } from '../notifications/NotificationService';
-import { PushRegistrationService } from '../services/PushRegistrationService';
+import { getSetting } from '../db/settingsRepo';
+import { successKey } from '../services/NotificationRegistrationService';
+import { isDevnet } from '../utils/rpcConfig';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS, PROGRAM_ID } from '../utils/constants';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
@@ -17,7 +19,9 @@ const DEFAULT_CONFIG: HeartbeatConfig = {
   intervalSeconds: HEARTBEAT_INTERVALS.weekly,
 };
 
-const DEV_ESCALATION = {
+// Demo/dev escalation timers (30s/stage). Exported so the deliberate signed-
+// registration flow (Settings) registers the SAME stage durations the app uses.
+export const DEV_ESCALATION = {
   stage1Duration: 30,
   stage2Duration: 30,
   stage3Duration: 30,
@@ -101,33 +105,26 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
     escService.start();
     setIsMonitoring(true);
 
-    // Register this device with the FCM notify server so escalation pushes
-    // arrive even when the app is killed. Idempotent; the server reads
-    // heartbeats from chain, so we only register the token + stage durations.
-    // Fire-and-forget and no-ops if push isn't configured in this build.
+    // WP5: signed notification registration is a DELIBERATE user action (Settings),
+    // never a background call. Heartbeat only READS the local persisted signed-
+    // registration record to reflect whether server-driven escalation is active —
+    // it acquires NO device token, requests NO wallet signature, and makes NO
+    // /register request. FCM primary (server delivers alerts) vs local timeline
+    // fallback follows whether the owner has completed signed registration.
     if (ownerPubkey) {
       try {
         const [vaultPda] = PublicKey.findProgramAddressSync(
           [Buffer.from('vault'), ownerPubkey.toBuffer()],
           new PublicKey(PROGRAM_ID),
         );
-        PushRegistrationService.register(
-          ownerPubkey.toBase58(),
-          vaultPda.toBase58(),
-          {
-            stage1: escConfig.stage1Duration,
-            stage2: escConfig.stage2Duration,
-            stage3: escConfig.stage3Duration,
-          },
+        const cluster = isDevnet() ? 'devnet' : 'mainnet-beta';
+        getSetting(
+          successKey({ cluster, programId: PROGRAM_ID, owner: ownerPubkey.toBase58(), vault: vaultPda.toBase58() }),
         )
-          // FCM primary, local timeline as fallback: if the server is watching
-          // this vault it delivers the escalation alerts, so cancel the local
-          // pre-scheduled timeline to avoid duplicate notifications. If it isn't
-          // (no push token / no server / failed), keep the local timeline.
-          .then((registered) => escService.setFcmActive(registered))
+          .then((record) => escService.setFcmActive(!!record))
           .catch(() => escService.setFcmActive(false));
       } catch {
-        // Non-fatal — push registration is best-effort.
+        escService.setFcmActive(false);
       }
     }
 
