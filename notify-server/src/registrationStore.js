@@ -25,6 +25,11 @@ export const RESULT = Object.freeze({
   OWNERSHIP_FAILED: 'ownership_failed',
   DEPENDENCY_UNAVAILABLE: 'dependency_unavailable',
   DATABASE_ERROR: 'database_error',
+  // WP3 route/auth-mode codes.
+  SIGNED_AUTHORIZATION_REQUIRED: 'signed_authorization_required',
+  SIGNED_NOT_ENABLED: 'signed_not_enabled',
+  SIGNED_REQUIRED: 'signed_required',
+  RATE_LIMITED: 'rate_limited',
 });
 
 // The additive V2 columns and their DDL. `auth_version`/`registration_revision`/
@@ -213,4 +218,113 @@ export function applySignedDeregistration(db, command) {
  */
 export function pruneNonces(db, olderThan) {
   return db.prepare('DELETE FROM used_nonces WHERE used_at < ?').run(olderThan).changes;
+}
+
+// ── WP3: legacy (unsigned) mutations with signed-row stickiness ──────────────
+// A row that has migrated to signed authentication is IMMUTABLE via the legacy
+// path — it can only be changed/removed by an owner-signed request. This blocks a
+// downgrade where an old unsigned app (or a shared-secret holder) overwrites or
+// deletes a signed registration.
+
+/** True if a row is under signed authentication and off-limits to the legacy path. */
+export function isSignedRow(row) {
+  return !!row && (row.auth_version >= 2 || row.migration_status === 'signed');
+}
+
+/**
+ * Legacy (unsigned) upsert. Refuses to touch a signed row (returns
+ * SIGNED_AUTHORIZATION_REQUIRED). A fresh row is created as `legacy`; an existing
+ * legacy row is updated (owner/device_token/stages/updated_at only), preserving
+ * created_at + last_stage + last_notified_at and NEVER touching the auth metadata.
+ */
+export function applyLegacyRegistration(db, command) {
+  const read = db.prepare('SELECT auth_version, migration_status FROM registrations WHERE vault = ?');
+  const insert = db.prepare(`
+    INSERT INTO registrations
+      (vault, owner, device_token, stage1, stage2, stage3, last_stage, last_notified_at,
+       created_at, updated_at, auth_version, registration_revision, device_token_hash,
+       signed_at, migration_status, last_auth_op)
+    VALUES
+      (@vault, @owner, @device_token, @stage1, @stage2, @stage3, 0, 0,
+       @now, @now, 1, 0, NULL, NULL, 'legacy', 'register')
+  `);
+  const update = db.prepare(`
+    UPDATE registrations SET
+      owner = @owner,
+      device_token = @device_token,
+      stage1 = @stage1, stage2 = @stage2, stage3 = @stage3,
+      updated_at = @now
+    WHERE vault = @vault
+  `);
+
+  const txn = db.transaction((cmd) => {
+    const row = read.get(cmd.vault);
+    if (isSignedRow(row)) return { ok: false, code: RESULT.SIGNED_AUTHORIZATION_REQUIRED };
+    const params = {
+      vault: cmd.vault,
+      owner: cmd.owner,
+      device_token: cmd.deviceToken,
+      stage1: cmd.stage1,
+      stage2: cmd.stage2,
+      stage3: cmd.stage3,
+      now: cmd.now,
+    };
+    if (!row) {
+      insert.run(params);
+      return { ok: true, code: RESULT.CREATED };
+    }
+    update.run(params);
+    return { ok: true, code: RESULT.UPDATED };
+  });
+
+  try {
+    return txn(command);
+  } catch {
+    return { ok: false, code: RESULT.DATABASE_ERROR };
+  }
+}
+
+/**
+ * Legacy (unsigned) delete of a specific vault. Refuses to delete a signed row
+ * (SIGNED_AUTHORIZATION_REQUIRED). A missing row is an idempotent removed=0. When
+ * `owner` is provided the delete additionally pins it. This is the EXTERNAL legacy
+ * route path — the internal poller uses the raw deleteRegistration (any row).
+ */
+export function deleteLegacyRegistration(db, { vault, owner }) {
+  const read = db.prepare('SELECT auth_version, migration_status FROM registrations WHERE vault = ?');
+  const delByVault = db.prepare('DELETE FROM registrations WHERE vault = ?');
+  const delByVaultOwner = db.prepare('DELETE FROM registrations WHERE vault = ? AND owner = ?');
+
+  const txn = db.transaction((v, o) => {
+    const row = read.get(v);
+    if (!row) return { ok: true, code: RESULT.REMOVED, removed: 0 };
+    if (isSignedRow(row)) return { ok: false, code: RESULT.SIGNED_AUTHORIZATION_REQUIRED };
+    const removed = o ? delByVaultOwner.run(v, o).changes : delByVault.run(v).changes;
+    return { ok: true, code: RESULT.REMOVED, removed };
+  });
+
+  try {
+    return txn(vault, owner);
+  } catch {
+    return { ok: false, code: RESULT.DATABASE_ERROR };
+  }
+}
+
+/**
+ * Legacy (unsigned) owner-wide delete — the DEV-only legacy-mode compatibility
+ * path. Deletes only the owner's NON-signed rows; a signed row
+ * (auth_version >= 2 OR migration_status = 'signed') is left intact, so the
+ * signed-row stickiness invariant holds uniformly (even a dev owner-wide delete
+ * can never force-remove a signed registration). The WHERE clause is the exact
+ * inverse of isSignedRow().
+ */
+export function deleteLegacyRegistrationsByOwner(db, owner) {
+  try {
+    const removed = db
+      .prepare("DELETE FROM registrations WHERE owner = ? AND auth_version < 2 AND migration_status != 'signed'")
+      .run(owner).changes;
+    return { ok: true, code: RESULT.REMOVED, removed };
+  } catch {
+    return { ok: false, code: RESULT.DATABASE_ERROR };
+  }
 }

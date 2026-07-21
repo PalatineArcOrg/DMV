@@ -2,38 +2,27 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { config } from './config.js';
+import {
+  ensureSchema,
+  applySignedRegistration as storeApplySignedRegistration,
+  applySignedDeregistration as storeApplySignedDeregistration,
+  applyLegacyRegistration as storeApplyLegacyRegistration,
+  deleteLegacyRegistration as storeDeleteLegacyRegistration,
+  deleteLegacyRegistrationsByOwner as storeDeleteLegacyRegistrationsByOwner,
+  getRegistration as storeGetRegistration,
+} from './registrationStore.js';
 
 mkdirSync(dirname(config.dbPath), { recursive: true });
 
 export const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS registrations (
-    vault            TEXT PRIMARY KEY,   -- vault PDA pubkey (one per owner)
-    owner            TEXT NOT NULL,
-    device_token     TEXT NOT NULL,      -- native FCM token
-    stage1           INTEGER NOT NULL,   -- escalation stage durations (seconds)
-    stage2           INTEGER NOT NULL,
-    stage3           INTEGER NOT NULL,
-    last_stage       INTEGER NOT NULL DEFAULT 0,  -- last escalation stage we notified for
-    last_notified_at INTEGER NOT NULL DEFAULT 0,  -- unix ts of last push (for recurring throttle)
-    created_at       INTEGER NOT NULL,
-    updated_at       INTEGER NOT NULL
-  );
-`);
-
-// Replay guard for owner-signed register/deregister: each (owner, nonce) is
-// single-use. Old rows are pruned (a stale nonce is also rejected by the
-// timestamp window, so they don't need to be kept long).
-db.exec(`
-  CREATE TABLE IF NOT EXISTS used_nonces (
-    owner    TEXT NOT NULL,
-    nonce    TEXT NOT NULL,
-    used_at  INTEGER NOT NULL,
-    PRIMARY KEY (owner, nonce)
-  );
-`);
+// Base schema + idempotent additive V2 migration (single-sourced in
+// registrationStore.js). Runs at import — before server.js opens a listener — so
+// a migration failure aborts boot (non-zero exit) rather than serving traffic on
+// a half-migrated schema. Additive + idempotent: legacy rows and the unsigned
+// upsert below stay valid; notification state is never reset.
+ensureSchema(db);
 
 const upsertStmt = db.prepare(`
   INSERT INTO registrations (vault, owner, device_token, stage1, stage2, stage3, last_stage, last_notified_at, created_at, updated_at)
@@ -91,4 +80,26 @@ export function claimNonce(owner, nonce, usedAt) {
 const pruneNoncesStmt = db.prepare('DELETE FROM used_nonces WHERE used_at < ?');
 export function pruneNonces(olderThan) {
   return pruneNoncesStmt.run(olderThan).changes;
+}
+
+// ── WP3: signed + legacy transactions bound to the live DB ───────────────────
+// Thin wrappers over the dependency-injected store functions (unit-tested against
+// temp DBs in registrationStore.test.js). The route layer calls these.
+export function getRegistration(vault) {
+  return storeGetRegistration(db, vault);
+}
+export function applySignedRegistration(command) {
+  return storeApplySignedRegistration(db, command);
+}
+export function applySignedDeregistration(command) {
+  return storeApplySignedDeregistration(db, command);
+}
+export function applyLegacyRegistration(command) {
+  return storeApplyLegacyRegistration(db, command);
+}
+export function deleteLegacyRegistration(args) {
+  return storeDeleteLegacyRegistration(db, args);
+}
+export function deleteLegacyRegistrationsByOwner(owner) {
+  return storeDeleteLegacyRegistrationsByOwner(db, owner);
 }

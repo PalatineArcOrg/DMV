@@ -23,6 +23,7 @@ const DMV_ENV_KEYS = [
   'ALLOW_NO_FCM', 'ALLOW_NO_EXECUTOR', 'MIN_CRANKER_BALANCE_SOL', 'WARN_CRANKER_BALANCE_SOL',
   'REQUIRE_PROGRAM_EXECUTABLE', 'POLL_MAX_FAILURE_RATIO', 'POLL_MAX_FAILURE_ABS', 'RPC_URL', 'PROGRAM_ID',
   'EXPECTED_CLUSTER', 'EXPECTED_CRANKER_PUBKEY', 'POLL_INTERVAL_MS', 'PORT', 'DB_PATH',
+  'REGISTRATION_AUTH_MODE', 'ADMIN_SECRET',
 ];
 function boot(env) {
   const clean = { ...process.env };
@@ -88,4 +89,29 @@ test('mainnet without FCM and without ALLOW_NO_FCM → exit 1 (static FCM readin
   const r = await boot({ ...OK, EXPECTED_CLUSTER: 'mainnet-beta', ALLOW_NO_EXECUTOR: '1', FCM_SERVICE_ACCOUNT: '' });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /FCM service account/);
+});
+
+// WP3 registration-auth boot fatals — reached AFTER assertSecureConfig/executor
+// static config, BEFORE the network classify + listen (so no network is touched).
+// OK provides ADMIN_SECRET + a mode; each case removes/faults exactly one.
+const OK3 = { ...OK, ADMIN_SECRET: 'boot-admin-secret', REGISTRATION_AUTH_MODE: 'dual' };
+
+test('production missing REGISTRATION_AUTH_MODE → exit 1', async () => {
+  const { REGISTRATION_AUTH_MODE, ...noMode } = OK3;
+  const r = await boot(noMode);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /REGISTRATION_AUTH_MODE/);
+});
+
+test('production missing ADMIN_SECRET → exit 1', async () => {
+  const { ADMIN_SECRET, ...noAdmin } = OK3;
+  const r = await boot(noAdmin);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /ADMIN_SECRET/);
+});
+
+test('ADMIN_SECRET equal to REGISTER_SECRET → exit 1', async () => {
+  const r = await boot({ ...OK3, ADMIN_SECRET: OK3.REGISTER_SECRET });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /ADMIN_SECRET must not equal REGISTER_SECRET/);
 });

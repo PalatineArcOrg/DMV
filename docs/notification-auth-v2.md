@@ -271,3 +271,97 @@ Its `owner` and `vault` are **independent synthetic pubkeys** — `vault` is NOT
 is an authorization-layer check, not a serialization property). Do **not** feed this
 vector to `authorizeRegisterV2`/`authorizeDeregisterV2` as a full-path happy-path
 input; it would fail the canonical-PDA / ownership checks by construction.
+
+# Route activation, auth modes + abuse controls (WP3)
+
+Status: **server integration, not deployed.** WP3 wires the WP1 contract + WP2
+primitives into the notify-server routes with a controlled legacy transition. It
+does **not** activate the mobile app's signed flow, and **no devnet deployment has
+occurred**. Mainnet remains unauthorized.
+
+## Authentication modes (`REGISTRATION_AUTH_MODE`)
+
+`legacy | dual | signed` — validated fail-closed at boot (`assertRegistrationAuthConfig`):
+
+- A **missing** mode is fatal outside `NODE_ENV=development` (dev defaults to `legacy`); an **unknown** value is always fatal (no trim/lowercase/alias).
+- `legacy` is permitted **only** in explicit development.
+- `mainnet-beta` **requires** `signed`.
+- `legacy`/`dual` require a non-empty `REGISTER_SECRET`; `signed` requires none.
+- Every non-dev deploy requires a distinct `ADMIN_SECRET` (≠ `REGISTER_SECRET`).
+- The trusted V2 context (cluster, program id, audience) must be complete; the audience is the fixed approved constant, never env-controlled.
+
+## Signed-attempt classification + downgrade resistance
+
+A request is a **signed attempt** if its body has ANY own V2-envelope field
+(`version, cluster, programId, audience, action, revision, timestamp, nonce,
+signature`). A present-but-empty `signature`, or a missing `signature` alongside
+other V2 fields, is still a signed attempt. A signed attempt is always handled by
+the V2 path and **never falls back to the legacy secret path** — possession of
+`REGISTER_SECRET` cannot rescue a failed signed request, and a V1 signed payload
+(no `version`/context) is a signed attempt that fails V2 (`invalid_request`) rather
+than activating or downgrading. `ADMIN_SECRET` authenticates neither registration path.
+
+## Route behaviour by mode
+
+| | legacy (dev) | dual | signed |
+|---|---|---|---|
+| signed `/register` | `signed_not_enabled` (409) | V2 auth + signed txn | V2 auth + signed txn |
+| pure legacy `/register` | secret + ownership proof → `{ok:true}` | secret + ownership proof → `{ok:true}` | `signed_required` (409) |
+| signed `/deregister` | `signed_not_enabled` | V2 auth (incl. post-close stored-owner path) | V2 auth |
+| pure legacy `/deregister` | specific-vault OR owner-wide | specific-vault only (owner-wide **disabled**) | `signed_required` |
+
+Signed `/register` returns `{ok:true, result:'created'|'updated', revision}` (201/200);
+signed `/deregister` returns `{ok:true, removed:0|1}` (200). The legacy path preserves
+the old `{ok:true}` response for app compatibility.
+
+## Signed-row stickiness
+
+Once a row is signed (`auth_version >= 2` or `migration_status = 'signed'`), the
+**legacy** path can neither update, delete, nor downgrade it — it returns
+`signed_authorization_required` (409). Only an owner-signed request may change it.
+The **internal poller** delete (`deleteRegistration`) still removes any row
+(inactive/executed/missing) regardless of auth version.
+
+## Admin-secret separation
+
+`/poll-now`, `/execute-now`, `/debug/push` are gated by `ADMIN_SECRET` via the
+dedicated `x-dmv-admin-secret` header (constant-time; generic 401). The legacy
+`x-dmv-secret` is never accepted for admin routes, and signed registration routes
+require neither secret. `/debug/push` is mounted only in development. A per-IP
+admin-attempt limit bounds secret-guessing.
+
+## Result → HTTP mapping
+
+`invalid_request`→400; `invalid_signature`/`stale_timestamp`/`context_mismatch`/`nonce_reused`→401;
+`ownership_failed`→403; `signed_not_enabled`/`signed_required`/`signed_authorization_required`/`stale_revision`/`owner_conflict`→409;
+`rate_limited`→429; `dependency_unavailable`→502; `database_error`→503. Responses carry a
+generic message + a machine-readable `code`; no signature reason, stored owner, DB
+text, RPC URL, nonce, token, or hash is ever exposed.
+
+## Write-endpoint rate limits
+
+A dedicated bounded limiter (separate from the read/RPC limiters): **30 req/IP/60s**
+(charged before signature/RPC/DB — a malformed body still costs IP), and facet
+windows **10/owner/10min, 10/vault/10min, 6/register-token-hash/10min** (charged
+before RPC/DB). Legacy and signed attempts share the owner/vault/token buckets; the
+token bucket is keyed by SHA-256, never plaintext; deregister has no token facet.
+Exceedance → 429 with `Retry-After` (remaining whole seconds); the exceeded facet is
+not revealed. Admin routes get an independent **20/IP/60s** limit. `/health` gains
+only `registrationAuthMode` — no secret is ever exposed.
+
+### WP3 review resolutions
+
+An independent security review of the WP3 diff found no CRITICAL/HIGH/MEDIUM issues.
+Resolved / accepted:
+
+- **Signed-row stickiness holds uniformly.** Even the DEV-only `legacy`-mode
+  owner-wide deregistration now routes through `deleteLegacyRegistrationsByOwner`,
+  which deletes only the owner's NON-signed rows — a signed registration can never
+  be force-removed via any external legacy path (the internal poller still removes
+  any row for lifecycle cleanup).
+- **Accepted (no change):** a `REGISTER_SECRET` holder can distinguish signed vs
+  legacy vaults via the `signed_authorization_required` (409) on legacy deregister —
+  it leaks only auth status, not owner/token, and the shared secret is already
+  acknowledged as weak auth. The write routes rely on the in-handler per-IP limiter
+  (30/60s) plus Caddy/Cloudflare as the outer bound (malformed JSON is rejected by
+  the body parser before the handler), matching the pre-WP3 posture.
