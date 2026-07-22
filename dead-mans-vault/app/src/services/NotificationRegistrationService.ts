@@ -322,10 +322,19 @@ export async function attemptSignedRegistration(
         cluster: deps.cluster,
         programId: deps.programId,
       };
-      await deps.setSetting(
-        successKey({ cluster: deps.cluster, programId: deps.programId, owner, vault }),
-        JSON.stringify(record),
-      );
+      // Server truth wins: the registration is already accepted server-side. The local
+      // success record is a best-effort cache — if persisting it fails, still report
+      // success. A missing local record only re-adds duplicate LOCAL warnings (the
+      // fail-safe direction) and self-heals on the next deliberate re-tap; it must never
+      // turn an accepted registration into a reported failure.
+      try {
+        await deps.setSetting(
+          successKey({ cluster: deps.cluster, programId: deps.programId, owner, vault }),
+          JSON.stringify(record),
+        );
+      } catch {
+        /* best-effort cache write; server already accepted the registration */
+      }
       return { ok: true, result, revision, record };
     }
     const code = res.code || mapStatusToCode(res.status);

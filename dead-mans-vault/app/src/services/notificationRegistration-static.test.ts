@@ -24,3 +24,20 @@ test('SettingsScreen wires the signed /register with NO shared-secret/admin/lega
   const screen = readFileSync(new URL('../screens/SettingsScreen.tsx', import.meta.url), 'utf8');
   assert.equal(/x-dmv-secret|x-dmv-admin-secret|EXPO_PUBLIC_NOTIFY_SECRET|PushRegistrationService\.headers/.test(screen), false);
 });
+test('DELIBERATE-ONLY lock: the signed handler is referenced ONLY at its declaration + onPress (no auto-trigger)', () => {
+  // Headline safety property: signing must fire only from an explicit tap. If a future edit
+  // wires the handler into a useEffect/useFocusEffect/timer/listener, the reference count
+  // changes and this test fails, forcing a conscious review.
+  const screen = readFileSync(new URL('../screens/SettingsScreen.tsx', import.meta.url), 'utf8');
+  const refs = screen.match(/handleEnableSignedNotifications/g) || [];
+  assert.equal(refs.length, 2, 'handler referenced exactly twice: its declaration and one onPress');
+  assert.match(screen, /const handleEnableSignedNotifications\s*=/);
+  assert.match(screen, /onPress=\{handleEnableSignedNotifications\}/);
+});
+test('SettingsScreen treats an in_flight result as a no-op, not a "failed" flash (review LOW-2)', () => {
+  const screen = readFileSync(new URL('../screens/SettingsScreen.tsx', import.meta.url), 'utf8');
+  // A concurrent-attempt result must be handled on its own branch (module single-flight
+  // guarantees one signature + one POST) rather than falling through to the generic
+  // "Registration failed" mapping and re-enabling the button mid-flight.
+  assert.match(screen, /result\.stage === 'in_flight'/);
+});

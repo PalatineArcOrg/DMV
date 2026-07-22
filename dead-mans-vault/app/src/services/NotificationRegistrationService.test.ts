@@ -50,7 +50,7 @@ function harness(o: makeOwnerT, over: Over = {}) {
     deriveVault: over.deriveVault ?? deriveVault,
     getDeviceToken: over.getDeviceToken ?? (async () => { spies.getDeviceToken++; return TOKEN; }),
     getSetting: async (k: string) => store.get(k) ?? null,
-    setSetting: async (k: string, v: string) => { store.set(k, v); order.push('set:' + (k.startsWith('notif_rev') ? 'rev' : 'success')); if (k.startsWith('notif_rev')) spies.setSettingRevision++; else spies.setSettingSuccess++; },
+    setSetting: over.setSetting ?? (async (k: string, v: string) => { store.set(k, v); order.push('set:' + (k.startsWith('notif_rev') ? 'rev' : 'success')); if (k.startsWith('notif_rev')) spies.setSettingRevision++; else spies.setSettingSuccess++; }),
     signMessage: over.signMessage ?? (async (bytes: Uint8Array) => { spies.signMessage++; order.push('sign'); return o.sign(bytes); }),
     buildRegisterMessage: registerMessageV2,
     generateNonce: over.generateNonce ?? generateNonceV2,
@@ -295,4 +295,21 @@ test('review MEDIUM: a rejecting sha256Hex returns a discrete failure stage, nev
   assert.equal((r as any).stage, 'hash');
   assert.equal(spies.signMessage, 0, 'no signature attempted when the token hash fails');
   assert.equal(spies.postRegister, 0);
+});
+test('review LOW-1: server 201 + a failing success-record write still reports success (server truth wins, not a false failure)', async () => {
+  // The registration is accepted server-side; a best-effort local-cache write failure
+  // must NOT be reported as a failed registration (that would flip the UI to "failed"
+  // and re-add duplicate local warnings). The revision write still succeeds.
+  const o = makeOwner();
+  let successWriteAttempted = false;
+  const { r, spies } = await run(o, {
+    setSetting: async (k: string) => {
+      if (k.startsWith('notif_signed_reg')) { successWriteAttempted = true; throw new Error('sqlite write failed'); }
+      // revision key persists normally
+    },
+  });
+  assert.equal(r.ok, true, 'accepted server registration reported as success despite cache-write failure');
+  assert.equal((r as any).result, 'created');
+  assert.equal(successWriteAttempted, true, 'the success-record write was attempted');
+  assert.equal(spies.postRegister, 1, 'exactly one server request');
 });

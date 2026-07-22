@@ -203,6 +203,10 @@ export function SettingsScreen() {
     } else if (result.stage === 'wallet') {
       // Wallet cancellation/rejection returns to a safe, non-enabled state (no error, no claim of success).
       setNotifReg({ state: 'not_enabled', message: null });
+    } else if (result.stage === 'in_flight') {
+      // A concurrent attempt is already running (module-level single-flight guarantees one
+      // signature + one POST). Leave the in-flight UI untouched — do NOT flash "failed" or
+      // re-enable the button while the first attempt's wallet sheet is still open.
     } else {
       const mapped = mapRegistrationError(result.code || result.stage);
       setNotifReg({ state: 'failed', message: mapped.message });
