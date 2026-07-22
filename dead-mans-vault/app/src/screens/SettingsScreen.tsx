@@ -27,7 +27,7 @@ import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS, NOTIFY_UR
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { RPC_OVERRIDE_KEY, explorerAddress, explorerTx, getRpcUrl, isCustomRpc, isDevnet, maskRpc, networkLabel } from '../utils/rpcConfig';
 import { getSetting, setSetting, deleteSetting } from '../db/settingsRepo';
-import { attemptSignedRegistration, attemptSignedDeregistration, successKey, mapRegistrationError, mapDeregisterError } from '../services/NotificationRegistrationService';
+import { attemptSignedRegistration, attemptSignedDeregistration, successKey, deregPendingKey, mapRegistrationError, mapDeregisterError } from '../services/NotificationRegistrationService';
 import { makeTokenObserver, operationIdentity, runExclusive, LifecycleState } from '../services/notificationLifecycle';
 import { DEV_ESCALATION } from '../hooks/useHeartbeat';
 import { registerMessageV2, deregisterMessageV2, generateNonceV2 } from '../utils/notifyAuth';
@@ -71,10 +71,6 @@ export function SettingsScreen() {
   // background token observer never overwrites an in-flight action's UI.
   const notifBusyRef = useRef(false);
   const notifObserverRef = useRef<ReturnType<typeof makeTokenObserver> | null>(null);
-  // Set when a signed deregistration succeeded on the server but the local tombstone write
-  // failed. Holds the tombstone to re-attempt LOCALLY (never a second server call) on the next
-  // reconcile; while set, the observer keeps showing "disabled", never a stale "enabled".
-  const notifPendingCleanupRef = useRef<{ key: string; json: string } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -175,6 +171,7 @@ export function SettingsScreen() {
       getSetting,
       setSetting,
       successKeyFor: successKey,
+      deregPendingKeyFor: deregPendingKey,
       subscribe: (cb) => {
         const sub = Notifications.addPushTokenListener(() => cb());
         return () => sub.remove();
@@ -182,10 +179,6 @@ export function SettingsScreen() {
       nowMs: () => Date.now(),
       onState: (s) => {
         if (notifBusyRef.current) return; // never stomp an in-flight deliberate action
-        // While a local tombstone is pending (server already deregistered), the intact
-        // record still reconciles to enabled/update_required — suppress that so the UI never
-        // regresses to "on"; keep showing the disabled/cleanup state until the repair lands.
-        if (notifPendingCleanupRef.current && (s === 'enabled' || s === 'update_required')) return;
         setNotifReg({ state: mapLifecycleToUi(s), message: null });
       },
     });
@@ -198,19 +191,11 @@ export function SettingsScreen() {
     };
   }, [publicKey, notifCluster, deriveVaultB58, notifSha256Hex, mapLifecycleToUi]);
 
-  // Re-reconcile on Settings focus (LOCAL only — never signs or mutates the server). If a
-  // local tombstone is pending from a prior successful deregistration, retry only that LOCAL
-  // write (no server call) before reconciling.
+  // Re-reconcile on Settings focus (LOCAL only — never signs or mutates the server). The
+  // observer's checkNow durably repairs a pending local tombstone (LOCAL write only) before
+  // reconciling, so a prior deregistration is never resurfaced as "enabled".
   useFocusEffect(useCallback(() => {
-    if (notifBusyRef.current) return;
-    const pending = notifPendingCleanupRef.current;
-    if (pending) {
-      setSetting(pending.key, pending.json)
-        .then(() => { notifPendingCleanupRef.current = null; void notifObserverRef.current?.checkNow(); })
-        .catch(() => { /* still pending; retry on a later reconcile */ });
-    } else {
-      void notifObserverRef.current?.checkNow();
-    }
+    if (!notifBusyRef.current) void notifObserverRef.current?.checkNow();
   }, []));
 
   // WP5/WP6: DELIBERATE owner-signed registration / token rotation. Runs ONLY from an
@@ -344,20 +329,13 @@ export function SettingsScreen() {
       }
       const result = ex.value;
       if (result.ok) {
-        if (result.localCleanupPending) {
-          // Server deregistered but the local tombstone write failed. Keep the UI disabled for
-          // the session and schedule a LOCAL-ONLY repair on the next reconcile (never a second
-          // server call). The observer suppresses a stale "enabled" while this is pending.
-          notifPendingCleanupRef.current = {
-            key: successKey({ cluster: notifCluster, programId: PROGRAM_ID, owner, vault }),
-            json: JSON.stringify({ owner, vault, cluster: notifCluster, programId: PROGRAM_ID, deregisteredAt: Math.floor(Date.now() / 1000) }),
-          };
-          setNotifReg({ state: 'local_cleanup_pending', message: 'Notifications disabled on the server. Local cleanup will finish shortly.' });
-        } else {
-          // Authoritative re-derive (tombstone → disabled; a no-op with no record → not_enabled).
-          notifBusyRef.current = false;
-          await notifObserverRef.current?.checkNow();
-        }
+        // Server deregistered. The coordinator already wrote the tombstone (or, if that local
+        // write failed, a DURABLE pending marker). Re-derive authoritatively: checkNow repairs
+        // a pending marker LOCALLY (never a second server call) → disabled, or shows
+        // local_cleanup_pending until the local write succeeds; a no-op with no record →
+        // not_enabled. This also bumps the observer generation so no stale check can stomp it.
+        notifBusyRef.current = false;
+        await notifObserverRef.current?.checkNow();
       } else if (result.stage === 'wallet') {
         // Cancellation → reconcile back to the prior local state.
         notifBusyRef.current = false;

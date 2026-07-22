@@ -12,6 +12,7 @@ import {
   computeNextRevision,
   revisionKey,
   successKey,
+  deregPendingKey,
   mapRegistrationError,
   mapStatusToCode,
   mapDeregisterError,
@@ -440,6 +441,23 @@ test('deregister: a local-cleanup write failure after server success → success
   });
   assert.equal(r.ok, true);
   assert.equal((r as any).localCleanupPending, true);
+});
+test('deregister (review MEDIUM): a tombstone-write failure writes a DURABLE dereg-pending marker for restart recovery', async () => {
+  const o = makeOwner();
+  const key = { cluster: CLUSTER, programId: PROGRAM, owner: o.owner, vault: deriveVault(o.owner) };
+  const writes = new Map<string, string>();
+  const { r } = await runDereg(o, {
+    postDeregister: async () => ({ status: 200, removed: 1 }),
+    setSetting: async (k: string, v: string) => { if (k.startsWith('notif_signed_reg')) throw new Error('sqlite write failed'); writes.set(k, v); },
+  });
+  assert.equal(r.ok, true);
+  assert.equal((r as any).localCleanupPending, true);
+  assert.ok(writes.get(deregPendingKey(key)), 'durable dereg-pending marker persisted so a restart cannot resurface "enabled"');
+});
+test('mapDeregisterError: stale_timestamp gives a clock hint and is retryable (review LOW)', () => {
+  const m = mapDeregisterError('stale_timestamp');
+  assert.equal(m.retryable, true);
+  assert.match(m.message, /clock|expired/i);
 });
 test('deregister: network error → dependency_unavailable, exactly one attempt (no auto-retry)', async () => {
   let calls = 0;

@@ -114,6 +114,7 @@ export interface ObserverDeps {
   getSetting: (k: string) => Promise<string | null>;
   setSetting: (k: string, v: string) => Promise<void>;
   successKeyFor: (k: KeyParts) => string; // injected (== coordinator's successKey)
+  deregPendingKeyFor: (k: KeyParts) => string; // injected (== coordinator's deregPendingKey)
   subscribe?: (cb: () => void) => () => void; // token-change source; returns an unsubscribe
   nowMs: () => number;
   onState?: (s: LifecycleState) => void;
@@ -177,6 +178,31 @@ export function makeTokenObserver(deps: ObserverDeps) {
       return 'error';
     }
     const key: KeyParts = { cluster: deps.cluster, programId: deps.programId, owner, vault };
+    // Durable local-cleanup recovery: if a prior signed deregistration succeeded
+    // server-side but the local tombstone write failed, a durable pending marker persists.
+    // Repair the tombstone LOCALLY (never a server call) so the UI can never resurface a
+    // stale "enabled" after a restart; until the repair succeeds, report local_cleanup_pending.
+    try {
+      const marker = await deps.getSetting(deps.deregPendingKeyFor(key));
+      if (marker) {
+        try {
+          const tombstone = {
+            owner,
+            vault,
+            cluster: deps.cluster,
+            programId: deps.programId,
+            deregisteredAt: Number(marker) || Math.floor(deps.nowMs() / 1000),
+          };
+          await deps.setSetting(deps.successKeyFor(key), JSON.stringify(tombstone));
+          await deps.setSetting(deps.deregPendingKeyFor(key), ''); // clear (best-effort)
+        } catch {
+          emit(gen, 'local_cleanup_pending'); // repair still failing → stay disabled, never enabled
+          return 'local_cleanup_pending';
+        }
+      }
+    } catch {
+      /* marker unreadable — fall through to a normal reconcile */
+    }
     let record: ConfirmedRecord | null = null;
     try {
       const raw = await deps.getSetting(deps.successKeyFor(key));

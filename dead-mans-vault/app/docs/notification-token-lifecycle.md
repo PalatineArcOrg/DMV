@@ -56,9 +56,12 @@ not claim a registration existed).
 On HTTP 200 (`removed` 0 or 1) the UI immediately shows **disabled**, the confirmed record is
 tombstoned, and the rotation marker is cleared — but the **revision high-watermark is preserved**
 (never deleted or lowered) so a later re-enable cannot reuse a lower revision. If the local
-cleanup write fails **after** server success, the result is still success with
-`localCleanupPending=true` (server truth wins): the UI stays disabled for the session, the app
-does **not** call the server again, and only local cleanup may be retried on a later reconcile.
+tombstone write fails **after** server success, the result is still success with
+`localCleanupPending=true` (server truth wins) and a **durable pending marker** is persisted
+(best-effort, to a distinct key). This survives an app restart: the observer's next reconcile
+repairs the local tombstone (a LOCAL write only, never a second server call) and shows
+`disabled`; until that local write succeeds the UI shows `local_cleanup_pending` — never a
+stale `enabled`.
 
 ## No automatic mutation (safety invariants)
 Nothing signs or deregisters on: app start, mount, background/foreground, wallet disconnect,

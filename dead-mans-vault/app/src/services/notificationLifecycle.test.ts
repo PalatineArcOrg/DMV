@@ -16,7 +16,7 @@ import {
   isOperationActive,
   operationIdentity,
 } from './notificationLifecycle.ts';
-import { successKey } from './NotificationRegistrationService.ts';
+import { successKey, deregPendingKey } from './NotificationRegistrationService.ts';
 
 const PROGRAM = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
 const CLUSTER = 'devnet';
@@ -98,8 +98,9 @@ function observerHarness(over: Record<string, any> = {}) {
     getCurrentToken: over.getCurrentToken ?? (async () => TOKEN_A),
     sha256Hex,
     getSetting: over.getSetting ?? (async (k: string) => store.get(k) ?? null),
-    setSetting: async (k: string, v: string) => { spies.setCount++; store.set(k, v); },
+    setSetting: over.setSetting ?? (async (k: string, v: string) => { spies.setCount++; store.set(k, v); }),
     successKeyFor: successKey,
+    deregPendingKeyFor: deregPendingKey,
     subscribe: over.subscribe,
     nowMs: () => 1784500000000 + (seq++),
     onState: (s: string) => states.push(s),
@@ -274,6 +275,28 @@ test('observer: a stale token event cannot re-enable a tombstoned record', async
   const obs = makeTokenObserver(h.deps);
   assert.equal(await obs.checkNow(), 'disabled'); // never 'enabled'
   assert.equal(h.spies.setCount, 0);
+});
+test('observer (review MEDIUM): a DURABLE dereg-pending marker recovers to disabled after "restart", never enabled', async () => {
+  // Server deregistered, but the local tombstone write failed → only a durable marker persists;
+  // the confirmed record is still intact (fingerprint matches the current token). A fresh
+  // observer must NOT report enabled — it repairs the tombstone locally and reports disabled.
+  const h = observerHarness({ seedRecord: confirmedRecord(fpA) });
+  h.store.set(deregPendingKey(KEY), '1784500000'); // durable pending marker
+  const obs = makeTokenObserver(h.deps);
+  assert.equal(await obs.checkNow(), 'disabled', 'recovered to disabled, not enabled');
+  assert.equal(h.store.get(deregPendingKey(KEY)) || '', '', 'marker cleared after local repair');
+  assert.ok(JSON.parse(h.store.get(successKey(KEY))!).deregisteredAt > 0, 'tombstone written on repair');
+});
+test('observer: if the local repair write keeps failing, it stays local_cleanup_pending (never enabled)', async () => {
+  const seed = confirmedRecord(fpA);
+  const store = new Map<string, string>([[successKey(KEY), seed], [deregPendingKey(KEY), '1784500000']]);
+  const h = observerHarness({
+    seedRecord: seed,
+    getSetting: async (k: string) => store.get(k) ?? null,
+    setSetting: async () => { throw new Error('sqlite write failed'); }, // repair can't complete
+  });
+  const obs = makeTokenObserver(h.deps);
+  assert.equal(await obs.checkNow(), 'local_cleanup_pending'); // never 'enabled'
 });
 test('observer: invalidate() prevents a stale in-flight check from emitting (deliberate-action stomp guard)', async () => {
   // A deliberate Disable/Enable calls invalidate() so a slow observer check started during the

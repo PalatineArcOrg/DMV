@@ -39,6 +39,15 @@ export function revisionKey(k: KeyParts): string {
 export function successKey(k: KeyParts): string {
   return `notif_signed_reg/${k.cluster}/${k.programId}/${k.owner}/${k.vault}`;
 }
+/**
+ * Durable "server deregistered, local tombstone write pending" marker key. Written
+ * (best-effort) when a signed deregistration succeeds server-side but the local
+ * tombstone write fails, so the disabled state survives an app restart and the
+ * local tombstone can be repaired on the next reconcile (never a second server call).
+ */
+export function deregPendingKey(k: KeyParts): string {
+  return `notif_dereg_pending/${k.cluster}/${k.programId}/${k.owner}/${k.vault}`;
+}
 
 /**
  * Next monotonic revision (pure). `next = max(nowMs, storedHighWatermark + 1)`.
@@ -418,6 +427,8 @@ export function mapDeregisterError(code: string): { message: string; retryable: 
       return { message: 'The deregistration request was invalid.', retryable: false };
     case 'invalid_signature':
       return { message: 'The wallet signature could not be verified.', retryable: false };
+    case 'stale_timestamp':
+      return { message: 'The request expired (a slow wallet approval or an incorrect device clock). Check the time, then try again.', retryable: true };
     case 'context_mismatch':
       return { message: 'Your app network settings differ from the server. Check your network/cluster.', retryable: false };
     case 'nonce_reused':
@@ -555,6 +566,13 @@ export async function attemptSignedDeregistration(input: DeregisterInput, deps: 
           await deps.setSetting(successKey(key), JSON.stringify(tombstone));
         } catch {
           localCleanupPending = true;
+          // Best-effort DURABLE marker so a kill-before-repair can't resurface a stale
+          // "enabled" UI: on the next reconcile the tombstone is repaired locally.
+          try {
+            await deps.setSetting(deregPendingKey(key), String(deps.nowSec()));
+          } catch {
+            /* best-effort; the in-session UI still shows disabled */
+          }
         }
         return localCleanupPending ? { ok: true, removed, localCleanupPending: true } : { ok: true, removed };
       }
