@@ -71,6 +71,13 @@ export function SettingsScreen() {
   // background token observer never overwrites an in-flight action's UI.
   const notifBusyRef = useRef(false);
   const notifObserverRef = useRef<ReturnType<typeof makeTokenObserver> | null>(null);
+  // In-session guard for the rare case where a signed deregistration succeeded server-side
+  // but BOTH the local tombstone AND the durable-marker writes failed (total storage
+  // failure): nothing durable exists, so the observer would reconcile the intact record back
+  // to "enabled". While set, the observer's "enabled"/"update_required" emits are suppressed
+  // so the UI never falsely shows "on" within the session. (A restart after a total write
+  // failure is an accepted best-effort limitation — nothing can be persisted.)
+  const notifDeregPendingSessionRef = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -179,6 +186,11 @@ export function SettingsScreen() {
       nowMs: () => Date.now(),
       onState: (s) => {
         if (notifBusyRef.current) return; // never stomp an in-flight deliberate action
+        // Total-write-failure guard: while a deregistration is session-pending with no durable
+        // state, never let the intact record resurface "enabled"/"update_required".
+        if (notifDeregPendingSessionRef.current && (s === 'enabled' || s === 'update_required')) return;
+        // A clean disabled/not_enabled (e.g. a durable-marker repair landed) clears the guard.
+        if (s === 'disabled' || s === 'not_enabled') notifDeregPendingSessionRef.current = false;
         setNotifReg({ state: mapLifecycleToUi(s), message: null });
       },
     });
@@ -218,6 +230,7 @@ export function SettingsScreen() {
       ? { stage1: DEV_ESCALATION.stage1Duration, stage2: DEV_ESCALATION.stage2Duration, stage3: DEV_ESCALATION.stage3Duration }
       : { stage1: ESCALATION_DEFAULTS.stage1, stage2: ESCALATION_DEFAULTS.stage2, stage3: ESCALATION_DEFAULTS.stage3 };
     notifBusyRef.current = true;
+    notifDeregPendingSessionRef.current = false; // a deliberate (re-)enable supersedes any pending-dereg guard
     setNotifReg({ state: 'registering', message: null });
     try {
       const ex = await runExclusive(identity, op, () => attemptSignedRegistration(
@@ -328,12 +341,17 @@ export function SettingsScreen() {
         return;
       }
       const result = ex.value;
-      if (result.ok) {
-        // Server deregistered. The coordinator already wrote the tombstone (or, if that local
-        // write failed, a DURABLE pending marker). Re-derive authoritatively: checkNow repairs
-        // a pending marker LOCALLY (never a second server call) → disabled, or shows
-        // local_cleanup_pending until the local write succeeds; a no-op with no record →
-        // not_enabled. This also bumps the observer generation so no stale check can stomp it.
+      if (result.ok && result.localCleanupPending) {
+        // Server deregistered but the local tombstone write failed. Show disabled/cleanup via
+        // PURE React state (no storage write needed, so this holds even under a total write
+        // failure) and set the session guard so a later observer reconcile of the still-intact
+        // record can't resurface "enabled". If the coordinator's durable marker DID persist,
+        // the observer repairs it to "disabled" on the next reconcile (which clears the guard).
+        notifDeregPendingSessionRef.current = true;
+        setNotifReg({ state: 'local_cleanup_pending', message: 'Notifications disabled on the server. Finishing local cleanup…' });
+      } else if (result.ok) {
+        // Tombstone written (or a no-op with no record). Re-derive authoritatively: checkNow →
+        // disabled (or not_enabled). Bumps the observer generation so no stale check can stomp it.
         notifBusyRef.current = false;
         await notifObserverRef.current?.checkNow();
       } else if (result.stage === 'wallet') {
@@ -641,9 +659,9 @@ export function SettingsScreen() {
                 Notifications disabled on this device.
               </Text>
             ) : null}
-            {notifReg.state === 'local_cleanup_pending' && notifReg.message ? (
+            {notifReg.state === 'local_cleanup_pending' ? (
               <Text style={{ color: COLORS.textSecondary, fontFamily: FONTS.primaryMedium, fontSize: 12, marginBottom: 8 }}>
-                {notifReg.message}
+                {notifReg.message || 'Notifications disabled on the server. Finishing local cleanup…'}
               </Text>
             ) : null}
 

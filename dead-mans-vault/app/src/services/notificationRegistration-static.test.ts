@@ -85,3 +85,13 @@ test('WP6: the disable confirmation clarifies no funds move and that it works af
   assert.match(screenSrc, /does not move funds/);
   assert.match(screenSrc, /after the vault is closed/);
 });
+test('WP6 (review MEDIUM-2): a local-cleanup-pending result sets the pending state via pure React state + session guard, not an enabled-capable re-derive', () => {
+  // On result.localCleanupPending the handler must set state directly (holds even under a total
+  // write failure) and arm the session guard — NOT unconditionally checkNow (which could
+  // resurface "enabled" when nothing durable persisted).
+  assert.match(screenSrc, /result\.ok && result\.localCleanupPending/);
+  assert.match(screenSrc, /notifDeregPendingSessionRef\.current = true/);
+});
+test('WP6 (review MEDIUM-2): the observer onState suppresses enabled/update_required while a dereg is session-pending', () => {
+  assert.match(screenSrc, /notifDeregPendingSessionRef\.current && \(s === 'enabled' \|\| s === 'update_required'\)/);
+});
