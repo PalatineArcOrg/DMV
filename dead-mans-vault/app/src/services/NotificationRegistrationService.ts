@@ -99,7 +99,7 @@ export interface SuccessRecord {
   owner: string;
   vault: string;
   revision: number;
-  tokenFingerprint: string; // sha256(token)[:16] — never the token
+  tokenFingerprint: string; // sha256(token)[:32] — 128-bit, never the token
   stage1: number;
   stage2: number;
   stage3: number;
@@ -308,7 +308,7 @@ export async function attemptSignedRegistration(
     // 12: map response. Success record persisted ONLY on 201/200.
     if (res.status === 201 || res.status === 200) {
       const result = res.status === 201 ? 'created' : 'updated';
-      const tokenFingerprint = deviceTokenHash.slice(0, 16); // reuse the local hash; no recompute/throw
+      const tokenFingerprint = deviceTokenHash.slice(0, 32); // 128-bit (WP6); reuse local hash, no recompute/throw
       const record: SuccessRecord = {
         owner,
         vault,
@@ -341,5 +341,228 @@ export async function attemptSignedRegistration(
     return { ok: false, stage: 'server', code, retryable: RETRYABLE_CODES.has(code) };
   } finally {
     inFlight = false;
+  }
+}
+
+// ── WP6: deliberate owner-signed DEREGISTRATION ──────────────────────────────
+// Same hard rules as registration: fail closed, NO auto-retry, NO legacy fallback
+// ever, exactly one signature + one request, and never store a token/signature/
+// nonce/message/secret. The deregistration envelope carries NO device token, token
+// hash, stages, or revision. Both `removed=1` and `removed=0` are idempotent
+// success. The revision high-watermark is PRESERVED (never deleted/lowered) so a
+// later re-enable cannot reuse a lower revision.
+
+export type DeregisterV2Fields = {
+  cluster: string;
+  programId: string;
+  owner: string;
+  vault: string;
+  timestamp: number;
+  nonce: string;
+};
+
+export interface DeregisterDeps {
+  cluster: string;
+  programId: string;
+  deriveVault: (owner: string) => string;
+  getSetting: (key: string) => Promise<string | null>;
+  setSetting: (key: string, value: string) => Promise<void>;
+  signMessage: (bytes: Uint8Array) => Promise<Uint8Array>;
+  buildDeregisterMessage: (f: DeregisterV2Fields) => string; // WP1 deregisterMessageV2
+  generateNonce: () => string; // WP1 generateNonceV2
+  postDeregister: (
+    body: Record<string, unknown>,
+  ) => Promise<{ status: number; code?: string; removed?: number; retryAfter?: string | null }>;
+  nowSec: () => number;
+}
+
+export interface DeregisterInput {
+  owner: string;
+}
+
+export type DeregisterResult =
+  | { ok: true; removed: number; localCleanupPending?: boolean }
+  | { ok: false; stage: string; code?: string; retryable: boolean };
+
+/** Deregistration status → stable code (200 is handled by the caller as success). */
+export function mapDeregisterStatusToCode(status: number): string {
+  switch (status) {
+    case 400:
+      return 'invalid_request';
+    case 401:
+      return 'invalid_signature';
+    case 403:
+      return 'ownership_failed';
+    case 409:
+      return 'owner_conflict';
+    case 410:
+      return 'legacy_window_expired';
+    case 429:
+      return 'rate_limited';
+    case 502:
+      return 'dependency_unavailable';
+    case 503:
+      return 'database_error';
+    default:
+      return 'unknown';
+  }
+}
+
+// Codes for which a *deliberate* retry may succeed (there is NO automatic retry).
+const DEREG_RETRYABLE_CODES = new Set(['rate_limited', 'dependency_unavailable', 'database_error']);
+
+/** Map a deregistration code → a user-safe message. `removed=0` is success, not an error. */
+export function mapDeregisterError(code: string): { message: string; retryable: boolean } {
+  switch (code) {
+    case 'invalid_request':
+      return { message: 'The deregistration request was invalid.', retryable: false };
+    case 'invalid_signature':
+      return { message: 'The wallet signature could not be verified.', retryable: false };
+    case 'context_mismatch':
+      return { message: 'Your app network settings differ from the server. Check your network/cluster.', retryable: false };
+    case 'nonce_reused':
+      return { message: 'That request was already used. Try the action again.', retryable: false };
+    case 'ownership_failed':
+      return { message: 'This vault could not be verified as yours.', retryable: false };
+    case 'owner_conflict':
+      return { message: 'This vault is registered to a different owner.', retryable: false };
+    case 'rate_limited':
+      return { message: 'Too many attempts. Wait a moment, then try again.', retryable: true };
+    case 'dependency_unavailable':
+      return { message: 'The service is temporarily unavailable. Try again.', retryable: true };
+    case 'database_error':
+      return { message: 'The server had a temporary error. Try again.', retryable: true };
+    // These do not apply to a signed deregistration; if seen, it is a server inconsistency.
+    case 'stale_revision':
+    case 'legacy_window_expired':
+      return { message: 'Server configuration inconsistency — please try again later.', retryable: false };
+    default:
+      return { message: 'Deregistration failed. Please try again.', retryable: false };
+  }
+}
+
+// Process-local single-flight guard for deregistration (separate from register).
+let deregInFlight = false;
+
+/**
+ * One deliberate signed-deregistration attempt. Returns a discriminated result;
+ * never throws for expected failures; never auto-retries; never falls back to
+ * legacy; never deletes by owner. Caller guarantees this is a deliberate action.
+ */
+export async function attemptSignedDeregistration(input: DeregisterInput, deps: DeregisterDeps): Promise<DeregisterResult> {
+  if (deregInFlight) return { ok: false, stage: 'in_flight', retryable: false };
+  deregInFlight = true;
+  try {
+    const owner = input?.owner;
+    if (!isCanonicalPubkey(owner)) return { ok: false, stage: 'validate', retryable: false };
+    let vault: string;
+    try {
+      vault = deps.deriveVault(owner);
+    } catch {
+      return { ok: false, stage: 'validate', retryable: false };
+    }
+    if (!isCanonicalPubkey(vault)) return { ok: false, stage: 'validate', retryable: false };
+    if (deps.cluster !== EXPECTED_CLUSTER || deps.programId !== EXPECTED_PROGRAM_ID) {
+      return { ok: false, stage: 'context', retryable: false };
+    }
+    const key = { cluster: deps.cluster, programId: deps.programId, owner, vault };
+    // If a local record exists, require owner + canonical vault match BEFORE the wallet.
+    // A missing/unreadable record is allowed (post-close / recovery → idempotent removal).
+    let record: SuccessRecord | null = null;
+    try {
+      const raw = await deps.getSetting(successKey(key));
+      record = raw ? (JSON.parse(raw) as SuccessRecord) : null;
+    } catch {
+      record = null;
+    }
+    if (record && (record.owner !== owner || record.vault !== vault)) {
+      return { ok: false, stage: 'owner_mismatch', retryable: false };
+    }
+    const timestamp = deps.nowSec();
+    if (!isSafePosInt(timestamp)) return { ok: false, stage: 'validate', retryable: false };
+    let nonce: string;
+    try {
+      nonce = deps.generateNonce();
+    } catch {
+      return { ok: false, stage: 'rng', retryable: false };
+    }
+    if (!BASE58_NONCE.test(nonce)) return { ok: false, stage: 'rng', retryable: false };
+    // Exact V2 deregistration message (no token/hash/stages/revision).
+    let message: string;
+    try {
+      message = deps.buildDeregisterMessage({ cluster: deps.cluster, programId: deps.programId, owner, vault, timestamp, nonce });
+    } catch {
+      return { ok: false, stage: 'validate', retryable: false };
+    }
+    // Hermes-safe encoding, OUTSIDE the wallet try (a non-wallet throw is not a cancel).
+    let messageBytes: Uint8Array;
+    try {
+      messageBytes = Buffer.from(message, 'utf8');
+    } catch {
+      return { ok: false, stage: 'encode', retryable: false };
+    }
+    let sigBytes: Uint8Array;
+    try {
+      sigBytes = await deps.signMessage(messageBytes);
+    } catch {
+      return { ok: false, stage: 'wallet', retryable: true };
+    }
+    if (!sigBytes || sigBytes.length !== 64) return { ok: false, stage: 'signature', retryable: false };
+    let signature: string;
+    try {
+      signature = bs58.encode(sigBytes);
+    } catch {
+      return { ok: false, stage: 'signature', retryable: false };
+    }
+    const body: Record<string, unknown> = {
+      owner,
+      vault,
+      version: 2,
+      cluster: deps.cluster,
+      programId: deps.programId,
+      audience: AUDIENCE,
+      action: 'deregister',
+      timestamp,
+      nonce,
+      signature,
+    };
+    let res: { status: number; code?: string; removed?: number; retryAfter?: string | null };
+    try {
+      res = await deps.postDeregister(body);
+    } catch {
+      return { ok: false, stage: 'network', code: 'dependency_unavailable', retryable: true };
+    }
+    // Idempotent success: HTTP 200 with removed 0 or 1. Server truth = registration absent.
+    if (res.status === 200 && (res.removed === 0 || res.removed === 1)) {
+      const removed = res.removed;
+      // Only tombstone when there was something to clear — a prior local record or a
+      // server-side removal (removed=1). A pure no-op ("Clear" with no local record and
+      // removed=0) leaves local state untouched so the UI does not overstate that a
+      // registration existed. Tombstoning PRESERVES the revision watermark (revisionKey is
+      // never touched here); a local write failure after server success does NOT flip the
+      // result to failure — server truth wins.
+      if (record || removed === 1) {
+        let localCleanupPending = false;
+        try {
+          const tombstone = {
+            owner,
+            vault,
+            cluster: deps.cluster,
+            programId: deps.programId,
+            deregisteredAt: deps.nowSec(),
+            localCleanupPending: false,
+          };
+          await deps.setSetting(successKey(key), JSON.stringify(tombstone));
+        } catch {
+          localCleanupPending = true;
+        }
+        return localCleanupPending ? { ok: true, removed, localCleanupPending: true } : { ok: true, removed };
+      }
+      return { ok: true, removed };
+    }
+    const code = res.code || mapDeregisterStatusToCode(res.status);
+    return { ok: false, stage: 'server', code, retryable: DEREG_RETRYABLE_CODES.has(code) };
+  } finally {
+    deregInFlight = false;
   }
 }

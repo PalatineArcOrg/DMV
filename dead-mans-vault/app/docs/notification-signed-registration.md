@@ -43,8 +43,8 @@ program, timestamp) — never the plaintext token, signature, nonce, or message.
 token/signature/nonce/message/secret.
 
 ## Current limitations
-- **Device-token rotation** handling is **WP6** (not in this release).
-- **Signed deregistration** is **WP6**.
+- **Device-token rotation** and **signed deregistration** are implemented in **WP6** (see
+  `notification-token-lifecycle.md`) — source-only, not built or released.
 - The notify server is live on **devnet in `dual` mode**; **Fox has not been migrated** to
   signed auth; a **live end-to-end route canary is pending** an approved disposable-vault harness.
 - **No app build has been released** for this flow.

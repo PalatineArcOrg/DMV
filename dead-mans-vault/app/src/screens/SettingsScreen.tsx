@@ -27,9 +27,10 @@ import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS, NOTIFY_UR
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { RPC_OVERRIDE_KEY, explorerAddress, explorerTx, getRpcUrl, isCustomRpc, isDevnet, maskRpc, networkLabel } from '../utils/rpcConfig';
 import { getSetting, setSetting, deleteSetting } from '../db/settingsRepo';
-import { attemptSignedRegistration, successKey, mapRegistrationError } from '../services/NotificationRegistrationService';
+import { attemptSignedRegistration, attemptSignedDeregistration, successKey, mapRegistrationError, mapDeregisterError } from '../services/NotificationRegistrationService';
+import { makeTokenObserver, operationIdentity, runExclusive, LifecycleState } from '../services/notificationLifecycle';
 import { DEV_ESCALATION } from '../hooks/useHeartbeat';
-import { registerMessageV2, generateNonceV2 } from '../utils/notifyAuth';
+import { registerMessageV2, deregisterMessageV2, generateNonceV2 } from '../utils/notifyAuth';
 import { PushRegistrationService } from '../services/PushRegistrationService';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
@@ -58,8 +59,22 @@ export function SettingsScreen() {
   const [rpcSaved, setRpcSaved] = useState<string | null>(null);
   const [rpcTesting, setRpcTesting] = useState(false);
   const [rpcTestResult, setRpcTestResult] = useState<string | null>(null);
-  // WP5: deliberate signed notification-registration state (this device).
-  const [notifReg, setNotifReg] = useState<{ state: 'not_enabled' | 'registering' | 'enabled' | 'failed'; message: string | null }>({ state: 'not_enabled', message: null });
+  // WP5/WP6: deliberate signed notification-registration + lifecycle state (this device).
+  // 'registering'/'disabling' are the in-flight deliberate actions; the rest are derived
+  // by local-only observation. Signing/mutation happens ONLY from a deliberate handler.
+  type NotifRegState =
+    | 'not_enabled' | 'checking' | 'registering' | 'enabled' | 'update_required'
+    | 'disabling' | 'disabled' | 'token_unavailable' | 'owner_mismatch'
+    | 'local_cleanup_pending' | 'failed';
+  const [notifReg, setNotifReg] = useState<{ state: NotifRegState; message: string | null }>({ state: 'not_enabled', message: null });
+  // True only while a deliberate register/update/disable action is running, so the
+  // background token observer never overwrites an in-flight action's UI.
+  const notifBusyRef = useRef(false);
+  const notifObserverRef = useRef<ReturnType<typeof makeTokenObserver> | null>(null);
+  // Set when a signed deregistration succeeded on the server but the local tombstone write
+  // failed. Holds the tombstone to re-attempt LOCALLY (never a second server call) on the next
+  // reconcile; while set, the observer keeps showing "disabled", never a stale "enabled".
+  const notifPendingCleanupRef = useRef<{ key: string; json: string } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -130,88 +145,271 @@ export function SettingsScreen() {
     Alert.alert('Reset', 'Reverted to the default RPC. Restart the app to apply.');
   }, []);
 
-  // WP5: reflect (read-only) whether this device already has a signed registration.
-  // This NEVER triggers signing or a network request — it only reads local state.
-  useFocusEffect(useCallback(() => {
-    if (!publicKey) return;
-    const ownerB58 = publicKey.toBase58();
-    const vaultB58 = PublicKey.findProgramAddressSync([Buffer.from('vault'), publicKey.toBuffer()], new PublicKey(PROGRAM_ID))[0].toBase58();
-    const cluster = isDevnet() ? 'devnet' : 'mainnet-beta';
-    getSetting(successKey({ cluster, programId: PROGRAM_ID, owner: ownerB58, vault: vaultB58 }))
-      .then((rec) => setNotifReg((s) => (s.state === 'registering' ? s : { state: rec ? 'enabled' : 'not_enabled', message: null })))
-      .catch(() => {});
-  }, [publicKey]));
+  // Shared derivations for the notification lifecycle handlers/observer.
+  const notifSha256Hex = useCallback((t: string) => Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, t), []);
+  const deriveVaultB58 = useCallback(
+    (owner: string) => PublicKey.findProgramAddressSync([Buffer.from('vault'), new PublicKey(owner).toBuffer()], new PublicKey(PROGRAM_ID))[0].toBase58(),
+    [],
+  );
+  const notifCluster = isDevnet() ? 'devnet' : 'mainnet-beta';
+  const mapLifecycleToUi = useCallback((s: LifecycleState): NotifRegState => (s === 'error' ? 'failed' : (s as NotifRegState)), []);
 
-  // WP5: DELIBERATE owner-signed registration. Runs ONLY from an explicit tap.
+  // WP6 — token lifecycle: LOCAL-ONLY observation. Derives the notification state
+  // (enabled / update_required / token_unavailable / owner_mismatch / disabled) by
+  // comparing the current device-token fingerprint to the confirmed record, and on a
+  // token change it detects/persists a local pending marker. It NEVER signs and NEVER
+  // issues a /register or /deregister request — all server mutation is a deliberate
+  // handler below (Enable / Update / Disable). It never overwrites an in-flight action.
+  React.useEffect(() => {
+    if (!publicKey) {
+      setNotifReg((prev) => (prev.state === 'registering' || prev.state === 'disabling' ? prev : { state: 'not_enabled', message: null }));
+      return;
+    }
+    const observer = makeTokenObserver({
+      cluster: notifCluster,
+      programId: PROGRAM_ID,
+      getConnectedOwner: () => publicKey?.toBase58() ?? null,
+      deriveVault: deriveVaultB58,
+      getCurrentToken: () => PushRegistrationService.getDeviceToken(),
+      sha256Hex: notifSha256Hex,
+      getSetting,
+      setSetting,
+      successKeyFor: successKey,
+      subscribe: (cb) => {
+        const sub = Notifications.addPushTokenListener(() => cb());
+        return () => sub.remove();
+      },
+      nowMs: () => Date.now(),
+      onState: (s) => {
+        if (notifBusyRef.current) return; // never stomp an in-flight deliberate action
+        // While a local tombstone is pending (server already deregistered), the intact
+        // record still reconciles to enabled/update_required — suppress that so the UI never
+        // regresses to "on"; keep showing the disabled/cleanup state until the repair lands.
+        if (notifPendingCleanupRef.current && (s === 'enabled' || s === 'update_required')) return;
+        setNotifReg({ state: mapLifecycleToUi(s), message: null });
+      },
+    });
+    observer.start();
+    notifObserverRef.current = observer;
+    void observer.checkNow();
+    return () => {
+      observer.dispose();
+      notifObserverRef.current = null;
+    };
+  }, [publicKey, notifCluster, deriveVaultB58, notifSha256Hex, mapLifecycleToUi]);
+
+  // Re-reconcile on Settings focus (LOCAL only — never signs or mutates the server). If a
+  // local tombstone is pending from a prior successful deregistration, retry only that LOCAL
+  // write (no server call) before reconciling.
+  useFocusEffect(useCallback(() => {
+    if (notifBusyRef.current) return;
+    const pending = notifPendingCleanupRef.current;
+    if (pending) {
+      setSetting(pending.key, pending.json)
+        .then(() => { notifPendingCleanupRef.current = null; void notifObserverRef.current?.checkNow(); })
+        .catch(() => { /* still pending; retry on a later reconcile */ });
+    } else {
+      void notifObserverRef.current?.checkNow();
+    }
+  }, []));
+
+  // WP5/WP6: DELIBERATE owner-signed registration / token rotation. Runs ONLY from an
+  // explicit tap. Enable and Update share this coordinator (rotation = a higher-revision
+  // register). Guarded by the identity-scoped lifecycle lock so it cannot race a disable.
   const handleEnableSignedNotifications = useCallback(async () => {
-    if (notifReg.state === 'registering') return; // single-flight; no duplicate submit
+    if (notifReg.state === 'registering' || notifBusyRef.current) return; // single-flight
     if (!publicKey) {
       setNotifReg({ state: 'failed', message: 'Connect your wallet first.' });
       return;
     }
-    setNotifReg({ state: 'registering', message: null });
-    // Register the SAME stage durations the app's escalation actually uses
-    // (demo/dev = 30s each; otherwise the production defaults) so server-side
-    // escalation timing matches the device.
+    const owner = publicKey.toBase58();
+    const vault = deriveVaultB58(owner);
+    const identity = operationIdentity({ cluster: notifCluster, programId: PROGRAM_ID, owner, vault });
+    const op = notifReg.state === 'update_required' ? 'update' : 'register';
+    // Register the SAME stage durations the app's escalation actually uses (demo/dev = 30s
+    // each; otherwise the production defaults) so server-side timing matches the device.
     const useDevTimers = __DEV__ || isDemoMode;
     const stages = useDevTimers
       ? { stage1: DEV_ESCALATION.stage1Duration, stage2: DEV_ESCALATION.stage2Duration, stage3: DEV_ESCALATION.stage3Duration }
       : { stage1: ESCALATION_DEFAULTS.stage1, stage2: ESCALATION_DEFAULTS.stage2, stage3: ESCALATION_DEFAULTS.stage3 };
-    let result: Awaited<ReturnType<typeof attemptSignedRegistration>>;
+    notifBusyRef.current = true;
+    setNotifReg({ state: 'registering', message: null });
     try {
-      result = await attemptSignedRegistration(
-      {
-        owner: publicKey.toBase58(),
-        stages,
-      },
-      {
-        cluster: isDevnet() ? 'devnet' : 'mainnet-beta',
-        programId: PROGRAM_ID,
-        deriveVault: (o: string) => PublicKey.findProgramAddressSync([Buffer.from('vault'), new PublicKey(o).toBuffer()], new PublicKey(PROGRAM_ID))[0].toBase58(),
-        getDeviceToken: () => PushRegistrationService.getDeviceToken(),
-        getSetting,
-        setSetting,
-        signMessage,
-        buildRegisterMessage: registerMessageV2,
-        generateNonce: generateNonceV2,
-        sha256Hex: (t: string) => Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, t),
-        postRegister: async (body) => {
-          const res = await fetch(`${NOTIFY_URL}/register`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          let code: string | undefined;
-          try {
-            code = (await res.json())?.code;
-          } catch {
-            /* no/invalid JSON body — status alone drives the outcome */
-          }
-          return { status: res.status, code, retryAfter: res.headers.get('retry-after') };
+      const ex = await runExclusive(identity, op, () => attemptSignedRegistration(
+        { owner, stages },
+        {
+          cluster: notifCluster,
+          programId: PROGRAM_ID,
+          deriveVault: deriveVaultB58,
+          getDeviceToken: () => PushRegistrationService.getDeviceToken(),
+          getSetting,
+          setSetting,
+          signMessage,
+          buildRegisterMessage: registerMessageV2,
+          generateNonce: generateNonceV2,
+          sha256Hex: notifSha256Hex,
+          postRegister: async (body) => {
+            const res = await fetch(`${NOTIFY_URL}/register`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            let code: string | undefined;
+            try {
+              code = (await res.json())?.code;
+            } catch {
+              /* no/invalid JSON body — status alone drives the outcome */
+            }
+            return { status: res.status, code, retryAfter: res.headers.get('retry-after') };
+          },
+          nowSec: () => Math.floor(Date.now() / 1000),
+          nowMs: () => Date.now(),
         },
-        nowSec: () => Math.floor(Date.now() / 1000),
-        nowMs: () => Date.now(),
-      },
-      );
+      ));
+      if (!ex.ran) {
+        if (ex.reason === 'conflict') setNotifReg({ state: 'failed', message: 'Another notification action is in progress. Try again in a moment.' });
+        return; // noop: a concurrent identical action is already running
+      }
+      const result = ex.value;
+      if (result.ok) {
+        // Re-derive authoritatively from storage + the latest token. This bumps the observer
+        // generation (so no stale in-flight check can stomp this result) and naturally
+        // implements the §6 token-change race: enabled only if the accepted token is still the
+        // latest, else update_required. If the local success write failed it shows not_enabled.
+        notifBusyRef.current = false;
+        await notifObserverRef.current?.checkNow();
+      } else if (result.stage === 'wallet') {
+        // Wallet cancellation → reconcile back to the prior local state (no claim of success).
+        notifBusyRef.current = false;
+        await notifObserverRef.current?.checkNow();
+      } else if (result.stage === 'in_flight') {
+        /* concurrent duplicate — leave the in-flight UI untouched */
+      } else {
+        const mapped = mapRegistrationError(result.code || result.stage);
+        setNotifReg({ state: 'failed', message: mapped.message });
+      }
     } catch {
       // A coordinator throw must never wedge the UI at "Registering…".
       setNotifReg({ state: 'failed', message: 'Registration failed. Please try again.' });
+    } finally {
+      notifBusyRef.current = false;
+      notifObserverRef.current?.invalidate(); // kill any stale in-flight check so it can't stomp the terminal state
+    }
+  }, [notifReg.state, publicKey, signMessage, notifCluster, deriveVaultB58, notifSha256Hex]);
+
+  // WP6: DELIBERATE owner-signed DEREGISTRATION core. Only ever called from a confirmed
+  // user action below. Never called on mount/heartbeat/disconnect/account-change/token-loss.
+  const runDisable = useCallback(async () => {
+    if (!publicKey || notifBusyRef.current) return;
+    const owner = publicKey.toBase58();
+    const vault = deriveVaultB58(owner);
+    const identity = operationIdentity({ cluster: notifCluster, programId: PROGRAM_ID, owner, vault });
+    notifBusyRef.current = true;
+    setNotifReg({ state: 'disabling', message: null });
+    try {
+      const ex = await runExclusive(identity, 'deregister', () => attemptSignedDeregistration(
+        { owner },
+        {
+          cluster: notifCluster,
+          programId: PROGRAM_ID,
+          deriveVault: deriveVaultB58,
+          getSetting,
+          setSetting,
+          signMessage,
+          buildDeregisterMessage: deregisterMessageV2,
+          generateNonce: generateNonceV2,
+          postDeregister: async (body) => {
+            const res = await fetch(`${NOTIFY_URL}/deregister`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            let code: string | undefined;
+            let removed: number | undefined;
+            try {
+              const j = await res.json();
+              code = j?.code;
+              removed = typeof j?.removed === 'number' ? j.removed : undefined;
+            } catch {
+              /* status drives the outcome */
+            }
+            return { status: res.status, code, removed, retryAfter: res.headers.get('retry-after') };
+          },
+          nowSec: () => Math.floor(Date.now() / 1000),
+        },
+      ));
+      if (!ex.ran) {
+        if (ex.reason === 'conflict') setNotifReg({ state: 'failed', message: 'Another notification action is in progress. Try again in a moment.' });
+        return;
+      }
+      const result = ex.value;
+      if (result.ok) {
+        if (result.localCleanupPending) {
+          // Server deregistered but the local tombstone write failed. Keep the UI disabled for
+          // the session and schedule a LOCAL-ONLY repair on the next reconcile (never a second
+          // server call). The observer suppresses a stale "enabled" while this is pending.
+          notifPendingCleanupRef.current = {
+            key: successKey({ cluster: notifCluster, programId: PROGRAM_ID, owner, vault }),
+            json: JSON.stringify({ owner, vault, cluster: notifCluster, programId: PROGRAM_ID, deregisteredAt: Math.floor(Date.now() / 1000) }),
+          };
+          setNotifReg({ state: 'local_cleanup_pending', message: 'Notifications disabled on the server. Local cleanup will finish shortly.' });
+        } else {
+          // Authoritative re-derive (tombstone → disabled; a no-op with no record → not_enabled).
+          notifBusyRef.current = false;
+          await notifObserverRef.current?.checkNow();
+        }
+      } else if (result.stage === 'wallet') {
+        // Cancellation → reconcile back to the prior local state.
+        notifBusyRef.current = false;
+        await notifObserverRef.current?.checkNow();
+      } else if (result.stage === 'in_flight') {
+        /* concurrent duplicate — leave the in-flight UI untouched */
+      } else if (result.stage === 'owner_mismatch') {
+        setNotifReg({ state: 'owner_mismatch', message: 'This vault is registered to a different wallet.' });
+      } else {
+        const mapped = mapDeregisterError(result.code || result.stage);
+        setNotifReg({ state: 'failed', message: mapped.message });
+      }
+    } catch {
+      setNotifReg({ state: 'failed', message: 'Could not disable notifications. Please try again.' });
+    } finally {
+      notifBusyRef.current = false;
+      notifObserverRef.current?.invalidate(); // kill any stale in-flight check so it can't stomp the terminal state
+    }
+  }, [publicKey, notifCluster, deriveVaultB58, signMessage]);
+
+  // Deliberate disable with a plain-language confirmation (works after vault closure).
+  const handleDisableSignedNotifications = useCallback(() => {
+    if (!publicKey) {
+      setNotifReg({ state: 'failed', message: 'Connect your wallet first.' });
       return;
     }
-    if (result.ok) {
-      setNotifReg({ state: 'enabled', message: null });
-    } else if (result.stage === 'wallet') {
-      // Wallet cancellation/rejection returns to a safe, non-enabled state (no error, no claim of success).
-      setNotifReg({ state: 'not_enabled', message: null });
-    } else if (result.stage === 'in_flight') {
-      // A concurrent attempt is already running (module-level single-flight guarantees one
-      // signature + one POST). Leave the in-flight UI untouched — do NOT flash "failed" or
-      // re-enable the button while the first attempt's wallet sheet is still open.
-    } else {
-      const mapped = mapRegistrationError(result.code || result.stage);
-      setNotifReg({ state: 'failed', message: mapped.message });
+    Alert.alert(
+      'Disable notifications',
+      'This stops escalation notifications for this vault. The wallet signature does not move funds. It still works after the vault is closed. Re-enabling later requires another signature.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disable', style: 'destructive', onPress: () => { void runDisable(); } },
+      ],
+    );
+  }, [publicKey, runDisable]);
+
+  // Advanced: clear a server registration when there is no local record. May be a no-op
+  // (idempotent removed=0); it does not claim a registration existed.
+  const handleClearServerRegistration = useCallback(() => {
+    if (!publicKey) {
+      setNotifReg({ state: 'failed', message: 'Connect your wallet first.' });
+      return;
     }
-  }, [notifReg.state, publicKey, signMessage]);
+    Alert.alert(
+      'Clear server notification registration',
+      'This asks the server to remove any notification registration for this vault. It may safely do nothing. The wallet signature does not move funds.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: () => { void runDisable(); } },
+      ],
+    );
+  }, [publicKey, runDisable]);
 
   useFocusEffect(useCallback(() => {
     Notifications.getPermissionsAsync().then(({ status }) => {
@@ -439,24 +637,91 @@ export function SettingsScreen() {
               A wallet signature authorizes escalation notifications to this device. It does not move funds.
               {vaultPda ? `  Vault ${truncateAddress(vaultPda.toBase58(), 4)}.` : ''}
             </Text>
-            <TouchableOpacity
-              disabled={notifReg.state === 'registering' || !connected}
-              onPress={handleEnableSignedNotifications}
-              style={[styles.netBtn, (notifReg.state === 'registering' || !connected) && { opacity: 0.5 }]}
-            >
-              <Text style={styles.netBtnText}>
-                {notifReg.state === 'registering'
-                  ? 'Registering…'
-                  : notifReg.state === 'enabled'
-                    ? 'Update notification registration'
-                    : 'Enable notifications (signed)'}
-              </Text>
-            </TouchableOpacity>
-            {notifReg.state === 'enabled' ? (
-              <Text style={{ color: COLORS.accent, fontFamily: FONTS.primaryMedium, fontSize: 12, marginTop: 8 }}>
-                Signed registration enabled on this device.
+            {/* Lifecycle status lines (local-only detection). */}
+            {notifReg.state === 'update_required' ? (
+              <Text style={{ color: COLORS.warning, fontFamily: FONTS.primaryMedium, fontSize: 12, marginBottom: 8 }}>
+                Notification token changed — update required. The server may still point at the previous device token until you sign the update.
               </Text>
             ) : null}
+            {notifReg.state === 'token_unavailable' ? (
+              <Text style={{ color: COLORS.warning, fontFamily: FONTS.primaryMedium, fontSize: 12, marginBottom: 8 }}>
+                The device push token is unavailable right now. Your existing registration is unchanged.
+              </Text>
+            ) : null}
+            {notifReg.state === 'owner_mismatch' ? (
+              <Text style={{ color: COLORS.warning, fontFamily: FONTS.primaryMedium, fontSize: 12, marginBottom: 8 }}>
+                This device's notification record belongs to a different wallet. Connect the matching wallet to manage it.
+              </Text>
+            ) : null}
+            {notifReg.state === 'enabled' ? (
+              <Text style={{ color: COLORS.accent, fontFamily: FONTS.primaryMedium, fontSize: 12, marginBottom: 8 }}>
+                Notifications enabled on this device.
+              </Text>
+            ) : null}
+            {notifReg.state === 'disabled' ? (
+              <Text style={{ color: COLORS.textSecondary, fontFamily: FONTS.primaryMedium, fontSize: 12, marginBottom: 8 }}>
+                Notifications disabled on this device.
+              </Text>
+            ) : null}
+            {notifReg.state === 'local_cleanup_pending' && notifReg.message ? (
+              <Text style={{ color: COLORS.textSecondary, fontFamily: FONTS.primaryMedium, fontSize: 12, marginBottom: 8 }}>
+                {notifReg.message}
+              </Text>
+            ) : null}
+
+            {/* Enable / Update primary action (hidden once enabled). */}
+            {notifReg.state !== 'enabled' ? (
+              <TouchableOpacity
+                disabled={notifReg.state === 'registering' || notifReg.state === 'disabling' || notifReg.state === 'checking' || !connected}
+                onPress={handleEnableSignedNotifications}
+                style={[styles.netBtn, (notifReg.state === 'registering' || notifReg.state === 'disabling' || notifReg.state === 'checking' || !connected) && { opacity: 0.5 }]}
+              >
+                <Text style={styles.netBtnText}>
+                  {notifReg.state === 'registering'
+                    ? 'Signing…'
+                    : notifReg.state === 'disabling'
+                      ? 'Disabling…'
+                      : notifReg.state === 'checking'
+                        ? 'Checking…'
+                        : notifReg.state === 'update_required'
+                          ? 'Update notification registration'
+                          : 'Enable notifications (signed)'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {/* Disable (when a registration exists on this device). */}
+            {notifReg.state === 'enabled' || notifReg.state === 'update_required' ? (
+              <TouchableOpacity
+                disabled={!connected}
+                onPress={handleDisableSignedNotifications}
+                style={{ marginTop: 8, paddingVertical: 10, alignItems: 'center' }}
+              >
+                <Text style={{ color: COLORS.critical, fontFamily: FONTS.primaryMedium, fontSize: 13 }}>Disable notifications</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {/* Retry the local token check. */}
+            {notifReg.state === 'token_unavailable' ? (
+              <TouchableOpacity
+                onPress={() => { void notifObserverRef.current?.checkNow(); }}
+                style={{ marginTop: 8, paddingVertical: 10, alignItems: 'center' }}
+              >
+                <Text style={{ color: COLORS.textSecondary, fontFamily: FONTS.primaryMedium, fontSize: 13 }}>Retry token check</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {/* Advanced: clear a server registration when no local record exists. */}
+            {notifReg.state === 'not_enabled' || notifReg.state === 'disabled' || notifReg.state === 'failed' ? (
+              <TouchableOpacity
+                disabled={!connected}
+                onPress={handleClearServerRegistration}
+                style={{ marginTop: 8, paddingVertical: 8, alignItems: 'center' }}
+              >
+                <Text style={{ color: COLORS.textSecondary, fontFamily: FONTS.primaryMedium, fontSize: 12 }}>Clear server notification registration</Text>
+              </TouchableOpacity>
+            ) : null}
+
             {notifReg.state === 'failed' && notifReg.message ? (
               <Text style={{ color: COLORS.critical, fontFamily: FONTS.primaryMedium, fontSize: 12, marginTop: 8 }}>
                 {notifReg.message}

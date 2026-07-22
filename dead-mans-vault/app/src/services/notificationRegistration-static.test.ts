@@ -41,3 +41,47 @@ test('SettingsScreen treats an in_flight result as a no-op, not a "failed" flash
   // "Registration failed" mapping and re-enabling the button mid-flight.
   assert.match(screen, /result\.stage === 'in_flight'/);
 });
+
+// ── WP6 static invariants ─────────────────────────────────────────────────────
+const lifecycle = readFileSync(new URL('./notificationLifecycle.ts', import.meta.url), 'utf8');
+const heartbeat = readFileSync(new URL('../hooks/useHeartbeat.ts', import.meta.url), 'utf8');
+const screenSrc = readFileSync(new URL('../screens/SettingsScreen.tsx', import.meta.url), 'utf8');
+
+test('WP6: the lifecycle observer NEVER signs or issues a register/deregister request', () => {
+  // A real server mutation would need fetch()+NOTIFY_URL or a sign call; those catch it.
+  // (Call-form patterns so the module's own prose that names these APIs doesn't false-positive.)
+  assert.equal(/signMessage\s*\(|attemptSigned\w*\s*\(|fetch\s*\(|NOTIFY_URL/.test(lifecycle), false);
+});
+test('WP6: the lifecycle module does not log via console.*', () => {
+  assert.equal(/console\.(log|warn|error|debug|info)\s*\(/.test(lifecycle), false);
+});
+test('WP6: the deregistration coordinator preserves the revision watermark and carries no plaintext token', () => {
+  const i = svc.indexOf('export async function attemptSignedDeregistration');
+  assert.ok(i > 0, 'deregistration coordinator present');
+  const deregFn = svc.slice(i);
+  assert.equal(/revisionKey\s*\(/.test(deregFn), false, 'deregister must not write the revision watermark');
+  assert.equal(/deleteSetting/.test(deregFn), false, 'deregister must not delete settings');
+  assert.equal(/\bdeviceToken\b/.test(deregFn), false, 'deregister carries/stores no device token');
+});
+test('WP6: the automatic token-observer wiring cannot sign or mutate the server', () => {
+  const i = screenSrc.indexOf('makeTokenObserver({');
+  assert.ok(i > 0, 'observer wired in SettingsScreen');
+  const j = screenSrc.indexOf('observer.start();', i);
+  assert.ok(j > i, 'observer block bounded');
+  const block = screenSrc.slice(i, j);
+  assert.equal(/attemptSigned|signMessage|runDisable|handleEnable|handleDisable|fetch\s*\(/.test(block), false,
+    'the observer config must not sign or trigger a server mutation');
+});
+test('WP6: server-mutation entrypoints are each referenced exactly twice (one import + one deliberate call site)', () => {
+  assert.equal((screenSrc.match(/attemptSignedRegistration/g) || []).length, 2);
+  assert.equal((screenSrc.match(/attemptSignedDeregistration/g) || []).length, 2);
+  // The deregister core is invoked ONLY from the two confirmation onPress handlers.
+  assert.equal((screenSrc.match(/void runDisable\(\)/g) || []).length, 2);
+});
+test('WP6: useHeartbeat never signs, registers, or deregisters (no auto-mutation on the heartbeat path)', () => {
+  assert.equal(/signMessage\s*\(|attemptSigned\w*\s*\(|PushRegistrationService\.(register|deregister)\s*\(|['"`]\/register|['"`]\/deregister/.test(heartbeat), false);
+});
+test('WP6: the disable confirmation clarifies no funds move and that it works after vault close', () => {
+  assert.match(screenSrc, /does not move funds/);
+  assert.match(screenSrc, /after the vault is closed/);
+});
