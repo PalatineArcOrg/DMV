@@ -614,3 +614,22 @@ test('dereg (WP6.1 LOW): already_absent_after_close + tombstone-write failure â†
   const r = await attemptSignedDeregistration({ owner: o.owner, context: 'post_close_cleanup' }, h.deps);
   assert.equal(r.ok, true); assert.equal((r as any).alreadyAbsentAfterClose, true); assert.equal((r as any).localCleanupPending, true);
 });
+test('dereg (WP6.1 LOW-fix): compound double-write fault (tombstone + durable marker both fail) â†’ closed-vault proof SURVIVES (restart reconciles, no stale "enabled")', async () => {
+  const o = makeOwner();
+  const key = { cluster: CLUSTER, programId: PROGRAM, owner: o.owner, vault: deriveVault(o.owner) };
+  const store = new Map<string, string>([[successKey(key), seedRec(o)], [closedVaultKey(key), closedTombFor(o.owner)]]);
+  const dpk = deregPendingKey(key);
+  const h = deregHarness(o, {
+    postDeregister: async () => ({ status: 403, code: 'ownership_failed' }),
+    getSetting: async (k: string) => store.get(k) ?? null,
+    // Fail BOTH the tombstone write and the durable dereg-pending marker; persist everything else,
+    // so an (unwanted) unconditional clear of the closed-vault marker would be observable.
+    setSetting: async (k: string, v: string) => {
+      if (k.startsWith('notif_signed_reg') || k === dpk) throw new Error('sqlite write failed');
+      store.set(k, v);
+    },
+  });
+  const r = await attemptSignedDeregistration({ owner: o.owner, context: 'post_close_cleanup' }, h.deps);
+  assert.equal(r.ok, true); assert.equal((r as any).alreadyAbsentAfterClose, true); assert.equal((r as any).localCleanupPending, true);
+  assert.ok((store.get(closedVaultKey(key)) || '').length > 0, 'closed-vault proof survives the compound double-write fault (clear gated on !localCleanupPending)');
+});

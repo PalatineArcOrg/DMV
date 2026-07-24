@@ -678,8 +678,11 @@ export async function attemptSignedDeregistration(input: DeregisterInput, deps: 
             /* best-effort; the in-session UI still shows disabled */
           }
         }
-        // WP6.1 — the vault-closed cleanup (if any) is now reconciled; clear the marker.
-        try { await deps.setSetting(closedVaultKey(key), ''); } catch { /* best-effort */ }
+        // WP6.1 — clear the vault-closed marker ONLY when durable local state landed. If
+        // localCleanupPending (the tombstone AND the durable dereg marker both failed to write),
+        // KEEP the closed-vault proof so a kill+restart shows cleanup-pending — never a stale
+        // "enabled" for a closed vault — and a re-tap finds the still-valid proof to reconcile.
+        if (!localCleanupPending) { try { await deps.setSetting(closedVaultKey(key), ''); } catch { /* best-effort */ } }
         return localCleanupPending ? { ok: true, removed, localCleanupPending: true } : { ok: true, removed };
       }
       try { await deps.setSetting(closedVaultKey(key), ''); } catch { /* best-effort */ }
@@ -709,7 +712,9 @@ export async function attemptSignedDeregistration(input: DeregisterInput, deps: 
         localCleanupPending = true;
         try { await deps.setSetting(deregPendingKey(key), String(deps.nowSec())); } catch { /* best-effort */ }
       }
-      try { await deps.setSetting(closedVaultKey(key), ''); } catch { /* best-effort */ }
+      // Mirror the 200 path: clear the closed-vault proof only when durable state landed; if
+      // localCleanupPending, keep it so a restart reconciles instead of resurfacing "enabled".
+      if (!localCleanupPending) { try { await deps.setSetting(closedVaultKey(key), ''); } catch { /* best-effort */ } }
       return localCleanupPending
         ? { ok: true, removed: 0, alreadyAbsentAfterClose: true, localCleanupPending: true }
         : { ok: true, removed: 0, alreadyAbsentAfterClose: true };
