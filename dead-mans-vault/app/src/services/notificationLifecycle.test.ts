@@ -16,7 +16,7 @@ import {
   isOperationActive,
   operationIdentity,
 } from './notificationLifecycle.ts';
-import { successKey, deregPendingKey } from './NotificationRegistrationService.ts';
+import { successKey, deregPendingKey, closedVaultKey } from './NotificationRegistrationService.ts';
 
 const PROGRAM = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
 const CLUSTER = 'devnet';
@@ -101,6 +101,7 @@ function observerHarness(over: Record<string, any> = {}) {
     setSetting: over.setSetting ?? (async (k: string, v: string) => { spies.setCount++; store.set(k, v); }),
     successKeyFor: successKey,
     deregPendingKeyFor: deregPendingKey,
+    closedVaultKeyFor: closedVaultKey,
     subscribe: over.subscribe,
     nowMs: () => 1784500000000 + (seq++),
     onState: (s: string) => states.push(s),
@@ -308,4 +309,58 @@ test('observer: invalidate() prevents a stale in-flight check from emitting (del
   await p;
   assert.equal(h.states.length, 0, 'the stale check did not emit after invalidate()');
   assert.equal(h.spies.setCount, 0, 'and did not persist a pending marker');
+});
+
+// ── WP6.1 vault-closed cleanup precedence ────────────────────────────────────
+function closedTomb(over: Record<string, unknown> = {}) {
+  return JSON.stringify({ schemaVersion: 1, owner: OWNER, vault: VAULT, cluster: CLUSTER, programId: PROGRAM, revokedAt: 1784500000, revokeSig: 'S'.repeat(64), needsServerReconcile: true, ...over });
+}
+test('observer (WP6.1): closed-vault marker + active record → vault_closed_cleanup_pending (never enabled)', async () => {
+  const h = observerHarness({ seedRecord: confirmedRecord(fpA), getCurrentToken: async () => TOKEN_A });
+  h.store.set(closedVaultKey(KEY), closedTomb());
+  assert.equal(await makeTokenObserver(h.deps).checkNow(), 'vault_closed_cleanup_pending');
+});
+test('observer (WP6.1): cleanup_pending survives a "restart" — a fresh observer never returns enabled', async () => {
+  const store = new Map<string, string>([[successKey(KEY), confirmedRecord(fpA)], [closedVaultKey(KEY), closedTomb()]]);
+  const h = observerHarness({ getSetting: async (k: string) => store.get(k) ?? null, getCurrentToken: async () => TOKEN_A });
+  assert.equal(await makeTokenObserver(h.deps).checkNow(), 'vault_closed_cleanup_pending');
+});
+test('observer (WP6.1): a token event cannot restore enabled while cleanup pending', async () => {
+  let fire: any;
+  const h = observerHarness({ seedRecord: confirmedRecord(fpA), getCurrentToken: async () => TOKEN_A, subscribe: (cb: any) => { fire = cb; return () => {}; } });
+  h.store.set(closedVaultKey(KEY), closedTomb());
+  const obs = makeTokenObserver(h.deps); obs.start(); fire(); await new Promise((r) => setTimeout(r, 5));
+  assert.equal(await obs.checkNow(), 'vault_closed_cleanup_pending');
+});
+test('observer (WP6.1): closed-vault marker + tombstoned record → disabled + marker cleared', async () => {
+  const rec = JSON.stringify({ owner: OWNER, vault: VAULT, cluster: CLUSTER, programId: PROGRAM, deregisteredAt: 900 });
+  const h = observerHarness({ seedRecord: rec, getCurrentToken: async () => TOKEN_A });
+  h.store.set(closedVaultKey(KEY), closedTomb());
+  assert.equal(await makeTokenObserver(h.deps).checkNow(), 'disabled');
+  assert.equal(h.store.get(closedVaultKey(KEY)) || '', '', 'marker cleared once cleanup is done');
+});
+test('observer (WP6.1): closed-vault marker + NO record → clears the pointless marker, not_enabled', async () => {
+  const h = observerHarness({ getCurrentToken: async () => TOKEN_A });
+  h.store.set(closedVaultKey(KEY), closedTomb());
+  assert.equal(await makeTokenObserver(h.deps).checkNow(), 'not_enabled');
+  assert.equal(h.store.get(closedVaultKey(KEY)) || '', '', 'pointless marker cleared');
+});
+test('observer (WP6.1): a closed-vault marker whose body owner differs is ignored (owner guard)', async () => {
+  const h = observerHarness({ seedRecord: confirmedRecord(fpA), getCurrentToken: async () => TOKEN_A });
+  h.store.set(closedVaultKey(KEY), closedTomb({ owner: 'AnotherOwner1111111111111111111111111111111' }));
+  assert.equal(await makeTokenObserver(h.deps).checkNow(), 'enabled'); // body-owner mismatch → not treated as closed
+});
+
+test('observer (WP6.1 MED): a record whose revision post-dates the closure → live (enabled) + stale tombstone cleared', async () => {
+  const rec = JSON.stringify({ owner: OWNER, vault: VAULT, revision: 2000, tokenFingerprint: fpA, cluster: CLUSTER, programId: PROGRAM });
+  const h = observerHarness({ seedRecord: rec, getCurrentToken: async () => TOKEN_A });
+  h.store.set(closedVaultKey(KEY), closedTomb({ priorRevision: 1000 }));
+  assert.equal(await makeTokenObserver(h.deps).checkNow(), 'enabled'); // record newer than closure → live
+  assert.equal(h.store.get(closedVaultKey(KEY)) || '', '', 'stale tombstone cleared');
+});
+test('observer (WP6.1): a same-revision record (not newer than the closure) stays cleanup_pending', async () => {
+  const rec = JSON.stringify({ owner: OWNER, vault: VAULT, revision: 1000, tokenFingerprint: fpA, cluster: CLUSTER, programId: PROGRAM });
+  const h = observerHarness({ seedRecord: rec, getCurrentToken: async () => TOKEN_A });
+  h.store.set(closedVaultKey(KEY), closedTomb({ priorRevision: 1000 }));
+  assert.equal(await makeTokenObserver(h.deps).checkNow(), 'vault_closed_cleanup_pending');
 });

@@ -75,8 +75,52 @@ blocked. There is **no** legacy shared-secret fallback anywhere.
 ## Status
 - Old released app builds still use the unsigned **legacy** registration (accepted during the
   bounded `dual` legacy window).
-- **WP5 + WP6 source is not built, installed, or released** (no APK).
-- The notify server is live on **devnet in `dual` mode**; a **live route canary is pending** an
-  approved disposable-vault harness; **Fox remains a legacy registration**; **no signed-only
-  cutover** has occurred.
+- The disposable-vault **live route canary passed** on devnet, and a **private internal APK** (from
+  the reviewed source) was **manually installed on one Fox-free test device** and exercised end-to-end.
+  No **public/production** WP5/WP6 release exists. The WP6.1 correction here is **source-only** — no
+  new APK has been built.
+- The notify server is live on **devnet in `dual` mode**; **Fox remains a legacy registration**
+  (unmigrated); **no signed-only cutover** has occurred.
 - **Mainnet remains NO-GO.**
+
+## WP6.1 — post-revoke notification-state reconciliation
+
+**The Seeker LOW finding.** During the controlled device gate, after a successful vault revoke the
+app could keep showing notifications as **enabled**; if the notify-server's poller had already
+removed the closed-vault registration, a later explicit Disable/Clear received `ownership_failed`
+("This vault could not be verified as yours"), leaving stale local UI. WP6.1 fixes this, source-only.
+
+**After a CONFIRMED owner-authorized revoke** (`reconcileNotificationsAfterClose`, called from the
+revoke handler once the tx is confirmed) the app writes a **durable closed-vault tombstone**
+(`recordVaultClosure` → key `notif_vault_closed/<cluster>/<programId>/<owner>/<vault>`) — but ONLY
+when an active notification record exists for that identity. It is LOCAL-ONLY: it never signs, never
+calls the server, and never touches the revision high-watermark. The tombstone holds only
+non-sensitive fields (`owner`, `vault`, `cluster`, `programId`, `revokedAt`, the public `revokeSig`,
+`priorRevision`, `needsServerReconcile`) — no token/fingerprint/signature/nonce/message/secret. The
+existing invariant is preserved: **revoke never automatically deregisters.**
+
+**Local state / UI.** The observer's `checkNow` treats the closed-vault tombstone with PRECEDENCE:
+while the confirmed record is still present it returns `vault_closed_cleanup_pending`
+("Vault closed — notification cleanup pending") — it can never resurface `enabled`/`update_required`
+for a closed vault, and a token event or focus/foreground reconcile cannot change that. Once the
+record is tombstoned/gone (cleanup done) the marker is cleared and the state falls to `disabled` /
+`not_enabled`. This survives an app restart (the tombstone is durable); no wallet prompt and no HTTP
+request happen automatically.
+
+**Poller-wins race — explicit cleanup.** From the `vault_closed_cleanup_pending` state the only
+deliberate action is **"Clear server notification registration"**, which signs **once** and sends
+**one** V2 deregister. If it reaches the server first → `HTTP 200 removed=1`; if the poller already
+removed the row → the server returns `ownership_failed`. In THIS narrow context — and ONLY here —
+that `ownership_failed` is interpreted as `already_absent_after_close`. The strict conditions
+(all required): the action is the explicit post-close cleanup (`context: 'post_close_cleanup'`); the
+connected wallet matches the stored owner; the vault is the canonical PDA for that owner; a durable
+closed-vault tombstone proves THIS exact vault was revoked through the app (with a real confirmed
+`revokeSig` and `revokedAt`); the request used the exact signed V2 deregistration (no legacy
+fallback). Under proven closure the app renders **disabled**, clears the confirmed-registration
+record, clears the closed-vault marker, and **preserves the revision high-watermark** — with no
+automatic second request. In **every other** case `ownership_failed` stays a hard failure (a live
+vault, an owner/vault mismatch, the wrong wallet, a normal registration/deregistration, a missing or
+corrupt tombstone) — it must not mask a real ownership error. Both server `removed=1` and `removed=0`
+also render disabled, clear the marker, and preserve the watermark.
+
+**Status.** Source-only. No new APK has been built. Fox has not been migrated. Mainnet remains NO-GO.

@@ -13,6 +13,8 @@ import {
   revisionKey,
   successKey,
   deregPendingKey,
+  closedVaultKey,
+  recordVaultClosure,
   mapRegistrationError,
   mapStatusToCode,
   mapDeregisterError,
@@ -54,7 +56,12 @@ function harness(o: makeOwnerT, over: Over = {}) {
     deriveVault: over.deriveVault ?? deriveVault,
     getDeviceToken: over.getDeviceToken ?? (async () => { spies.getDeviceToken++; return TOKEN; }),
     getSetting: async (k: string) => store.get(k) ?? null,
-    setSetting: over.setSetting ?? (async (k: string, v: string) => { store.set(k, v); order.push('set:' + (k.startsWith('notif_rev') ? 'rev' : 'success')); if (k.startsWith('notif_rev')) spies.setSettingRevision++; else spies.setSettingSuccess++; }),
+    setSetting: over.setSetting ?? (async (k: string, v: string) => {
+      store.set(k, v);
+      if (k.startsWith('notif_rev')) { order.push('set:rev'); spies.setSettingRevision++; }
+      else if (k.startsWith('notif_signed_reg')) { order.push('set:success'); spies.setSettingSuccess++; }
+      else { order.push('set:other'); } // e.g. WP6.1 closed-vault marker clear — not a success-record write
+    }),
     signMessage: over.signMessage ?? (async (bytes: Uint8Array) => { spies.signMessage++; order.push('sign'); return o.sign(bytes); }),
     buildRegisterMessage: registerMessageV2,
     generateNonce: over.generateNonce ?? generateNonceV2,
@@ -505,4 +512,105 @@ test('rotation: a successful register records the ACCEPTED token fingerprint + r
   const rec = JSON.parse(store.get(successKey(key))!);
   assert.equal(rec.tokenFingerprint, (await sha256Hex(TOKEN)).slice(0, 32), 'record carries the accepted token fingerprint');
   assert.equal(rec.revision, (r as any).revision, 'record carries the accepted revision (preserved for the race compare)');
+});
+
+// ── WP6.1: recordVaultClosure + contextual ownership_failed ──────────────────
+function closedTombFor(owner: string, over: Record<string, unknown> = {}) {
+  return JSON.stringify({ schemaVersion: 1, owner, vault: deriveVault(owner), cluster: CLUSTER, programId: PROGRAM, revokedAt: NOW_SEC, revokeSig: 'S'.repeat(64), needsServerReconcile: true, ...over });
+}
+const closureDeps = (store: Map<string, string>) => ({ cluster: CLUSTER, programId: PROGRAM, deriveVault, getSetting: async (k: string) => store.get(k) ?? null, setSetting: async (k: string, v: string) => { store.set(k, v); } });
+
+test('recordVaultClosure: writes a closed-vault tombstone when an active record + confirmed sig exist', async () => {
+  const o = makeOwner();
+  const key = { cluster: CLUSTER, programId: PROGRAM, owner: o.owner, vault: deriveVault(o.owner) };
+  const store = new Map<string, string>([[successKey(key), JSON.stringify({ owner: o.owner, vault: key.vault, revision: 1234, cluster: CLUSTER, programId: PROGRAM })]]);
+  assert.equal(await recordVaultClosure({ owner: o.owner, revokeSig: 'S'.repeat(64), revokedAt: NOW_SEC }, closureDeps(store)), true);
+  const tomb = JSON.parse(store.get(closedVaultKey(key))!);
+  assert.equal(tomb.owner, o.owner); assert.equal(tomb.vault, key.vault); assert.equal(tomb.priorRevision, 1234); assert.equal(tomb.revokeSig, 'S'.repeat(64));
+});
+test('recordVaultClosure: NO active record → does not write (nothing to reconcile)', async () => {
+  const o = makeOwner(); const store = new Map<string, string>();
+  assert.equal(await recordVaultClosure({ owner: o.owner, revokeSig: 'S'.repeat(64), revokedAt: NOW_SEC }, closureDeps(store)), false);
+  assert.equal(store.size, 0);
+});
+test('recordVaultClosure: a too-short revokeSig is rejected (requires a confirmed signature)', async () => {
+  const o = makeOwner(); const key = { cluster: CLUSTER, programId: PROGRAM, owner: o.owner, vault: deriveVault(o.owner) };
+  const store = new Map<string, string>([[successKey(key), JSON.stringify({ owner: o.owner, vault: key.vault, revision: 1, cluster: CLUSTER, programId: PROGRAM })]]);
+  assert.equal(await recordVaultClosure({ owner: o.owner, revokeSig: 'short', revokedAt: NOW_SEC }, closureDeps(store)), false);
+  assert.equal(store.get(closedVaultKey(key)), undefined);
+});
+test('recordVaultClosure: an already-tombstoned record → does not write', async () => {
+  const o = makeOwner(); const key = { cluster: CLUSTER, programId: PROGRAM, owner: o.owner, vault: deriveVault(o.owner) };
+  const store = new Map<string, string>([[successKey(key), JSON.stringify({ owner: o.owner, vault: key.vault, cluster: CLUSTER, programId: PROGRAM, deregisteredAt: 5 })]]);
+  assert.equal(await recordVaultClosure({ owner: o.owner, revokeSig: 'S'.repeat(64), revokedAt: NOW_SEC }, closureDeps(store)), false);
+});
+
+const seedRec = (o: makeOwnerT) => JSON.stringify({ owner: o.owner, vault: deriveVault(o.owner), revision: 1, tokenFingerprint: 'a'.repeat(32), cluster: CLUSTER, programId: PROGRAM });
+
+test('dereg (WP6.1): post_close_cleanup + valid tombstone + ownership_failed → already_absent_after_close; record tombstoned; marker cleared; watermark preserved', async () => {
+  const o = makeOwner();
+  const h = deregHarness(o, { seedRecord: seedRec(o), seedRevision: '7777', postDeregister: async () => ({ status: 403, code: 'ownership_failed' }) });
+  h.store.set(closedVaultKey(h.key), closedTombFor(o.owner));
+  const r = await attemptSignedDeregistration({ owner: o.owner, context: 'post_close_cleanup' }, h.deps);
+  assert.equal(r.ok, true); assert.equal((r as any).alreadyAbsentAfterClose, true); assert.equal((r as any).removed, 0);
+  assert.ok(JSON.parse(h.store.get(successKey(h.key))!).deregisteredAt > 0, 'record tombstoned');
+  assert.equal(h.store.get(closedVaultKey(h.key)) || '', '', 'closed-vault marker cleared');
+  assert.equal(h.store.get(revisionKey(h.key)), '7777', 'revision watermark preserved');
+});
+test('dereg (WP6.1): ownership_failed WITHOUT the post_close_cleanup context → remains a FAILURE (no masking)', async () => {
+  const o = makeOwner();
+  const h = deregHarness(o, { seedRecord: seedRec(o), postDeregister: async () => ({ status: 403, code: 'ownership_failed' }) });
+  h.store.set(closedVaultKey(h.key), closedTombFor(o.owner));
+  const r = await attemptSignedDeregistration({ owner: o.owner }, h.deps);
+  assert.equal(r.ok, false); assert.equal((r as any).code, 'ownership_failed');
+});
+test('dereg (WP6.1): post_close_cleanup + NO tombstone + ownership_failed → FAILURE', async () => {
+  const o = makeOwner();
+  const h = deregHarness(o, { seedRecord: seedRec(o), postDeregister: async () => ({ status: 403, code: 'ownership_failed' }) });
+  const r = await attemptSignedDeregistration({ owner: o.owner, context: 'post_close_cleanup' }, h.deps);
+  assert.equal(r.ok, false); assert.equal((r as any).code, 'ownership_failed');
+});
+test('dereg (WP6.1): post_close_cleanup + tombstone with a DIFFERENT body owner + ownership_failed → FAILURE', async () => {
+  const o = makeOwner(); const other = makeOwner();
+  const h = deregHarness(o, { seedRecord: seedRec(o), postDeregister: async () => ({ status: 403, code: 'ownership_failed' }) });
+  h.store.set(closedVaultKey(h.key), closedTombFor(other.owner, { vault: deriveVault(o.owner) }));
+  const r = await attemptSignedDeregistration({ owner: o.owner, context: 'post_close_cleanup' }, h.deps);
+  assert.equal(r.ok, false); assert.equal((r as any).code, 'ownership_failed');
+});
+test('dereg (WP6.1): post_close_cleanup + tombstone with a too-short revokeSig + ownership_failed → FAILURE (invalid proof)', async () => {
+  const o = makeOwner();
+  const h = deregHarness(o, { seedRecord: seedRec(o), postDeregister: async () => ({ status: 403, code: 'ownership_failed' }) });
+  h.store.set(closedVaultKey(h.key), closedTombFor(o.owner, { revokeSig: 'short' }));
+  const r = await attemptSignedDeregistration({ owner: o.owner, context: 'post_close_cleanup' }, h.deps);
+  assert.equal(r.ok, false); assert.equal((r as any).code, 'ownership_failed');
+});
+test('dereg (WP6.1): post_close_cleanup + server 200 removed=1 → success, marker cleared, watermark preserved', async () => {
+  const o = makeOwner();
+  const h = deregHarness(o, { seedRecord: seedRec(o), seedRevision: '9999', postDeregister: async () => ({ status: 200, removed: 1 }) });
+  h.store.set(closedVaultKey(h.key), closedTombFor(o.owner));
+  const r = await attemptSignedDeregistration({ owner: o.owner, context: 'post_close_cleanup' }, h.deps);
+  assert.equal(r.ok, true); assert.equal((r as any).removed, 1);
+  assert.equal(h.store.get(closedVaultKey(h.key)) || '', '', 'marker cleared on server success');
+  assert.equal(h.store.get(revisionKey(h.key)), '9999', 'watermark preserved');
+});
+
+test('register (WP6.1 MED): a successful register CLEARS a stale closed-vault marker (new vault re-init at same PDA)', async () => {
+  const o = makeOwner();
+  const h = harness(o);
+  const key = { cluster: CLUSTER, programId: PROGRAM, owner: o.owner, vault: deriveVault(o.owner) };
+  h.store.set(closedVaultKey(key), closedTombFor(o.owner, { priorRevision: 5 }));
+  const r = await attemptSignedRegistration({ owner: o.owner, stages }, h.deps);
+  assert.equal(r.ok, true);
+  assert.equal(h.store.get(closedVaultKey(key)) || '', '', 'register cleared the stale closed-vault marker');
+});
+test('dereg (WP6.1 LOW): already_absent_after_close + tombstone-write failure → localCleanupPending set', async () => {
+  const o = makeOwner();
+  const h = deregHarness(o, {
+    seedRecord: seedRec(o),
+    postDeregister: async () => ({ status: 403, code: 'ownership_failed' }),
+    setSetting: async (k: string) => { if (k.startsWith('notif_signed_reg')) throw new Error('sqlite write failed'); },
+  });
+  h.store.set(closedVaultKey(h.key), closedTombFor(o.owner));
+  const r = await attemptSignedDeregistration({ owner: o.owner, context: 'post_close_cleanup' }, h.deps);
+  assert.equal(r.ok, true); assert.equal((r as any).alreadyAbsentAfterClose, true); assert.equal((r as any).localCleanupPending, true);
 });

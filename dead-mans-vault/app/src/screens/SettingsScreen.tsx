@@ -27,7 +27,7 @@ import { COLORS, FONTS, PROGRAM_ID, STAGE_CONFIG, ESCALATION_DEFAULTS, NOTIFY_UR
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { RPC_OVERRIDE_KEY, explorerAddress, explorerTx, getRpcUrl, isCustomRpc, isDevnet, maskRpc, networkLabel } from '../utils/rpcConfig';
 import { getSetting, setSetting, deleteSetting } from '../db/settingsRepo';
-import { attemptSignedRegistration, attemptSignedDeregistration, successKey, deregPendingKey, mapRegistrationError, mapDeregisterError } from '../services/NotificationRegistrationService';
+import { attemptSignedRegistration, attemptSignedDeregistration, successKey, deregPendingKey, closedVaultKey, recordVaultClosure, mapRegistrationError, mapDeregisterError } from '../services/NotificationRegistrationService';
 import { makeTokenObserver, operationIdentity, runExclusive, LifecycleState } from '../services/notificationLifecycle';
 import { DEV_ESCALATION } from '../hooks/useHeartbeat';
 import { registerMessageV2, deregisterMessageV2, generateNonceV2 } from '../utils/notifyAuth';
@@ -65,7 +65,7 @@ export function SettingsScreen() {
   type NotifRegState =
     | 'not_enabled' | 'checking' | 'registering' | 'enabled' | 'update_required'
     | 'disabling' | 'disabled' | 'token_unavailable' | 'owner_mismatch'
-    | 'local_cleanup_pending' | 'failed';
+    | 'local_cleanup_pending' | 'vault_closed_cleanup_pending' | 'failed';
   const [notifReg, setNotifReg] = useState<{ state: NotifRegState; message: string | null }>({ state: 'not_enabled', message: null });
   // True only while a deliberate register/update/disable action is running, so the
   // background token observer never overwrites an in-flight action's UI.
@@ -179,6 +179,7 @@ export function SettingsScreen() {
       setSetting,
       successKeyFor: successKey,
       deregPendingKeyFor: deregPendingKey,
+      closedVaultKeyFor: closedVaultKey,
       subscribe: (cb) => {
         const sub = Notifications.addPushTokenListener(() => cb());
         return () => sub.remove();
@@ -297,7 +298,7 @@ export function SettingsScreen() {
 
   // WP6: DELIBERATE owner-signed DEREGISTRATION core. Only ever called from a confirmed
   // user action below. Never called on mount/heartbeat/disconnect/account-change/token-loss.
-  const runDisable = useCallback(async () => {
+  const runDisable = useCallback(async (context?: 'post_close_cleanup') => {
     if (!publicKey || notifBusyRef.current) return;
     const owner = publicKey.toBase58();
     const vault = deriveVaultB58(owner);
@@ -306,7 +307,7 @@ export function SettingsScreen() {
     setNotifReg({ state: 'disabling', message: null });
     try {
       const ex = await runExclusive(identity, 'deregister', () => attemptSignedDeregistration(
-        { owner },
+        { owner, context },
         {
           cluster: notifCluster,
           programId: PROGRAM_ID,
@@ -407,6 +408,46 @@ export function SettingsScreen() {
     );
   }, [publicKey, runDisable]);
 
+  // WP6.1: explicit post-close cleanup for the `vault_closed_cleanup_pending` state (after a
+  // confirmed revoke). One signature reconciles the notification server row; because closure
+  // is locally proven (durable closed-vault tombstone), a server `ownership_failed` (the
+  // poller may have already removed the row) is treated as an idempotent already-disabled.
+  const handlePostCloseCleanup = useCallback(() => {
+    if (!publicKey) {
+      setNotifReg({ state: 'failed', message: 'Connect your wallet first.' });
+      return;
+    }
+    Alert.alert(
+      'Clear server notification registration',
+      'Your vault is already closed. This only reconciles notification state — the wallet signature moves no funds. The server may already have removed the registration, so this can be a harmless no-op.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: () => { void runDisable('post_close_cleanup'); } },
+      ],
+    );
+  }, [publicKey, runDisable]);
+
+  // WP6.1: after a CONFIRMED owner-authorized revoke that closed the vault, record a durable
+  // closed-vault tombstone (LOCAL-ONLY — no sign, no server call) so the notification UI never
+  // shows a stale "enabled" for the closed vault, then re-derive via the observer. Best-effort:
+  // never blocks or alters the revoke result.
+  const reconcileNotificationsAfterClose = useCallback(async (result: { status: string; executed?: boolean; txs: { sig: string }[] }) => {
+    try {
+      if (!publicKey) return;
+      const closedOnChain = result.status === 'revoked' || (result.status === 'cleared' && !!result.executed);
+      const revokeSig = result.txs && result.txs.length ? result.txs[result.txs.length - 1].sig : '';
+      if (!closedOnChain || !revokeSig) return;
+      await recordVaultClosure(
+        { owner: publicKey.toBase58(), revokeSig, revokedAt: Math.floor(Date.now() / 1000) },
+        { cluster: notifCluster, programId: PROGRAM_ID, deriveVault: deriveVaultB58, getSetting, setSetting },
+      );
+      notifObserverRef.current?.invalidate();
+      await notifObserverRef.current?.checkNow();
+    } catch {
+      /* best-effort notification reconciliation; never blocks the revoke */
+    }
+  }, [publicKey, notifCluster, deriveVaultB58]);
+
   useFocusEffect(useCallback(() => {
     Notifications.getPermissionsAsync().then(({ status }) => {
       setNotifStatus(status === 'granted' ? 'Enabled' : 'Disabled');
@@ -454,6 +495,7 @@ export function SettingsScreen() {
               const { revokeVault, formatRevokeSummary } = require('../services/revokeVault');
               const result = await revokeVault(publicKey, signTransaction);
               const summary = formatRevokeSummary(result);
+              await reconcileNotificationsAfterClose(result); // WP6.1: no stale "enabled" after revoke
 
               const buttons = [
                 ...summary.txs.slice(0, 2).map((t: { label: string; sig: string }, i: number) => ({
@@ -482,7 +524,7 @@ export function SettingsScreen() {
         },
       ],
     );
-  }, [publicKey, signTransaction]);
+  }, [publicKey, signTransaction, reconcileNotificationsAfterClose]);
 
   const handleCloseExecuted = useCallback(async () => {
     if (!publicKey) return;
@@ -664,8 +706,15 @@ export function SettingsScreen() {
                 {notifReg.message || 'Notifications disabled on the server. Finishing local cleanup…'}
               </Text>
             ) : null}
+            {notifReg.state === 'vault_closed_cleanup_pending' ? (
+              <Text style={{ color: COLORS.warning, fontFamily: FONTS.primaryMedium, fontSize: 12, marginBottom: 8 }}>
+                Vault closed — notification cleanup pending. The server registration may still point at the closed vault until you clear it.
+              </Text>
+            ) : null}
 
-            {/* Enable / Update primary action (hidden once enabled). */}
+            {/* Enable / Update primary action (hidden once enabled). Shown for a closed vault too,
+                so a NEW vault re-initialized at the same owner PDA can re-enable; for a truly-closed
+                vault the register just fails ownership gracefully. */}
             {notifReg.state !== 'enabled' ? (
               <TouchableOpacity
                 disabled={notifReg.state === 'registering' || notifReg.state === 'disabling' || notifReg.state === 'checking' || !connected}
@@ -704,6 +753,17 @@ export function SettingsScreen() {
                 style={{ marginTop: 8, paddingVertical: 10, alignItems: 'center' }}
               >
                 <Text style={{ color: COLORS.textSecondary, fontFamily: FONTS.primaryMedium, fontSize: 13 }}>Retry token check</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {/* WP6.1: post-close cleanup for a revoked vault (the only deliberate action here). */}
+            {notifReg.state === 'vault_closed_cleanup_pending' ? (
+              <TouchableOpacity
+                disabled={!connected}
+                onPress={handlePostCloseCleanup}
+                style={[styles.netBtn, !connected && { opacity: 0.5 }]}
+              >
+                <Text style={styles.netBtnText}>Clear server notification registration</Text>
               </TouchableOpacity>
             ) : null}
 

@@ -48,6 +48,7 @@ export type LifecycleState =
   | 'token_unavailable'
   | 'owner_mismatch'
   | 'local_cleanup_pending'
+  | 'vault_closed_cleanup_pending'
   | 'error';
 
 /** The confirmed local record (WP5 SuccessRecord, plus WP6 tombstone fields we read). */
@@ -74,6 +75,30 @@ export interface PendingMarker {
 /** Pending-rotation marker key (separate from the confirmed record). */
 export function pendingKey(k: KeyParts): string {
   return `notif_pending/${k.cluster}/${k.programId}/${k.owner}/${k.vault}`;
+}
+
+/**
+ * WP6.1 — durable "this exact vault was revoked through the app" tombstone. Written
+ * ONLY after a CONFIRMED owner-authorized revoke (so `revokeSig` is a confirmed
+ * signature). It makes the notification UI show `vault_closed_cleanup_pending` (never a
+ * stale `enabled`) for a closed vault, and it is the LOCAL PROOF that lets the explicit
+ * post-close cleanup safely interpret the server's `ownership_failed` (closed vault, the
+ * poller may already have dropped the row) as already-absent. Non-sensitive: it holds NO
+ * token/fingerprint/signature/nonce/message/secret.
+ */
+export interface ClosedVaultTombstone {
+  schemaVersion: number;
+  owner: string;
+  vault: string;
+  cluster: string;
+  programId: string;
+  revokedAt: number; // unix seconds — revoke CONFIRMATION time
+  revokeSig: string; // public revoke transaction signature (confirmed)
+  priorRevision?: number; // the confirmed registration revision before closure
+  needsServerReconcile: boolean;
+}
+export function closedVaultKey(k: KeyParts): string {
+  return `notif_vault_closed/${k.cluster}/${k.programId}/${k.owner}/${k.vault}`;
 }
 
 // ── Pure reconciliation ──────────────────────────────────────────────────────
@@ -115,6 +140,7 @@ export interface ObserverDeps {
   setSetting: (k: string, v: string) => Promise<void>;
   successKeyFor: (k: KeyParts) => string; // injected (== coordinator's successKey)
   deregPendingKeyFor: (k: KeyParts) => string; // injected (== coordinator's deregPendingKey)
+  closedVaultKeyFor: (k: KeyParts) => string; // injected (== coordinator's closedVaultKey) [WP6.1]
   subscribe?: (cb: () => void) => () => void; // token-change source; returns an unsubscribe
   nowMs: () => number;
   onState?: (s: LifecycleState) => void;
@@ -178,6 +204,37 @@ export function makeTokenObserver(deps: ObserverDeps) {
       return 'error';
     }
     const key: KeyParts = { cluster: deps.cluster, programId: deps.programId, owner, vault };
+    // WP6.1 — vault-closed cleanup takes PRECEDENCE. A locally-proven revoke means the
+    // notification UI must never show "enabled" for this vault again. While the confirmed
+    // record is still present (not yet reconciled) show `vault_closed_cleanup_pending`;
+    // once it is tombstoned/gone the marker is cleared and the normal flow (disabled /
+    // not_enabled) runs. This is LOCAL-ONLY (no sign, no server call).
+    try {
+      const rawClosed = await deps.getSetting(deps.closedVaultKeyFor(key));
+      if (rawClosed) {
+        let tomb: ClosedVaultTombstone | null = null;
+        try { tomb = JSON.parse(rawClosed) as ClosedVaultTombstone; } catch { tomb = null; }
+        if (tomb && tomb.owner === owner && tomb.vault === vault) {
+          let rec: ConfirmedRecord | null = null;
+          try { const r = await deps.getSetting(deps.successKeyFor(key)); rec = r ? (JSON.parse(r) as ConfirmedRecord) : null; } catch { rec = null; }
+          if (rec && rec.owner === owner && rec.vault === vault && !rec.deregisteredAt) {
+            // A record whose revision POST-DATES the closure means the owner re-registered for a
+            // NEW vault re-initialized at the same PDA — the tombstone is stale; fall through to a
+            // normal reconcile (→ enabled) instead of showing cleanup pending for a live vault.
+            const staleTomb = typeof rec.revision === 'number' && typeof tomb.priorRevision === 'number' && rec.revision > tomb.priorRevision;
+            if (!staleTomb) {
+              emit(gen, 'vault_closed_cleanup_pending');
+              return 'vault_closed_cleanup_pending';
+            }
+          }
+          // Stale tombstone, or nothing left to reconcile (no record / already tombstoned) —
+          // clear the marker (best-effort) and fall through to the normal reconcile.
+          try { await deps.setSetting(deps.closedVaultKeyFor(key), ''); } catch { /* best-effort */ }
+        }
+      }
+    } catch {
+      /* unreadable closed-vault marker — fall through to normal reconcile */
+    }
     // Durable local-cleanup recovery: if a prior signed deregistration succeeded
     // server-side but the local tombstone write failed, a durable pending marker persists.
     // Repair the tombstone LOCALLY (never a server call) so the UI can never resurface a

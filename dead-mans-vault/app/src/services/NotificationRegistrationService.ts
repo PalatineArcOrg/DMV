@@ -48,6 +48,15 @@ export function successKey(k: KeyParts): string {
 export function deregPendingKey(k: KeyParts): string {
   return `notif_dereg_pending/${k.cluster}/${k.programId}/${k.owner}/${k.vault}`;
 }
+/**
+ * WP6.1 — durable "this exact vault was revoked through the app" tombstone key
+ * (mirrors notificationLifecycle.closedVaultKey). Written by `recordVaultClosure`
+ * after a CONFIRMED revoke; it is the local proof that lets the explicit post-close
+ * cleanup interpret the server's `ownership_failed` (closed vault) as already-absent.
+ */
+export function closedVaultKey(k: KeyParts): string {
+  return `notif_vault_closed/${k.cluster}/${k.programId}/${k.owner}/${k.vault}`;
+}
 
 /**
  * Next monotonic revision (pure). `next = max(nowMs, storedHighWatermark + 1)`.
@@ -344,6 +353,10 @@ export async function attemptSignedRegistration(
       } catch {
         /* best-effort cache write; server already accepted the registration */
       }
+      // WP6.1 — a fresh accepted registration means a LIVE vault at this PDA. Clear any stale
+      // closed-vault tombstone (e.g. a new vault re-initialized at the same owner PDA after a
+      // prior revoke) so the observer shows `enabled`, not `vault_closed_cleanup_pending`.
+      try { await deps.setSetting(closedVaultKey({ cluster: deps.cluster, programId: deps.programId, owner, vault }), ''); } catch { /* best-effort */ }
       return { ok: true, result, revision, record };
     }
     const code = res.code || mapStatusToCode(res.status);
@@ -387,11 +400,82 @@ export interface DeregisterDeps {
 
 export interface DeregisterInput {
   owner: string;
+  /**
+   * WP6.1 — set to 'post_close_cleanup' ONLY for the explicit post-revoke cleanup action.
+   * In that context, and ONLY when a valid closed-vault tombstone proves this exact vault
+   * was revoked through the app, a server `ownership_failed` (closed vault, poller may have
+   * already dropped the row) is interpreted as an idempotent already-absent success. In any
+   * other context `ownership_failed` remains a hard failure.
+   */
+  context?: 'post_close_cleanup';
 }
 
 export type DeregisterResult =
-  | { ok: true; removed: number; localCleanupPending?: boolean }
+  | { ok: true; removed: number; localCleanupPending?: boolean; alreadyAbsentAfterClose?: boolean }
   | { ok: false; stage: string; code?: string; retryable: boolean };
+
+export interface VaultClosureInput {
+  owner: string;
+  revokeSig: string; // the CONFIRMED revoke transaction signature (caller confirms first)
+  revokedAt: number; // unix seconds — revoke confirmation time
+}
+export interface VaultClosureDeps {
+  cluster: string;
+  programId: string;
+  deriveVault: (owner: string) => string;
+  getSetting: (key: string) => Promise<string | null>;
+  setSetting: (key: string, value: string) => Promise<void>;
+}
+/**
+ * WP6.1 — record a CONFIRMED owner-authorized vault revoke as a durable closed-vault
+ * tombstone. LOCAL-ONLY: never signs, never calls the server, never touches the revision
+ * high-watermark. The caller MUST have confirmed the revoke transaction before calling this
+ * (`revokeSig` is the confirmed signature). Writes the tombstone ONLY when an active (not
+ * already-tombstoned) notification record exists for this identity — otherwise there is
+ * nothing to reconcile. Idempotent; returns whether a tombstone was written.
+ */
+export async function recordVaultClosure(input: VaultClosureInput, deps: VaultClosureDeps): Promise<boolean> {
+  const owner = input?.owner;
+  if (!isCanonicalPubkey(owner)) return false;
+  if (typeof input.revokeSig !== 'string' || input.revokeSig.length < 32) return false; // require a real confirmed signature
+  if (!isSafePosInt(input.revokedAt)) return false;
+  let vault: string;
+  try {
+    vault = deps.deriveVault(owner);
+  } catch {
+    return false;
+  }
+  if (!isCanonicalPubkey(vault)) return false;
+  if (deps.cluster !== EXPECTED_CLUSTER || deps.programId !== EXPECTED_PROGRAM_ID) return false;
+  const key = { cluster: deps.cluster, programId: deps.programId, owner, vault };
+  // Only meaningful if there is an active notification record to reconcile.
+  let priorRevision: number | undefined;
+  try {
+    const raw = await deps.getSetting(successKey(key));
+    const rec = raw ? (JSON.parse(raw) as SuccessRecord & { deregisteredAt?: number }) : null;
+    if (!rec || rec.owner !== owner || rec.vault !== vault || rec.deregisteredAt) return false; // nothing to reconcile
+    if (typeof rec.revision === 'number') priorRevision = rec.revision;
+  } catch {
+    return false; // unreadable record → do not fabricate a cleanup state
+  }
+  const tomb = {
+    schemaVersion: 1,
+    owner,
+    vault,
+    cluster: deps.cluster,
+    programId: deps.programId,
+    revokedAt: input.revokedAt,
+    revokeSig: input.revokeSig,
+    priorRevision,
+    needsServerReconcile: true,
+  };
+  try {
+    await deps.setSetting(closedVaultKey(key), JSON.stringify(tomb));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Deregistration status → stable code (200 is handled by the caller as success). */
 export function mapDeregisterStatusToCode(status: number): string {
@@ -489,6 +573,26 @@ export async function attemptSignedDeregistration(input: DeregisterInput, deps: 
     if (record && (record.owner !== owner || record.vault !== vault)) {
       return { ok: false, stage: 'owner_mismatch', retryable: false };
     }
+    // WP6.1 — closure proof: a valid closed-vault tombstone (written only after a CONFIRMED
+    // owner-authorized revoke, with a real revokeSig) for THIS owner+vault. Used ONLY in the
+    // explicit post-close cleanup context to interpret a later `ownership_failed` (closed
+    // vault, poller may already have dropped the row) as already-absent. A missing/invalid
+    // tombstone, or any other context, leaves `ownership_failed` a hard failure.
+    let closureProven = false;
+    try {
+      const rawTomb = await deps.getSetting(closedVaultKey(key));
+      const tomb = rawTomb ? (JSON.parse(rawTomb) as { owner?: string; vault?: string; revokedAt?: number; revokeSig?: string }) : null;
+      closureProven =
+        input?.context === 'post_close_cleanup' &&
+        !!tomb &&
+        tomb.owner === owner &&
+        tomb.vault === vault &&
+        isSafePosInt(tomb.revokedAt) &&
+        typeof tomb.revokeSig === 'string' &&
+        tomb.revokeSig.length >= 32;
+    } catch {
+      closureProven = false; // unreadable/corrupt tombstone → fail closed (no masking)
+    }
     const timestamp = deps.nowSec();
     if (!isSafePosInt(timestamp)) return { ok: false, stage: 'validate', retryable: false };
     let nonce: string;
@@ -574,11 +678,42 @@ export async function attemptSignedDeregistration(input: DeregisterInput, deps: 
             /* best-effort; the in-session UI still shows disabled */
           }
         }
+        // WP6.1 — the vault-closed cleanup (if any) is now reconciled; clear the marker.
+        try { await deps.setSetting(closedVaultKey(key), ''); } catch { /* best-effort */ }
         return localCleanupPending ? { ok: true, removed, localCleanupPending: true } : { ok: true, removed };
       }
+      try { await deps.setSetting(closedVaultKey(key), ''); } catch { /* best-effort */ }
       return { ok: true, removed };
     }
     const code = res.code || mapDeregisterStatusToCode(res.status);
+    // WP6.1 — ONLY in the explicit post-close cleanup context, with locally-proven closure,
+    // interpret `ownership_failed` (closed vault + no server row; the poller won the race) as
+    // an idempotent already-absent success. Tombstone the confirmed record + clear the
+    // closed-vault marker; PRESERVE the revision watermark; no second request. In every other
+    // case `ownership_failed` stays a failure (it must not mask a live/owner/vault error).
+    if (code === 'ownership_failed' && closureProven) {
+      let localCleanupPending = false;
+      try {
+        const tombstone = {
+          owner,
+          vault,
+          cluster: deps.cluster,
+          programId: deps.programId,
+          deregisteredAt: deps.nowSec(),
+          localCleanupPending: false,
+        };
+        await deps.setSetting(successKey(key), JSON.stringify(tombstone));
+      } catch {
+        // Mirror the 200 path: on a tombstone-write failure surface localCleanupPending so the UI
+        // engages its in-session guard and cannot resurface a stale "enabled" for the closed vault.
+        localCleanupPending = true;
+        try { await deps.setSetting(deregPendingKey(key), String(deps.nowSec())); } catch { /* best-effort */ }
+      }
+      try { await deps.setSetting(closedVaultKey(key), ''); } catch { /* best-effort */ }
+      return localCleanupPending
+        ? { ok: true, removed: 0, alreadyAbsentAfterClose: true, localCleanupPending: true }
+        : { ok: true, removed: 0, alreadyAbsentAfterClose: true };
+    }
     return { ok: false, stage: 'server', code, retryable: DEREG_RETRYABLE_CODES.has(code) };
   } finally {
     deregInFlight = false;

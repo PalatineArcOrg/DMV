@@ -95,3 +95,35 @@ test('WP6 (review MEDIUM-2): a local-cleanup-pending result sets the pending sta
 test('WP6 (review MEDIUM-2): the observer onState suppresses enabled/update_required while a dereg is session-pending', () => {
   assert.match(screenSrc, /notifDeregPendingSessionRef\.current && \(s === 'enabled' \|\| s === 'update_required'\)/);
 });
+
+// ── WP6.1 static invariants ───────────────────────────────────────────────────
+test('WP6.1: reconcileNotificationsAfterClose (revoke path) never signs or issues a server request', () => {
+  const i = screenSrc.indexOf('const reconcileNotificationsAfterClose');
+  assert.ok(i > 0, 'reconcile-after-close present');
+  const j = screenSrc.indexOf('}, [publicKey, notifCluster, deriveVaultB58]);', i);
+  assert.ok(j > i, 'block bounded');
+  const block = screenSrc.slice(i, j);
+  assert.equal(/signMessage\s*\(|attemptSigned\w*\s*\(|fetch\s*\(|runDisable\s*\(/.test(block), false, 'revoke reconciliation must not sign/deregister/fetch');
+  assert.match(block, /recordVaultClosure\s*\(/); // it only records the closure locally + re-derives via the observer
+});
+test('WP6.1: recordVaultClosure is LOCAL-ONLY — no sign / server request / revision-watermark write / delete', () => {
+  const i = svc.indexOf('export async function recordVaultClosure');
+  assert.ok(i > 0, 'recordVaultClosure present');
+  const fn = svc.slice(i, svc.indexOf('export async function attemptSignedDeregistration'));
+  assert.equal(/signMessage\s*\(|fetch\s*\(|postDeregister|revisionKey\s*\(|deleteSetting/.test(fn), false);
+});
+test('WP6.1: ownership_failed is contextualized ONLY in the explicit post_close_cleanup path with proven closure', () => {
+  assert.match(svc, /input\?\.context === 'post_close_cleanup'/);
+  assert.match(svc, /code === 'ownership_failed' && closureProven/);
+  const ci = svc.indexOf('let closureProven');
+  const cj = svc.indexOf('const timestamp = deps.nowSec();', ci);
+  const block = svc.slice(ci, cj);
+  assert.match(block, /tomb\.owner === owner/);
+  assert.match(block, /tomb\.vault === vault/);
+  assert.match(block, /tomb\.revokeSig/); // requires a confirmed revoke signature in the tombstone
+});
+test('WP6.1: SettingsScreen exposes a deliberate post-close cleanup action for the closed-vault state', () => {
+  assert.match(screenSrc, /handlePostCloseCleanup/);
+  assert.match(screenSrc, /void runDisable\('post_close_cleanup'\)/);
+  assert.match(screenSrc, /vault_closed_cleanup_pending/);
+});
