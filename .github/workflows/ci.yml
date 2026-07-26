@@ -20,7 +20,7 @@ jobs:
         working-directory: notify-server
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24' # match the runtime (systemd runs node 24); node 20's
           # CJS→ESM lexer misses some @coral-xyz/anchor named re-exports
@@ -45,7 +45,7 @@ jobs:
         working-directory: keeper-bot
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - run: npm ci
@@ -64,7 +64,7 @@ jobs:
         working-directory: dead-mans-vault/app
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24' # needed for `node --test` TypeScript type-stripping
       - run: yarn install --frozen-lockfile
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Install app deps (needed by @app-aliased modules)
@@ -112,7 +112,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Verify release manifest matches source
@@ -177,7 +177,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.89.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       # anchor-cli pulls hidapi (Ledger support) which links libudev at BUILD and
@@ -222,7 +222,7 @@ jobs:
           echo "built IDL program id: $BUILT  (manifest: $WANT)"
           test "$BUILT" = "$WANT" || { echo "::error::built program id ($BUILT) != manifest ($WANT)"; exit 1; }
       - name: Upload build attestation
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-attestation
           path: dead-mans-vault/build-hashes.txt
@@ -253,7 +253,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.89.0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: System deps (libudev for anchor-cli's hidapi)
@@ -296,7 +296,7 @@ jobs:
           anchor test --skip-build --provider.cluster localnet
       - name: Upload validator + program logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-logs
           path: |
