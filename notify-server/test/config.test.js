@@ -1,6 +1,6 @@
 // Config validation tests (Phase 2). config.js reads process.env at import, so each case sets env
 // then imports a FRESH module (cache-busted query) and exercises assertSecureConfig().
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 // The FULL config surface config.js reads at import. We DELETE all of these before applying a test's
@@ -52,14 +52,28 @@ const VALID_PRIVATE_KEY = pem('rsa', { modulusLength: 2048 });
 const ED25519_KEY = pem('ed25519', {});
 
 // Write a temp service-account JSON and return its path.
+// Every temp dir this file creates, so it can clean up exactly those and nothing else.
+const SA_TMP_DIRS = [];
+
 async function writeSA(fields) {
   const { writeFileSync, mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const p = join(mkdtempSync(join(tmpdir(), 'dmv-fcm-')), 'sa.json');
+  const dir = mkdtempSync(join(tmpdir(), 'dmv-fcm-'));
+  SA_TMP_DIRS.push(dir);
+  const p = join(dir, 'sa.json');
   writeFileSync(p, JSON.stringify(fields));
   return p;
 }
+
+// Remove only the directories recorded above, once this file's tests finish (pass or fail).
+// Each mkdtemp path is unique, so this stays safe under parallel runs.
+after(async () => {
+  const { rm } = await import('node:fs/promises');
+  await Promise.all(
+    SA_TMP_DIRS.splice(0).map((d) => rm(d, { recursive: true, force: true }).catch(() => {})),
+  );
+});
 
 test('valid devnet config passes assertSecureConfig', async () => {
   const { assertSecureConfig } = await loadConfig({ ...base });

@@ -3,7 +3,7 @@
 // static-fatal boot must exit non-zero so systemd `Restart=on-failure` surfaces it (a silent exit 0
 // would leave the daemon dead). Complements config.test.js (which unit-tests assertSecureConfig): this
 // proves the actual process wires those checks into a fail-closed exit.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,18 @@ const server = resolve(here, '../src/server.js');
 // A throwaway DB + a NON-production port so a hypothetical happy-boot could never touch the real
 // registrations.db or bind 8787 (the live service). Every case here exits before app.listen anyway.
 const DB = join(tmpdir(), `dmv-boot-test-${process.pid}.db`);
+
+// Clean up the throwaway DB (and any SQLite sidecars) once this file's tests finish, pass or
+// fail. Without this every run left dmv-boot-test-*.db{,-wal,-shm} behind in the OS temp dir.
+// Scoped strictly to the exact paths this file creates — never a broad temp-dir sweep.
+after(async () => {
+  const { rm } = await import('node:fs/promises');
+  await Promise.all(
+    [DB, `${DB}-wal`, `${DB}-shm`, `${DB}-journal`].map((f) =>
+      rm(f, { force: true }).catch(() => {}),
+    ),
+  );
+});
 
 // Strip DMV-specific env so a developer's shell / .env can't leak into the child (e.g. a real
 // REGISTER_SECRET would make the "missing secret" case falsely pass). Keep PATH/HOME etc. for node.
