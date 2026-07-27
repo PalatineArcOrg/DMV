@@ -73,13 +73,26 @@ test('the signed request boundary sends only a content-type header', () => {
 
 test('no background/mount/focus/timer path performs registration', () => {
   // The signed entry points must never be referenced from an effect, timer or listener.
-  const AUTO = /(useEffect|useFocusEffect|setInterval|setTimeout|addListener|addEventListener|AppState)/;
+  // Block-scoped, not line-scoped: scan a window of lines FOLLOWING each auto-trigger opener so a
+  // multi-line `useEffect(() => { void attemptSignedRegistration(...) }, [])` is caught too.
+  // Match auto-trigger CALL SITES (`useEffect(`, `setTimeout(`, `.addListener(` ...), not bare
+  // mentions, and never an import line — then scan the following block so a multi-line
+  // `useEffect(() => { void attemptSignedRegistration(...) }, [])` is caught.
+  const AUTO_CALL = /\b(useEffect|useFocusEffect|setInterval|setTimeout|addListener|addEventListener)\s*\(/;
+  const WINDOW = 25;
   const offenders: string[] = [];
   for (const f of NON_TEST) {
     const s = read(f);
     if (!/attemptSignedRegistration|attemptSignedDeregistration/.test(s)) continue;
-    for (const line of s.split('\n')) {
-      if (AUTO.test(line) && /attemptSigned(Registration|Deregistration)/.test(line)) offenders.push(`${f}: ${line.trim()}`);
+    const lines = s.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*import\b/.test(line)) continue; // an import is not a call site
+      if (!AUTO_CALL.test(line)) continue;
+      const block = lines.slice(i, i + WINDOW).join('\n');
+      if (/attemptSigned(Registration|Deregistration)\s*\(/.test(block)) {
+        offenders.push(`${f}:${i + 1}: ${line.trim()}`);
+      }
     }
   }
   assert.deepEqual(offenders, [], `auto-triggered signing: ${offenders.join(' | ')}`);

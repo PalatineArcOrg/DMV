@@ -102,6 +102,24 @@ test('rotating the register secret cannot change any signed-request outcome', as
   assert.equal(outcomes[0], outcomes[1], `signed outcome differed with/without a valid secret: ${outcomes.join(' vs ')}`);
 });
 
+test('a SUCCESSFUL signed register never consults the legacy secret at all', async () => {
+  // The outcome-independence test above exercises the failed-auth branch (the only place the route
+  // reads the secret, purely for the downgradeBlocked metric). Cover the success branch too: there
+  // the secret must never be read under any circumstances.
+  for (const secretOk of [true, false]) {
+    const { seen, deps } = probeDeps(AUTH_MODE.SIGNED_REQUIRED, { secretOk });
+    deps.authorizeRegisterV2 = async () => ({
+      ok: true,
+      command: { owner: '1'.repeat(43), vault: '2'.repeat(43), revision: 5 },
+    });
+    const { register } = makeRegistrationHandlers(deps);
+    const r = res();
+    await register({ body: { version: 2, action: 'register', ...legacyBody, signature: 'sig', nonce: 'n', timestamp: 1, revision: 5 }, get: () => undefined }, r);
+    assert.equal(r._s, 201, 'signed register accepted');
+    assert.equal(seen.secretChecked, false, 'success path must never read the register secret');
+  }
+});
+
 // ── temp-file hygiene ───────────────────────────────────────────────────────────────────────
 test('serverBoot test cleans up its throwaway database', () => {
   const s = readFileSync(new URL('./serverBoot.test.js', import.meta.url), 'utf8');
