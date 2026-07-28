@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { createPrivateKey, sign } from 'node:crypto';
 import { PublicKey } from '@solana/web3.js';
+import { NOTIFY_AUDIENCE } from './authMessage.js';
 
 // Only an explicit NODE_ENV=development is treated as "dev mode". Anything else
 // (including unset) is treated as production, so the fail-closed secret check
@@ -35,6 +36,18 @@ export const config = {
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '60000', 10),
   dbPath: process.env.DB_PATH || new URL('../data/registrations.db', import.meta.url).pathname,
   registerSecret: process.env.REGISTER_SECRET || '',
+  // Registration authentication mode (WP3): legacy | dual | signed. Raw here;
+  // resolveAuthMode()/assertRegistrationAuthConfig() validate it fail-closed at boot.
+  registrationAuthMode: process.env.REGISTRATION_AUTH_MODE || '',
+  // Server-only admin secret for /poll-now, /execute-now, /debug/push. SEPARATE from
+  // REGISTER_SECRET (which is legacy-registration only). Never exposed in health/logs.
+  adminSecret: process.env.ADMIN_SECRET || '',
+  // The V2 signed-message audience is a FIXED constant, never an env-controlled value.
+  expectedAudience: NOTIFY_AUDIENCE,
+  // Time-bounded legacy-acceptance cutoff (WP4), Unix seconds. Raw here; parsed +
+  // validated (mode-specific) in assertRegistrationAuthConfig. Governs only pure
+  // legacy register/deregister in dual mode.
+  legacyAcceptUntilRaw: process.env.REGISTRATION_LEGACY_ACCEPT_UNTIL ?? '',
   fcmProjectId: process.env.FCM_PROJECT_ID || '',
   fcmServiceAccountPath: process.env.FCM_SERVICE_ACCOUNT || '',
   // Permissionless executor: keyless crank that distributes a vault's assets
@@ -78,7 +91,10 @@ export const crankerLamports = () => ({
  * production misconfiguration cannot silently expose those endpoints.
  */
 export function assertSecureConfig() {
-  if (!config.registerSecret && !isDev) {
+  // Legacy/dual registration is gated by REGISTER_SECRET; signed mode needs no
+  // shared secret (owner signatures replace it), so a signed-mode deploy may boot
+  // without one. The full mode matrix is validated in assertRegistrationAuthConfig().
+  if (!config.registerSecret && !isDev && config.registrationAuthMode !== 'signed') {
     throw new Error(
       'REGISTER_SECRET is not set. Refusing to start with unauthenticated write ' +
         'endpoints. Set REGISTER_SECRET in .env, or set NODE_ENV=development to ' +
@@ -203,6 +219,118 @@ export function assertSecureConfig() {
       throw new Error(
         `FCM_PROJECT_ID (${config.fcmProjectId}) conflicts with the service-account project_id (${sa.project_id}).`,
       );
+    }
+  }
+}
+
+// ── Registration authentication modes (WP3) ─────────────────────────────────
+// legacy: unsigned x-dmv-secret path only (dev only). dual: signed OR legacy,
+// with no downgrade from a failed signed attempt. signed: owner-signed only.
+export const AUTH_MODE = Object.freeze({
+  LEGACY_ONLY: 'legacy',
+  DUAL_ACCEPT: 'dual',
+  SIGNED_REQUIRED: 'signed',
+});
+const VALID_AUTH_MODES = new Set(['legacy', 'dual', 'signed']);
+
+/**
+ * Resolve + validate REGISTRATION_AUTH_MODE. Fail-closed: a missing mode defaults
+ * to 'legacy' ONLY under explicit NODE_ENV=development; outside dev a missing mode
+ * is fatal. An unknown value is always fatal. No trim/lowercase/alias/repair.
+ */
+export function resolveAuthMode() {
+  const raw = config.registrationAuthMode; // captured from env at import (single source)
+  if (raw === undefined || raw === '') {
+    if (isDev) return AUTH_MODE.LEGACY_ONLY;
+    throw new Error(
+      'REGISTRATION_AUTH_MODE is required (legacy|dual|signed) outside NODE_ENV=development.',
+    );
+  }
+  if (!VALID_AUTH_MODES.has(raw)) {
+    throw new Error(`Invalid REGISTRATION_AUTH_MODE "${raw}" — must be exactly legacy, dual, or signed.`);
+  }
+  return raw;
+}
+
+// Max future legacy-acceptance window: 30 days (WP4). A longer window is refused so
+// a stale transition config can't keep legacy writes open indefinitely.
+const MAX_LEGACY_WINDOW_SEC = 30 * 24 * 60 * 60;
+
+/**
+ * Parse REGISTRATION_LEGACY_ACCEPT_UNTIL (WP4). Returns null when absent/empty,
+ * otherwise a canonical positive Unix-seconds integer. Rejects leading-zero, sign,
+ * whitespace, fraction, exponent, date-string, and unsafe-integer forms — no
+ * trimming/coercion/repair. Throws on a malformed value.
+ */
+export function parseLegacyAcceptUntil(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new Error('Invalid REGISTRATION_LEGACY_ACCEPT_UNTIL — must be a canonical positive Unix-seconds integer.');
+  }
+  return Number(raw);
+}
+
+/**
+ * Fail-closed boot validation of the registration-auth surface. Called at boot
+ * AFTER assertSecureConfig()/executor static config (so pre-existing static faults
+ * surface first). Enforces the full mode/cluster/secret matrix + the WP4 legacy
+ * window. Throws (→ exit 1) on any violation. Error messages never contain a
+ * secret value. `now()` (Unix seconds) is injectable for tests.
+ */
+export function assertRegistrationAuthConfig({ now = () => Math.floor(Date.now() / 1000) } = {}) {
+  const mode = resolveAuthMode();
+
+  // legacy is a development-only convenience — never a production posture.
+  if (mode === AUTH_MODE.LEGACY_ONLY && !isDev) {
+    throw new Error('REGISTRATION_AUTH_MODE=legacy is only permitted with NODE_ENV=development.');
+  }
+  // Mainnet must run signed-only — no legacy/dual downgrade window on mainnet.
+  if (config.expectedCluster === 'mainnet-beta' && mode !== AUTH_MODE.SIGNED_REQUIRED) {
+    throw new Error('REGISTRATION_AUTH_MODE must be "signed" on mainnet-beta.');
+  }
+  // legacy/dual accept the shared secret path → they require a non-empty secret.
+  // signed mode needs none (owner signatures replace it).
+  if ((mode === AUTH_MODE.LEGACY_ONLY || mode === AUTH_MODE.DUAL_ACCEPT) && !config.registerSecret && !isDev) {
+    throw new Error('REGISTER_SECRET is required for REGISTRATION_AUTH_MODE=legacy or dual.');
+  }
+  // Every non-development deployment must have a distinct admin secret for the
+  // operational routes (/poll-now, /execute-now, /debug/push).
+  if (!config.adminSecret && !isDev) {
+    throw new Error('ADMIN_SECRET is required outside NODE_ENV=development.');
+  }
+  if (config.adminSecret && config.registerSecret && config.adminSecret === config.registerSecret) {
+    throw new Error('ADMIN_SECRET must not equal REGISTER_SECRET.');
+  }
+  // Trusted V2 authorization context must be complete + canonical.
+  if (!GENESIS_HASHES[config.expectedCluster]) {
+    throw new Error('Registration auth requires a valid EXPECTED_CLUSTER (devnet|mainnet-beta).');
+  }
+  try {
+    new PublicKey(config.programId); // eslint-disable-line no-new
+  } catch {
+    throw new Error('Registration auth requires a valid PROGRAM_ID.');
+  }
+  if (config.expectedAudience !== NOTIFY_AUDIENCE) {
+    throw new Error('Registration auth audience must equal the approved constant.');
+  }
+
+  // ── WP4: legacy-acceptance window (mode-specific) ──────────────────────────
+  // Ordered LAST so the WP3 boot/config faults above always surface first.
+  if (mode === AUTH_MODE.DUAL_ACCEPT) {
+    const until = parseLegacyAcceptUntil(config.legacyAcceptUntilRaw); // throws on malformed
+    if (until === null) {
+      throw new Error('REGISTRATION_LEGACY_ACCEPT_UNTIL is required for REGISTRATION_AUTH_MODE=dual.');
+    }
+    const t = now();
+    if (until > t && until - t > MAX_LEGACY_WINDOW_SEC) {
+      throw new Error('REGISTRATION_LEGACY_ACCEPT_UNTIL must be at most 30 days in the future.');
+    }
+    // An already-expired cutoff is allowed: the server boots effective signed-only.
+  } else {
+    // signed + (dev) legacy must NOT carry a cutoff — a non-empty value is a stale
+    // transition config and is fatal.
+    if (config.legacyAcceptUntilRaw !== '') {
+      throw new Error(`REGISTRATION_LEGACY_ACCEPT_UNTIL must be absent for REGISTRATION_AUTH_MODE=${mode}.`);
     }
   }
 }

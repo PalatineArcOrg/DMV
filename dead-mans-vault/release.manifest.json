@@ -6,7 +6,7 @@
   "feeWallet": "98x9Rn63Ne8xbL3w522zgbuYg9bdHn7cRqJQVCUZUFsp",
   "notifyApi": "https://notify.palatinearc.com",
   "webUrl": "https://dmvapp.palatinearc.com",
-  "appVersion": "1.13.20",
-  "versionCode": 106,
+  "appVersion": "1.13.21",
+  "versionCode": 107,
   "idlSha256": "970d83fc07ecd448b459e44cbeee77a62cf427c65dfc956d3b3cef19ce558273"
 }

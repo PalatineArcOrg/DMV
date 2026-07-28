@@ -1,21 +1,36 @@
 import express from 'express';
-import { timingSafeEqual } from 'node:crypto';
 import { PublicKey } from '@solana/web3.js';
-import { config, isDev, assertSecureConfig } from './config.js';
 import {
-  upsertRegistration,
-  deleteRegistration,
-  deleteRegistrationsByOwner,
+  config, isDev, assertSecureConfig, assertRegistrationAuthConfig, resolveAuthMode, parseLegacyAcceptUntil,
+} from './config.js';
+import {
+  deleteLegacyRegistrationsByOwner,
   countRegistrations,
   allRegistrations,
-  claimNonce,
   pruneNonces,
+  getRegistration,
+  applySignedRegistration,
+  applySignedDeregistration,
+  applyLegacyRegistration,
+  deleteLegacyRegistration,
+  migrationCounts,
 } from './db.js';
 import { probeFcm, setFcmObserver, tokFingerprint } from './fcm.js';
 import { startPoller, pollOnce } from './poller.js';
 import { executorReady, crankerPubkey, runExecutor, executorStaticConfig, checkExecutorRuntime } from './executor.js';
-import { readVaultState, verifyVaultForOwner, classifyNetwork, checkProgram } from './solana.js';
-import { validateRegister, validateDeregister, SIG_WINDOW_SEC } from './registerAuth.js';
+import { readVaultState, verifyVaultForOwner, getConnection, classifyNetwork, checkProgram } from './solana.js';
+// SIG_WINDOW_SEC comes from the V2 authorizer: the used_nonces are V2
+// signed-registration nonces, so the prune horizon must track the V2 freshness
+// window (PR review LOW-A1) — coupling it to V1's would let a future independent
+// V2-window increase prune a still-fresh nonce and reopen a replay gap.
+import { authorizeRegisterV2, authorizeDeregisterV2, makeOwnershipVerifier, SIG_WINDOW_SEC } from './registerAuthV2.js';
+import { sha256Hex } from './authMessage.js';
+import { makeRegistrationHandlers } from './registrationRoutes.js';
+import { makeLegacySecretCheck, makeAdminGate } from './secretGate.js';
+import { makeWriteRateLimiter } from './writeRateLimiter.js';
+import { makeTransitionController } from './transitionState.js';
+import { makeAuthMetrics } from './authMetrics.js';
+import { makeRegistrationAuthStatusHandler } from './adminStatusRoute.js';
 import { readiness, NET, HEALTH, nextBackoff, bootDecision } from './readiness.js';
 import { makeExecuteNowHandler, makePollNowHandler } from './routes.js';
 import { installFatalGuards, sanitize } from './fatalGuards.js';
@@ -71,6 +86,10 @@ setInterval(() => {
   const now = Date.now();
   for (const [ip, b] of rateBuckets) if (now >= b.resetAt) rateBuckets.delete(ip);
   for (const [k, v] of vaultCache) if (now - v.at >= VAULT_CACHE_TTL_MS) vaultCache.delete(k);
+  // Prune the write-endpoint rate-limiter's fixed-window buckets (PR review INFO-B1):
+  // the in-hit prune only fires when a map exceeds its cap, so sweep expired buckets
+  // here too to keep memory bounded under a sustained distinct-key flood.
+  try { writeLimiter.sweep(); } catch { /* non-fatal */ }
   // Used nonces older than 2× the signature window can be dropped — a replay that
   // old is already rejected by the timestamp check.
   try {
@@ -90,54 +109,127 @@ function isPubkey(s) {
   }
 }
 
-// Dependencies passed to the owner-signed register/deregister validators.
-const authDeps = {
-  verifyVaultForOwner,
-  claimNonce,
-  now: () => Math.floor(Date.now() / 1000),
-};
-
-// Constant-time comparison of the shared secret to avoid a timing side-channel.
-function secretMatches(provided) {
-  if (typeof provided !== 'string' || provided.length !== config.registerSecret.length) {
-    return false;
-  }
-  try {
-    return timingSafeEqual(Buffer.from(provided), Buffer.from(config.registerSecret));
-  } catch {
-    return false;
-  }
+// Real client IP for the write/admin rate limiters. Behind Cloudflare
+// CF-Connecting-IP is the true client; otherwise Caddy's X-Forwarded-For →
+// req.ip (trust proxy = loopback). Same policy as the /rpc limiter.
+function clientIp(req) {
+  return req.headers['cf-connecting-ip'] || req.ip || 'unknown';
 }
 
-// Shared-secret gate for write endpoints (the app sends the same secret).
-// Fail-closed: with no secret configured, only an explicit dev build is allowed
-// through — production refuses to boot without one (see assertSecureConfig), so
-// the 503 branch is defense-in-depth that should never be reached in prod.
-// NOTE: the shared secret is shipped inside the app bundle (EXPO_PUBLIC_*), so it
-// is extractable and provides weak authenticity only. Sensitive state changes
-// (registration) are additionally ownership-proofed on-chain in /register, and
-// deregister/token-rebinding should move to an owner-wallet signature (follow-up).
-function requireSecret(req, res, next) {
-  if (!config.registerSecret) {
-    if (isDev) return next();
-    return res.status(503).json({ error: 'server misconfigured' });
-  }
-  if (secretMatches(req.get('x-dmv-secret'))) return next();
-  return res.status(401).json({ error: 'unauthorized' });
+// ── Fail-closed STATIC config gates (before any route/handler is constructed) ──
+// STATIC config faults are fatal (exit non-zero so systemd Restart=on-failure
+// surfaces them). Order: base secure config → static executor config → the
+// registration-auth matrix. A pre-existing static fault therefore surfaces first.
+try {
+  assertSecureConfig();
+} catch (e) {
+  console.error(`[boot] ${sanitize(e?.message || e)}`);
+  process.exit(1);
 }
+const execStatic = executorStaticConfig();
+if (execStatic.fatal) {
+  console.error(`[boot] FATAL executor config: ${execStatic.reason}`);
+  process.exit(1);
+}
+let authMode;
+try {
+  assertRegistrationAuthConfig();
+  authMode = resolveAuthMode();
+} catch (e) {
+  console.error(`[boot] ${sanitize(e?.message || e)}`);
+  process.exit(1);
+}
+
+// ── WP4: registration-auth transition controller + metrics ────────────────────
+// The legacy-acceptance cutoff was validated by assertRegistrationAuthConfig above;
+// parse it (non-throwing here). The controller holds a one-way in-process expiry
+// latch (dual only); metrics are fixed-cardinality + process-local.
+const nowSec = () => Math.floor(Date.now() / 1000);
+const legacyAcceptUntil = parseLegacyAcceptUntil(config.legacyAcceptUntilRaw);
+const authMetrics = makeAuthMetrics({ now: nowSec });
+const transition = makeTransitionController({
+  mode: authMode,
+  legacyAcceptUntil,
+  now: nowSec,
+  onFirstExpiry: (ts) => {
+    console.log('[registration-auth] legacy acceptance window expired; signed requests remain enabled');
+    authMetrics.legacyExpiryObserved(ts);
+  },
+});
+{
+  const bs = transition.get();
+  console.log(
+    `[registration-auth] configured ${authMode} effective ${bs.effectiveMode} legacyAccepting ${bs.legacyAccepting}` +
+      (authMode === 'dual' ? ` until ${bs.legacyAcceptUntil}` : ''),
+  );
+}
+
+// Write-endpoint rate limiter (register/deregister/admin). Separate from the
+// public-read + RPC limiters. Clock-injected so it is unit-testable.
+const writeLimiter = makeWriteRateLimiter({ now: () => Date.now() });
+
+// Transient-aware ownership verifier for the SIGNED path — classifies an RPC
+// transport failure as retryable (dependency_unavailable), never a definitive 403.
+// (The V1 verifyVaultForOwner conflates the two; it is used ONLY by the legacy path.)
+const ownershipVerifier = makeOwnershipVerifier(
+  (vault) => getConnection().getAccountInfo(new PublicKey(vault)),
+  { programId: config.programId },
+);
+
+const registrationHandlers = makeRegistrationHandlers({
+  mode: authMode,
+  expected: { cluster: config.expectedCluster, programId: config.programId, audience: config.expectedAudience },
+  authorizeRegisterV2,
+  authorizeDeregisterV2,
+  verifyOwnership: ownershipVerifier,
+  getRegistration,
+  applySignedRegistration,
+  applySignedDeregistration,
+  applyLegacyRegistration,
+  deleteLegacyRegistration,
+  deleteLegacyRegistrationsByOwner,
+  legacyOwnerVerify: verifyVaultForOwner,
+  legacySecretOk: makeLegacySecretCheck(config.registerSecret),
+  limiter: writeLimiter,
+  clientIp,
+  now: nowSec,
+  logger: console,
+  tokFingerprint,
+  sha256Hex,
+  isPubkey,
+  transition,
+  metrics: authMetrics,
+});
+
+// Admin gate for the operational routes — a DEDICATED admin secret + header,
+// separate from legacy registration auth.
+const adminGate = makeAdminGate({ adminSecret: config.adminSecret, isDev, limiter: writeLimiter, clientIp });
+// A scoped admin gate for the status endpoint that also counts auth failures.
+const statusAdminGate = makeAdminGate({
+  adminSecret: config.adminSecret, isDev, limiter: writeLimiter, clientIp,
+  onAuthFailure: () => authMetrics.adminAuthFailure(),
+});
 
 // Readiness/health: READY | DEGRADED | NOT_READY with per-domain booleans, machine-readable reason
 // codes, verification timestamps and the cranker balance — but NO secrets, keypairs, or RPC URL.
 // 503 only when NOT_READY (listener down or a confirmed cluster MISMATCH); DEGRADED still serves 200.
 app.get('/health', (req, res) => {
   const snap = readiness.snapshot();
+  const ts = transition.get();
   res.status(snap.status === HEALTH.NOT_READY ? 503 : 200).json({
     ...snap,
     cranker: crankerPubkey(),
     registrations: countRegistrations(),
     programId: config.programId,
     cluster: config.expectedCluster,
-    // NB: the RPC URL is intentionally NOT exposed here (even masked) — /health is public via Caddy.
+    registrationAuthMode: authMode,
+    // WP4: minimal transition visibility. Window expiry is an intended security
+    // transition, NOT a health degradation — status/HTTP code are unaffected.
+    registrationAuthEffectiveMode: ts.effectiveMode,
+    legacyRegistrationAccepting: ts.legacyAccepting,
+    legacyRegistrationAcceptUntil: ts.legacyAcceptUntil,
+    // NB: migration counts / metrics / blockers / RPC URL / secrets are NOT exposed
+    // here — /health is public via Caddy. See the admin-only status endpoint.
   });
 });
 
@@ -187,57 +279,26 @@ app.get('/inheritances', rateLimit, async (req, res) => {
   res.json({ wallet, inheritances: out, ...(truncated ? { truncated: true, scanned: scan.length } : {}) });
 });
 
-// NOTE: unsigned registration is the ACTIVE path — integrity comes from the
-// on-chain OWNERSHIP PROOF below (verifyVaultForOwner). It must stay matched with
-// the app, which sends unsigned. The owner-SIGNED validators (validateRegister/
-// validateDeregister in registerAuth.js) are kept DORMANT for mainnet: switching
-// to them requires the app to sign on register too — deploy the two together,
-// with a transition window that accepts both. See PushRegistrationService in the
-// app for the activation checklist.
-app.post('/register', requireSecret, async (req, res) => {
-  const { owner, vault, deviceToken, stage1, stage2, stage3 } = req.body || {};
-  if (!isPubkey(owner) || !isPubkey(vault)) {
-    return res.status(400).json({ error: 'invalid owner/vault pubkey' });
-  }
-  if (typeof deviceToken !== 'string' || deviceToken.length < 10) {
-    return res.status(400).json({ error: 'invalid deviceToken' });
-  }
-  const s1 = Number(stage1), s2 = Number(stage2), s3 = Number(stage3);
-  if (![s1, s2, s3].every((n) => Number.isFinite(n) && n > 0)) {
-    return res.status(400).json({ error: 'invalid stage durations' });
-  }
+// Registration routes (WP3). The handler does classification + auth-mode routing +
+// rate limiting internally: a signed request (any V2 envelope field) always takes
+// the owner-signed V2 path and never falls back to legacy; a pure legacy request
+// takes the unsigned x-dmv-secret + on-chain ownership-proof path (dual/legacy
+// modes) or is rejected (signed mode). Signed rows are immutable via the legacy
+// path (stickiness). See registrationRoutes.js / registerAuthV2.js.
+app.post('/register', registrationHandlers.register);
+app.post('/deregister', registrationHandlers.deregister);
 
-  // Ownership proof: `vault` must be the canonical PDA for `owner` and a real
-  // on-chain DMV VaultConfig whose stored owner matches. Blocks garbage/mismatched
-  // registrations and fake-vault injection into /inheritances. (Residual gap: does
-  // not prove the CALLER holds the owner key — that's what the dormant signed path
-  // adds for mainnet.)
-  let verdict;
-  try {
-    verdict = await verifyVaultForOwner(owner, vault);
-  } catch {
-    return res.status(502).json({ error: 'vault verification unavailable' });
-  }
-  if (!verdict.ok) {
-    return res.status(403).json({ error: `vault verification failed: ${verdict.reason}` });
-  }
-
-  upsertRegistration({ owner, vault, deviceToken, stage1: s1, stage2: s2, stage3: s3 });
-  console.log(`[register] vault ${vault.slice(0, 8)} owner ${owner.slice(0, 8)} ${tokFingerprint(deviceToken)} stages ${s1}/${s2}/${s3}`);
-  res.json({ ok: true });
-});
-
-app.post('/deregister', requireSecret, (req, res) => {
-  const { vault, owner } = req.body || {};
-  let removed = 0;
-  if (vault && isPubkey(vault)) removed += deleteRegistration(vault);
-  else if (owner && isPubkey(owner)) removed += deleteRegistrationsByOwner(owner);
-  else return res.status(400).json({ error: 'vault or owner required' });
-  res.json({ ok: true, removed });
-});
+// Admin-only registration-auth status (WP4): transition state + aggregate
+// migration counts + fixed metrics snapshot + cutover readiness. Read-only; no row
+// data / token / secret. ADMIN_SECRET gate + admin IP limiter (statusAdminGate).
+app.get(
+  '/admin/registration-auth/status',
+  statusAdminGate,
+  makeRegistrationAuthStatusHandler({ transition, migrationCounts, metrics: authMetrics, now: nowSec }),
+);
 
 // Manual trigger for testing. Refuses unless the network is positively VERIFIED.
-app.post('/poll-now', requireSecret, makePollNowHandler({ readiness, pollOnce }));
+app.post('/poll-now', adminGate, makePollNowHandler({ readiness, pollOnce }));
 
 // Manually crank a single vault's execution (testing the autonomous path). The handler passes the
 // executor a LIVE fail-closed guard (canSubmit = () => readiness.executorReady), re-checked before
@@ -245,7 +306,7 @@ app.post('/poll-now', requireSecret, makePollNowHandler({ readiness, pollOnce })
 // mid-crank, not just at the entry gate.
 app.post(
   '/execute-now',
-  requireSecret,
+  adminGate,
   makeExecuteNowHandler({
     readiness,
     executorReady,
@@ -259,7 +320,7 @@ app.post(
 // in production — an arbitrary title/body push to any FCM token is a phishing
 // primitive that must not exist on a mainnet deployment.
 if (isDev) {
-  app.post('/debug/push', requireSecret, async (req, res) => {
+  app.post('/debug/push', adminGate, async (req, res) => {
     const { token, title, body, channel } = req.body || {};
     if (typeof token !== 'string' || token.length < 20) {
       return res.status(400).json({ error: 'valid token required' });
@@ -411,18 +472,13 @@ async function monitorTick() {
   scheduleMonitor(cadence);
 }
 
-// ── Fail-closed boot ─────────────────────────────────────────────────────────
-// STATIC config failures are fatal (exit non-zero, so systemd `Restart=on-failure` retries — a
-// silent exit 0 would leave the daemon dead). A positive genesis MISMATCH at boot is fatal. A
-// transient UNKNOWN network is NOT fatal → boot DEGRADED and let the monitor recover WITHOUT a
-// restart. The boot classify runs inside the same guard so a top-level-await throw can't be
-// swallowed by the uncaughtException handler above (→ exit 0 → no restart).
-try {
-  assertSecureConfig();
-} catch (e) {
-  console.error(`[boot] ${sanitize(e?.message || e)}`);
-  process.exit(1);
-}
+// ── Fail-closed boot (network) ───────────────────────────────────────────────
+// The STATIC config gates (assertSecureConfig, static executor config, and the
+// registration-auth matrix) already ran fail-closed at the top of this module,
+// before any handler was constructed. A positive genesis MISMATCH at boot is
+// fatal; a transient UNKNOWN network is NOT fatal → boot DEGRADED and let the
+// monitor recover WITHOUT a restart. The boot classify runs inside a guard so a
+// top-level-await throw can't be swallowed by the uncaughtException handler above.
 readiness.fcmWaived = config.allowNoFcm;
 readiness.executorWaived = !config.executorEnabled || config.allowNoExecutor;
 
@@ -430,15 +486,6 @@ readiness.executorWaived = !config.executorEnabled || config.allowNoExecutor;
 // the /health readiness singleton synchronously, so a send failure between monitor ticks demotes
 // /health immediately (no two-states-disagree window). Wired before the first probeFcm below.
 setFcmObserver((ready, reason) => readiness.setFcm(ready, reason));
-
-// STATIC executor key validation is FATAL before listening (§2.3): a missing/unreadable/malformed
-// required keypair — or an expected-pubkey mismatch — is a broken LOCAL deployment, not a transient
-// dependency. Validating it locally (no RPC) ensures a transient RPC outage can never disguise it.
-const execStatic = executorStaticConfig();
-if (execStatic.fatal) {
-  console.error(`[boot] FATAL executor config: ${execStatic.reason}`);
-  process.exit(1);
-}
 
 try {
   const net = await classifyNetwork();

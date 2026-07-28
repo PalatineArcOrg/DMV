@@ -5,6 +5,7 @@ import { useVaultStore } from '../store/useVaultStore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
 import { deleteSetting } from '../db/settingsRepo';
+import { computeReturnedSol } from './revokeReturnedSol';
 
 /** A single on-chain transaction produced during revoke, for the UI breakdown. */
 export interface TxRef {
@@ -73,8 +74,15 @@ export async function revokeVault(
   // (deregister now requires an owner signature, so we don't do a separate signed
   // call here — the on-chain close is the source of truth and needs no extra prompt).
 
-  // Owner balance BEFORE anything — used to measure the true total returned.
-  const ownerBalBefore = await connection.getBalance(publicKey, 'confirmed');
+  // Owner balance BEFORE anything — used ONLY to measure the returned-SOL total for the
+  // summary. Best-effort: a transient RPC failure here must NOT block the revoke (the figure
+  // is cosmetic; the on-chain close is the source of truth). Unknown → the summary omits it.
+  let ownerBalBefore: number | null = null;
+  try {
+    ownerBalBefore = await connection.getBalance(publicKey, 'confirmed');
+  } catch {
+    ownerBalBefore = null;
+  }
   const txs: TxRef[] = [];
 
   // Always attempt agent SOL refund regardless of vault state so the agent
@@ -109,12 +117,17 @@ export async function revokeVault(
     refundError = e?.message || 'Unknown error';
   }
 
-  const finish = async (): Promise<{ totalReturnedSol: number; vaultReturnedSol: number }> => {
-    const ownerBalAfter = await connection.getBalance(publicKey, 'confirmed');
-    const totalReturnedSol = Math.max(0, (ownerBalAfter - ownerBalBefore) / LAMPORTS_PER_SOL);
-    const vaultReturnedSol = Math.max(0, totalReturnedSol - agentRefundedSol);
-    return { totalReturnedSol, vaultReturnedSol };
-  };
+  // The returned-SOL figures are COSMETIC (shown in the summary). Reading the post-close
+  // balance must NEVER reject a revoke whose on-chain close already succeeded — otherwise the
+  // caller's success path (which reconciles the notification state) is skipped, leaving a
+  // stale "enabled". computeReturnedSol fails soft to unknown (0) on any read failure.
+  const finish = (): Promise<{ totalReturnedSol: number; vaultReturnedSol: number }> =>
+    computeReturnedSol(
+      () => connection.getBalance(publicKey, 'confirmed'),
+      ownerBalBefore,
+      agentRefundedSol,
+      LAMPORTS_PER_SOL,
+    );
 
   if (vault && vault.active && !vault.executed) {
     // Active vault: withdraw assets + revoke on-chain
@@ -156,7 +169,7 @@ export async function revokeVault(
     useVaultStore.getState().reset();
     useHeartbeatStore.getState().reset();
     useEscalationStore.getState().reset();
-    await deleteSetting('heartbeat_config');
+    try { await deleteSetting('heartbeat_config'); } catch { /* local cleanup best-effort; the on-chain close already succeeded */ }
 
     const { totalReturnedSol, vaultReturnedSol } = await finish();
     return {
@@ -206,7 +219,7 @@ export async function revokeVault(
   useVaultStore.getState().reset();
   useHeartbeatStore.getState().reset();
   useEscalationStore.getState().reset();
-  await deleteSetting('heartbeat_config');
+  try { await deleteSetting('heartbeat_config'); } catch { /* local cleanup best-effort */ }
 
   const { totalReturnedSol, vaultReturnedSol } = await finish();
   return {

@@ -53,7 +53,11 @@ export const KEEPER_BOUNTY_LAMPORTS = 5_000_000;
  *  above this is rejected by the program; validate client-side first for a clear
  *  error instead of a raw on-chain failure. */
 export const MAX_KEEPER_BOUNTY_LAMPORTS = 100_000_000;
-export const NOTIFY_SECRET = process.env.EXPO_PUBLIC_NOTIFY_SECRET || '';
+// NOTE: no app-side notify registration secret exists any more. The former
+// former public notify-secret env alias shipped a server secret inside the APK bundle; it was
+// published in v1.13.20, is permanently burned, has been rotated server-side, and must
+// never be reintroduced. Registration is owner-signed only (see
+// NotificationRegistrationService); the live server rejects legacy writes outright.
 
 export const JUPITER_QUOTE_API = 'https://quote-api.jup.ag/v6';
 export const JUPITER_SWAP_API = 'https://quote-api.jup.ag/v6/swap';

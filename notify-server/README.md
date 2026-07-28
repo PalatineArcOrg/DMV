@@ -13,7 +13,7 @@ Live at **`notify.palatinearc.com`** (Caddy → `127.0.0.1:8787`), running under
 
 ## How it works
 
-The app registers each vault with `POST /register` (owner, vault PDA, FCM device token, stage durations) on setup and heartbeat. A poller then runs every `POLL_INTERVAL_MS` (set to **15s** — coarser intervals could skip short demo-mode stages, e.g. 30s each, and miss a notification):
+The app registers each vault with `POST /register` (owner, vault PDA, FCM device token, stage durations) from a **deliberate Settings action only** — one owner wallet message signature per registration. There is no automatic registration on setup, heartbeat, mount, focus or any timer. A poller then runs every `POLL_INTERVAL_MS` (set to **15s** — coarser intervals could skip short demo-mode stages, e.g. 30s each, and miss a notification):
 
 - Reads each registered vault's `VaultConfig` + `HeartbeatRecord` on-chain.
 - Computes the escalation stage; on a stage transition (or throttled recurring), sends the matching FCM push.
@@ -49,14 +49,19 @@ It never closes the core PDAs — that cleanup is the owner's (`close_executed_v
 | `GET`  | `/inheritances?wallet=<pubkey>` | rate-limited | Read-only. Returns the vaults where `wallet` is a beneficiary, each with `{ vault, owner, shareBps, status, deadline, secondsToDeadline }` (status = active \| warning \| claimable \| executed). Per-IP rate limit + short-TTL cache of on-chain reads; scan capped. Powers the app's Inheritances screen |
 | `GET`  | `/nft/<id>.json` | — | Static NFT metadata for devnet test collectibles (served from the `nft-metadata/` directory) |
 | `GET`  | `/nft/<id>.png` | — | Static NFT test image, self-hosted alongside the metadata JSON (same `nft-metadata/` static route) |
-| `POST` | `/register` | `x-dmv-secret` + on-chain proof | Register/update a vault: `{ owner, vault, deviceToken, stage1, stage2, stage3 }`. The vault must be the canonical PDA for `owner` and a real on-chain `VaultConfig` whose stored owner matches |
-| `POST` | `/deregister` | `x-dmv-secret` | Remove by `{ vault }` or `{ owner }` |
-| `POST` | `/poll-now` | `x-dmv-secret` | Run one poll tick immediately (testing) |
-| `POST` | `/execute-now` | `x-dmv-secret` | Manually crank one vault's execution: `{ vault }` (testing). Returns a generic error on failure (raw errors can embed the RPC api-key) |
-| `POST` | `/debug/push` | `x-dmv-secret`, **dev only** | Send one test FCM push: `{ token, title?, body?, channel? }`. Only mounted when `NODE_ENV=development` — an arbitrary push to any token is a phishing primitive and is not exposed in production |
+| `POST` | `/register` | **owner-signed V2 envelope** + on-chain proof | Register/update a vault: `{ owner, vault, deviceToken, stage1, stage2, stage3 }`. The vault must be the canonical PDA for `owner` and a real on-chain `VaultConfig` whose stored owner matches |
+| `POST` | `/deregister` | **owner-signed V2 envelope** | Remove by `{ vault }` (owner-scoped legacy removal is rejected in `signed` mode) |
+| `POST` | `/poll-now` | `x-dmv-admin-secret` | Run one poll tick immediately (testing) |
+| `POST` | `/execute-now` | `x-dmv-admin-secret` | Manually crank one vault's execution: `{ vault }` (testing). Returns a generic error on failure (raw errors can embed the RPC api-key) |
+| `POST` | `/debug/push` | `x-dmv-admin-secret`, **dev only** | Send one test FCM push: `{ token, title?, body?, channel? }`. Only mounted when `NODE_ENV=development` — an arbitrary push to any token is a phishing primitive and is not exposed in production |
 | `POST` | `/rpc` | CORS-scoped, rate-limited | JSON-RPC proxy. Forwards the request body to `config.rpcUrl` (the Helius devnet RPC) so the **Helius api-key stays server-side** and is never shipped in the web app's browser bundle. The default RPC for the web claim portal / owner console at `dmvapp.palatinearc.com` (users can override with their own RPC in the app's Settings → Network) |
 
-`x-dmv-secret` must match `REGISTER_SECRET` (compared in constant time). `/health` masks the RPC api-key so the (public) endpoint never leaks it.
+Registration auth: the devnet service runs `REGISTRATION_AUTH_MODE=signed`, so `/register` and
+`/deregister` accept **only** a deliberate owner-signed V2 envelope. A legacy shared-secret request is
+rejected with `409 signed_required` **before** the secret, the ownership RPC or the database is
+touched — a valid secret cannot rescue it and an invalid one is no oracle. The admin routes above use
+a separate `x-dmv-admin-secret` matching `ADMIN_SECRET` (constant-time), never `REGISTER_SECRET`.
+`/health` masks the RPC api-key so the (public) endpoint never leaks it.
 
 ### `POST /rpc` — browser RPC proxy
 
@@ -133,7 +138,12 @@ Copy `.env.example` → `.env` (mode `600`) and fill it in. Key vars:
 - `EXECUTOR_ENABLED` — `1` to enable autonomous execution.
 - `ALLOW_NO_EXECUTOR` — `0` (default). On `EXPECTED_CLUSTER=mainnet-beta` the server **requires `EXECUTOR_ENABLED=1`** (else it exits at startup), so a crankerless mainnet can't ship by accident. Set `1` to deliberately run **notify-only** on mainnet (cranking delegated to the independent keeper-bot).
 - `CRANKER_KEYPAIR` — absolute path to a `solana-keygen` JSON keypair, funded with a little devnet SOL. **Gitignored.** Only pays fees/rent. Monitor its balance (the executor caps per-vault spend, but running the crank still costs fees/rent).
-- `REGISTER_SECRET` — **required in production** (the server won't start without it). Long random string; the app sends it as `x-dmv-secret`. Extractable from the app bundle, so treated as weak auth — registration is additionally ownership-proofed on-chain.
+- `REGISTER_SECRET` — **required in production** (the server won't start without it), but **dormant**
+  under `REGISTRATION_AUTH_MODE=signed`: the legacy branch is rejected before the secret is read, so it
+  authenticates nothing. **No client sends it.** The app never contained it after the Phase 3
+  finalisation, and the value that WAS published in the v1.13.20 bundle has been rotated. Never
+  reintroduce a registration secret into a client — a shipped secret is extractable and permanently
+  burned.
 - `RPC_ALLOWED_ORIGIN` — *optional* (default `https://dmvapp.palatinearc.com`). The CORS origin allowed to use `POST /rpc`.
 - `FCM_PROJECT_ID`, `FCM_SERVICE_ACCOUNT` — as documented in `.env.example`.
 

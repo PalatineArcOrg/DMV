@@ -1,0 +1,25 @@
+{
+  "_note": "Public synthetic test data for the DMV V2 owner-signed notification contract. Shared by notify-server and app tests. Contains NO production device token, private key, keypair, signature, credential, or RPC URL. Do not add any.",
+  "cluster": "devnet",
+  "programId": "GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb",
+  "audience": "https://notify.palatinearc.com",
+  "owner": "DX5qF21LFK67wjfEAw1idZm9eRyrqKDSjFBVUxZdUunM",
+  "vault": "6p4J4Txnr2e6aa4TSNBKqooa5njRJS1uSfU4MyjkYp7T",
+  "deviceTokenHash": "3d9aa6f82752242327402b8d6c432528bfe05cbc61e2c2cf100a8d7255c4498d",
+  "stage1": 259200,
+  "stage2": 604800,
+  "stage3": 604800,
+  "revision": 1,
+  "timestamp": 1784500000,
+  "nonce": "6DspQZLuktpnPitfWYxbDq",
+  "register": {
+    "message": "DMV_NOTIFY_REGISTER_V2\nversion=2\ncluster=devnet\nprogramId=GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb\naudience=https://notify.palatinearc.com\naction=register\nowner=DX5qF21LFK67wjfEAw1idZm9eRyrqKDSjFBVUxZdUunM\nvault=6p4J4Txnr2e6aa4TSNBKqooa5njRJS1uSfU4MyjkYp7T\ndeviceTokenHash=3d9aa6f82752242327402b8d6c432528bfe05cbc61e2c2cf100a8d7255c4498d\nstage1=259200\nstage2=604800\nstage3=604800\nrevision=1\ntimestamp=1784500000\nnonce=6DspQZLuktpnPitfWYxbDq",
+    "byteLength": 444,
+    "sha256": "23c03054695746f061715df1427ed38191905a27f714e7e35db58c5d76e6438b"
+  },
+  "deregister": {
+    "message": "DMV_NOTIFY_DEREGISTER_V2\nversion=2\ncluster=devnet\nprogramId=GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb\naudience=https://notify.palatinearc.com\naction=deregister\nowner=DX5qF21LFK67wjfEAw1idZm9eRyrqKDSjFBVUxZdUunM\nvault=6p4J4Txnr2e6aa4TSNBKqooa5njRJS1uSfU4MyjkYp7T\ntimestamp=1784500000\nnonce=6DspQZLuktpnPitfWYxbDq",
+    "byteLength": 314,
+    "sha256": "4caec2efe2240b8d36f8555dfbdf3f643ff79eb03fcbea7a4f2ce799a8009318"
+  }
+}
