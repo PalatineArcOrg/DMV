@@ -11,10 +11,13 @@ export class EscalationService {
   private currentStage: EscalationStage = 0;
   private executionCallback: (() => void) | null = null;
   private beneficiaryCount: number = 0;
-  // When the FCM notify-server is confirmed watching this vault, IT delivers the
-  // stage 1-3 escalation alerts — so we must NOT also fire the local pre-scheduled
-  // timeline, or the user gets two notifications per stage. The local timeline is
-  // scheduled provisionally and used ONLY as a fallback when FCM isn't active.
+  // The FCM notify-server is the SOLE source of stage 1-3 escalation alerts (v1.7.3).
+  // This flag records whether the server is confirmed watching this vault; it is used
+  // to suppress the app's own stage-4 execution push so it can't double the server's.
+  // NOTE: there is NO local escalation fallback. The local pre-scheduled timeline was
+  // removed in v1.7.3 because it double-fired alongside the server, and nothing
+  // re-schedules it. When this is false the owner receives NO stage 1-3 warnings from
+  // the device at all — see scheduleBackgroundTimeline below.
   private fcmActive: boolean = false;
 
   constructor(heartbeatService: HeartbeatService, config: EscalationConfig) {
@@ -37,10 +40,15 @@ export class EscalationService {
 
   /**
    * Called with the result of registering this vault with the FCM notify-server.
-   * When FCM is active, the server is the single source of escalation alerts, so
-   * we cancel the local pre-scheduled timeline to avoid duplicate notifications.
-   * When it's not (no push token / no server / register failed), we (re)schedule
-   * the local timeline as the fallback.
+   * When FCM is active the server is the single source of escalation alerts, so any
+   * timeline left over from a pre-v1.7.3 build is cancelled to avoid duplicates.
+   *
+   * When it is NOT active this does NOT arm a fallback: scheduleBackgroundTimeline()
+   * is cancel-only, so the call below merely clears stale notifications. An owner who
+   * has not completed signed notification registration therefore gets NO stage 1-3
+   * warnings from the device. Escalation still runs server-side for REGISTERED vaults,
+   * and execution itself is unaffected (the permissionless keeper cranks from on-chain
+   * state), but the local warning path does not exist.
    */
   setFcmActive(active: boolean): void {
     this.fcmActive = active;
@@ -152,12 +160,14 @@ export class EscalationService {
   }
 
   /**
-   * Materialize the entire future escalation sequence as OS-scheduled
-   * notifications. Because the timeline is fully deterministic from the last
-   * heartbeat (nextDue + stage durations) and the device clock, every stage
-   * entry and recurring reminder can be scheduled up-front — so the user is
-   * warned on time even if the app is never reopened. Called on mount and on
-   * every heartbeat confirmation; each call replaces the prior timeline.
+   * CANCEL-ONLY since v1.7.3 — despite the name, this schedules nothing.
+   *
+   * It previously materialised the whole future escalation sequence as OS-scheduled
+   * notifications, but that double-fired alongside the notify-server, which is now the
+   * sole source of stage 1-3 alerts. All that remains is clearing a timeline left over
+   * from a pre-v1.7.3 install. The local senders it used (scheduleEscalationTimeline,
+   * sendHeartbeatReminder, sendUrgentReminder, sendFinalWarning) have no call sites.
+   * Renaming this is deferred to avoid churn; treat it as cancelEscalationTimeline().
    */
   async scheduleBackgroundTimeline(): Promise<void> {
     // v1.7.3: the notify-server (FCM) is the SOLE source of escalation alerts —
