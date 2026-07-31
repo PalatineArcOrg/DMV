@@ -78,6 +78,65 @@ jobs:
       - name: Dependency audit (app — reported; see security/dependency-waivers.md)
         run: yarn npm audit --severity high || yarn audit --level high || true
 
+  # ---- Mobile app: Metro/Hermes bundle ----
+  # `tsc` and `node --test` both run under Node's module resolver. Metro and Hermes do not.
+  # This repo has shipped THREE releases where type-checking was green and the release bundle
+  # was broken on device (v1.13.0 raw parser, v1.13.9 stocks classifier, v1.13.16 Bequests
+  # picker) — an imported binding resolving to `undefined` under Hermes, or a hot-path helper
+  # silently missing from the bundle. Nothing in the previous jobs can see that class of bug.
+  # This one produces the actual Hermes bytecode the APK would embed, so a resolution or
+  # Hermes-compile regression fails here instead of on someone's phone.
+  #
+  # This is NOT an APK build: no Gradle, no native code, no signing, no artifact published,
+  # and it is not a release path. The authoritative release path remains
+  # release-tools/build-android-release.sh.
+  app-bundle:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dead-mans-vault/app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: yarn install --frozen-lockfile
+      # There is deliberately no .env in CI. EXPO_PUBLIC_* values do not inline into the
+      # bundle (verified: the .hbc content hash is byte-identical with and without .env) —
+      # which is precisely why src/utils/rpcConfig.ts derives them at runtime instead.
+      - name: Metro export → Hermes bytecode
+        run: npx expo export --platform android --output-dir "$RUNNER_TEMP/bundle"
+      - name: Assert real Hermes bytecode containing app source exactly once
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          bundles=("$RUNNER_TEMP"/bundle/_expo/static/js/android/*.hbc)
+          if [ "${#bundles[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one Hermes bundle, found ${#bundles[@]}"
+            exit 1
+          fi
+          bundle="${bundles[0]}"
+
+          # Hermes bytecode magic. Guards against Metro emitting plain JS, which would
+          # otherwise pass as a "successful export" while not being what the APK ships.
+          magic=$(head -c 8 "$bundle" | od -An -tx1 | tr -d ' \n')
+          if [ "$magic" != "c61fbc03c103191f" ]; then
+            echo "::error::bundle is not Hermes bytecode (magic=$magic)"
+            exit 1
+          fi
+
+          # App source must be present, and present ONCE. Two copies means one module was
+          # reached by two different specifiers and duplicated into the graph — which for a
+          # stateful module means two divergent instances at runtime.
+          program_id=$(node -p "require('../release.manifest.json').programId")
+          hits=$(grep -a -c -- "$program_id" "$bundle" || true)
+          if [ "$hits" -ne 1 ]; then
+            echo "::error::expected the program id exactly once in the bundle, found $hits"
+            exit 1
+          fi
+
+          echo "Hermes bundle OK — $(( $(stat -c%s "$bundle") / 1024 / 1024 )) MB, app source present exactly once"
+
   # ---- Web console: typecheck + build ----
   # The web app reuses the mobile app's src via the `@app` alias, so it needs BOTH the app's
   # deps (yarn) and its own (npm ci) installed to typecheck/build.
