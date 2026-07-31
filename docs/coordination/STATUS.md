@@ -2,89 +2,87 @@
 
 ## Repository
 - Branch: `phase4-transactional-heartbeat`
-- HEAD: WP 4.4 implementation commit `phase4: add durable heartbeat reconciliation` (exact final SHA recorded in the handoff)
+- HEAD: WP 4.5 implementation commit `phase4: derive escalation from verified chain deadline` (exact final SHA recorded in the handoff)
 - Base: `origin/devnet` at `cd0264bb209c0bdc2cf4a576b48ce7d6372c69aa`
-- Starting HEAD: `f9ff1d2983a2fe0d161b1db8b9eff1746f0cde9e`
-- Worktree: Clean after the WP 4.4 implementation commit and authorized branch push.
+- Starting HEAD: `b4776ca3802b221373844f660daa4ded1bc41c70`
+- Worktree: Clean after the WP 4.5 implementation commit and authorized branch push.
 
 ## Current Work Package
-- Name: WP 4.4 — Durable heartbeat-operation journal and restart reconciliation
+- Name: WP 4.5 — Authoritative deadline and escalation correctness
 - State: PASS
 
 ## Completed
-- Added a structured SQLite `heartbeat_operations` journal with explicit schema version, identity, method, expected signature, blockhash lifetime, verified pre-state, lifecycle state, resolution state and bounded safe error code columns.
-- The legacy web3 transaction payer signature is selected from the agent signer entry after `Transaction.sign`, checked against `Transaction.signature`, encoded using the repository's existing `bs58` dependency and durably stored before the single `sendRawTransaction` call.
-- Serialization occurs before PREPARED persistence, so construction/signing/signature-extraction/serialization failures remain definite `preparation_failed` results.
-- PREPARED persistence is fail-closed. A journal failure prevents RPC submission.
-- A send exception, empty RPC signature or RPC signature mismatch is `submission_unknown`; the locally derived expected signature remains durable and is never automatically resubmitted.
-- Added read-only reconciliation using history-aware signature status, confirmed commitment, blockhash expiry and the hardened canonical heartbeat parser/verifier.
-- Added idempotent confirmed-history insertion by transaction signature.
-- Added a separate `authoritative_heartbeat_cache` for expired operations where chain liveness advanced but transaction attribution is unavailable.
-- Added bounded Dashboard focus reconciliation. It signs nothing, sends nothing, requests no wallet action, mutates no notification registration and has one in-flight reconciliation per identity.
-- Separated outcome-blocking operations from `confirmed_local_sync_pending`. Cache repair remains durable but cannot lock out a later deliberate heartbeat after chain success is already known.
-- Retains the ten most recent terminal operation records per identity and never prunes unresolved records.
+- Added a dependency-injected `OnChainDeadlineService` using the existing hardened `VaultConfig` and `HeartbeatRecord` parsers and canonical PDA helpers.
+- Confirmed chain time is read with `getSlot('confirmed')` followed by `getBlockTime(slot)`. Both canonical account reads use `commitment: 'confirmed'` and that slot as `minContextSlot`, preventing an older heartbeat account from being paired with a newer time observation.
+- Added checked timing arithmetic, safe BN conversion, explicit RPC/chain-time/account/configuration failure states and exact parity with the program's `now < finalDeadline` rule.
+- Added a 30-second monotonic freshness window. Projection may update stages 0–3 for display, but stale, regressing or Stage-4-reaching projection cannot execute and requests a fresh RPC verification.
+- Replaced `EscalationService → HeartbeatService.getStatus()` with explicit fresh authoritative snapshots. The service has no local history, wall-clock or notification sender dependency.
+- Added a process-lifetime Stage 4 guard keyed by cluster/program/owner/vault/final deadline. The callback is marked attempted before invocation, so callback failure cannot create an immediate retry loop.
+- Renamed the SQLite/device-clock status method to `getLocalHistoryStatus()` and isolated it as diagnostics/history only.
+- Immediate confirmed heartbeats and WP 4.4 confirmed/unattributed reconciliations now request a fresh canonical deadline read instead of directly resetting escalation.
+- Replaced Dashboard heartbeat/deadline labels with chain-observation-relative values and added verified, projected, checking, stale, RPC, invalid-state and stage-configuration UI states.
+- Centralized stage duration selection for vault creation, deadline evaluation and deliberate notify-server registration. The 30-second subdivision now applies only to explicit demo mode, not every development build.
+- Removed obsolete local `ExecutionService.waitForOnChainDeadline()`. The mobile crank is entered only through the fresh verified Stage 4 gate; the program, keeper and notify-server remain independent enforcement/execution paths.
+- Corrected local fallback wording: the only local timeline action is cancellation of pre-v1.7.3 remnants; Stage 1–3 pushes remain notify-server-only.
 
 ## Files Changed
-- `dead-mans-vault/app/src/db/database.ts`
-- `dead-mans-vault/app/src/db/heartbeatOperationRepo.ts`
-- `dead-mans-vault/app/src/db/heartbeatOperationRepoCore.ts`
-- `dead-mans-vault/app/src/db/heartbeatOperationRepoCore.test.ts`
-- `dead-mans-vault/app/src/db/heartbeatRepo.ts`
-- `dead-mans-vault/app/src/db/heartbeatRepoCore.ts`
+- `dead-mans-vault/app/src/components/StatusIndicator.tsx`
 - `dead-mans-vault/app/src/db/heartbeatRepoCore.test.ts`
 - `dead-mans-vault/app/src/hooks/useHeartbeat.ts`
 - `dead-mans-vault/app/src/screens/DashboardScreen.tsx`
+- `dead-mans-vault/app/src/screens/EstateReviewScreen.tsx`
+- `dead-mans-vault/app/src/screens/SettingsScreen.tsx`
 - `dead-mans-vault/app/src/services/DefaultHeartbeatOperationService.ts`
-- `dead-mans-vault/app/src/services/HeartbeatConfirmationVerifier.ts`
-- `dead-mans-vault/app/src/services/HeartbeatConfirmationVerifier.test.ts`
+- `dead-mans-vault/app/src/services/DefaultOnChainDeadlineService.ts`
+- `dead-mans-vault/app/src/services/EscalationService.ts`
+- `dead-mans-vault/app/src/services/EscalationService.test.ts`
+- `dead-mans-vault/app/src/services/ExecutionService.ts`
 - `dead-mans-vault/app/src/services/HeartbeatCoordinator.ts`
 - `dead-mans-vault/app/src/services/HeartbeatCoordinator.test.ts`
-- `dead-mans-vault/app/src/services/HeartbeatOperationLifecycle.test.ts`
 - `dead-mans-vault/app/src/services/HeartbeatOperationReconciler.ts`
 - `dead-mans-vault/app/src/services/HeartbeatOperationReconciler.test.ts`
 - `dead-mans-vault/app/src/services/HeartbeatService.ts`
-- `dead-mans-vault/app/src/services/VaultTransactionService.ts`
-- `dead-mans-vault/app/src/services/heartbeatAttemptUi.ts`
-- `dead-mans-vault/app/src/services/heartbeatAttemptUi.test.ts`
-- `dead-mans-vault/app/src/services/sendAndConfirmTransaction.ts`
-- `dead-mans-vault/app/src/services/sendAndConfirmTransaction.test.ts`
+- `dead-mans-vault/app/src/services/OnChainDeadlineService.ts`
+- `dead-mans-vault/app/src/services/OnChainDeadlineService.test.ts`
+- `dead-mans-vault/app/src/services/deadlineAuthorityGuards.test.ts`
+- `dead-mans-vault/app/src/store/useEscalationStore.ts`
+- `dead-mans-vault/app/src/utils/constants.ts`
+- `dead-mans-vault/app/src/utils/deadlineStageConfig.ts`
 - `docs/coordination/STATUS.md`
 - `docs/coordination/DECISIONS.md`
 - `docs/coordination/PHASE4.md`
 
 ## Tests
-- `cd dead-mans-vault/app && npm test`: PASS (19/19 test files, 0 failures).
-- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (324/324 cases).
-- Added real temporary SQLite close/reopen coverage. Each test uses a unique system temporary directory and removes it in `finally`.
-- Added signature extraction, pre-send persistence, journal failure, signature mismatch, repository validation/uniqueness/retention, crash-boundary, reconciliation, idempotency, coordinator blocking, focus lifecycle and static security coverage.
-- `cd dead-mans-vault/app && ./node_modules/.bin/tsc --noEmit`: PASS.
+- `cd dead-mans-vault/app && npm test`: PASS (22/22 test files, 0 failures).
+- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (379/379 cases).
+- Added deadline arithmetic, exact boundary parity, chain-time taxonomy, canonical account/slot pinning, unsafe conversion, time regression, monotonic projection, Stage 4 refresh, escalation one-shot, identity change, callback failure, lifecycle and static authority coverage.
+- `cd dead-mans-vault/app && npx tsc --noEmit`: PASS.
 - `git diff --check`: PASS.
 - Changed-file secret scan: PASS.
 - Forbidden-artifact scan: PASS.
-- Tests use injected RPC/status/account dependencies, generated fixture keypairs and isolated SQLite databases. No production RPC adapter is invoked by a test.
-- No existing security test was weakened or deleted merely to pass.
+- Tests use only injected account/RPC/time dependencies, generated public fixture data and existing isolated local test databases. No production RPC adapter or real wallet/device key is loaded.
+- No existing security test was removed or weakened merely to pass. The WP 4.3 local persistence assertion was renamed to its explicit local-history role and strengthened with an authority-separation assertion.
 
 ## Findings
-- Final deliberate send order: durable single-flight acquisition → blocking-journal lookup/read-only reconciliation → readiness and verified pre-state → transaction construction/blockhash/signing → payer-signature derivation → serialization → durable PREPARED insert → one RPC send → durable submitted/submission-unknown transition → one confirmation attempt → canonical post-state verification → idempotent local sync → terminal journal transition → escalation/countdown reset → best-effort notification → Explorer publication → reload → lock release.
-- The payer/agent signature is the first legacy transaction signature and therefore the Solana transaction ID. Production extraction also locates the signature entry by the exact payer public key and requires it to equal `Transaction.signature`.
-- Outcome-blocking states are `prepared`, `submitted`, `submission_unknown`, `confirmation_unknown` and `post_state_unverified`.
-- `confirmed_local_sync_pending` is reconciliable but non-blocking because on-chain success is already established.
-- Terminal states are `resolved_confirmed`, `resolved_failed`, `resolved_expired_not_landed`, `resolved_chain_advanced_unattributed` and `invalid_local_record`.
-- A history status with a non-null error resolves failed. A confirmed/finalized successful status must still pass the WP 4.3 canonical post-state verifier.
-- An absent status at or before `last_valid_block_height` remains pending. It is never resent.
-- An absent status after expiry resolves `resolved_expired_not_landed` only when canonical heartbeat state did not advance.
-- If canonical heartbeat state advanced after expiry but transaction history cannot attribute it, liveness is cached from chain truth under source `chain_advanced_unattributed`; the unresolved signature is not inserted in heartbeat history or shown as successful.
-- Confirmed history insertion uses one atomic `INSERT ... SELECT ... WHERE NOT EXISTS` statement keyed by `on_chain_tx`, so a crash after insertion but before journal resolution self-heals without duplicate history.
-- Restart reconciliation sends no OS heartbeat-success notification. Immediate same-session success retains WP 4.3 notification behavior.
-- Corrupt current-identity records are marked `invalid_local_record` before RPC use and fail closed. Records for other identities are excluded by the scoped query.
-- No raw or signed transaction bytes, private key material, error object, stack trace, RPC URL, notification token or environment value is stored in the journal.
-- Remaining Phase 4 risks: agent balance/fee readiness is not implemented; deadline/escalation boundary coverage remains WP 4.5; rotation and Android signing migration remain unchanged; no live canary has run.
+- Previous `lastHeartbeat` sources were Dashboard's decoded heartbeat account with a fallback to local Zustand/SQLite. `nextDue`, `secondsOverdue` and `secondsRemaining` came from `HeartbeatService.getStatus()`, `Date.now()` and a one-second decrement timer.
+- Previous stage and Stage 4 authority flowed `useHeartbeat → EscalationService.evaluate → HeartbeatService.getStatus → heartbeat_history`; `transitionTo(4)` set `executionStarted` and invoked `ExecutionService.execute()`.
+- Previous escalation resets occurred after deliberate verified heartbeat handling, WP 4.4 reconciliation, vault setup, executed-vault reload and execution completion. The first two now refresh canonical deadline state rather than asserting a local reset.
+- Current authoritative refresh order is canonical PDA derivation → confirmed slot/block time → slot-pinned canonical vault read/validation → active/not-executed check → slot-pinned canonical heartbeat read/validation → checked deadline arithmetic → fresh snapshot publication → possible Stage 4 guard.
+- Exact boundaries are: `now <= nextDue` stage 0; `nextDue < now < stage1End` stage 1; `stage1End <= now < stage2End` stage 2; `stage2End <= now < finalDeadline` stage 3; `now >= finalDeadline` stage 4.
+- `nextDue = lastHeartbeat + heartbeatInterval` and `finalDeadline = nextDue + gracePeriod`. The three positive safe stage durations must sum exactly to the canonical on-chain grace period.
+- Projection uses `performance.now()` only, never wall time. It expires after 30 seconds, does not continue indefinitely and cannot project into executable Stage 4.
+- Local confirmed history, unattributed authoritative cache and owner-activity rows remain useful for history, Explorer links, diagnostics and repair. None is read by deadline/escalation authority.
+- `startOnChainMonitoring()` remains disabled unless `on_chain_activity` is explicitly configured and records only non-authoritative activity history. It does not submit an agent heartbeat.
+- Notification registration remains deliberate and independent. The shared stage-duration helper prevents new app/server configuration drift, but absence of registration does not change deadline calculation or permissionless execution.
+- Notify-server stage polling still uses its server wall clock, and the keeper/notify executor paths remain independently protected by on-chain deadline enforcement. Changing their execution rules was explicitly outside WP 4.5.
+- `ClaimService` and `InheritancesScreen` still use the legacy read-only `getOnChainDeadline()` helper for claim availability/display; they are outside the mobile escalation/Stage 4 authority path and remain a later hardening candidate.
+- Remaining Phase 4 risks: agent balance/fee readiness is not implemented; existing rotation and Android signing migration remain continuity-unsafe; a stage configuration that cannot be reconstructed locally now pauses mobile inference until corrected; no live canary has run.
 - The current MigrationService must not be used for Fox or signing-identity migration.
   It destroys the active agent key before replacement authority is proven.
 
 ## Decisions Needed
-- None for the completed WP 4.4 boundary.
-- A separate user gate is required before WP 4.5.
+- None for the completed WP 4.5 boundary.
+- A separate user gate is required before WP 4.6.
 
 ## Live Actions
 - None.
@@ -93,4 +91,4 @@
 - Untouched.
 
 ## Exact Next Action
-- Stop for user review. The next recommended work package is WP 4.5 — deadline and escalation correctness. Do not begin it automatically.
+- Stop for user review. The next recommended work package is WP 4.6 — agent fee-state handling. Do not begin it automatically.

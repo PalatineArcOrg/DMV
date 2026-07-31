@@ -200,3 +200,41 @@ is unavailable or merely because it is old.
 Status: Implemented and covered by offline tests. No live RPC, automatic resend,
 wallet prompt, agent signing during reconciliation, program/IDL, rotation,
 migration, Android signing or notification-registration change was performed.
+
+## WP 4.5 authoritative deadline boundary
+
+WP 4.5 makes canonical on-chain vault and heartbeat accounts, evaluated against
+a fresh Solana chain-time observation, authoritative for deadline and
+escalation state.
+
+Local history and authoritative cache remain useful for diagnostics and repair,
+but cannot independently reset liveness, advance escalation or start execution.
+
+Monotonic projection is allowed only for bounded UI display between verified
+chain observations. Reaching the final deadline requires a fresh chain
+verification before the mobile app may invoke its permissionless execution
+crank.
+
+Stage 1–3 pushes remain notify-server-only. No local warning fallback exists.
+
+The production chain-time adapter reads a confirmed slot and its block time,
+then pins both canonical account reads to at least that slot with
+`minContextSlot`. This prevents an older heartbeat record from being combined
+with a newer time observation for the mobile Stage 4 decision.
+
+The UI freshness window is 30 seconds and uses only monotonic elapsed time.
+Projection may display stages 0–3 while fresh. Crossing the final deadline,
+monotonic regression, expiry of the freshness window or any unavailable/invalid
+chain time causes a fresh read or a stale/unknown state; it never starts
+execution.
+
+Stage subdivisions are deterministic and shared between vault creation,
+deadline evaluation and deliberate notify-server registration. Explicit demo
+mode uses 30 seconds per stage. Build/development mode alone does not alter
+timing. A positive safe stage sum must exactly equal the canonical vault grace
+period or mobile escalation inference fails closed.
+
+Status: Implemented and covered by offline tests. No live RPC, local warning
+fallback, notification registration mutation, heartbeat submission, execution
+submission, program/IDL, keeper/notify-server rule, rotation, migration, Android
+signing or deployment action was performed.

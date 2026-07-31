@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { DEFAULT_DEADLINE_STAGE_DURATIONS } from './deadlineStageConfig';
 
 export const PROGRAM_ID = 'GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb';
 
@@ -112,9 +113,9 @@ export const GRACE_PERIOD_DEFAULTS = {
 };
 
 export const ESCALATION_DEFAULTS = {
-  stage1: 259200,
-  stage2: 604800,
-  stage3: 604800,
+  stage1: DEFAULT_DEADLINE_STAGE_DURATIONS.stage1Duration,
+  stage2: DEFAULT_DEADLINE_STAGE_DURATIONS.stage2Duration,
+  stage3: DEFAULT_DEADLINE_STAGE_DURATIONS.stage3Duration,
 };
 
 export const STAGE_CONFIG: Record<number, {

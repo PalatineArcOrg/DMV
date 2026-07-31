@@ -7,14 +7,24 @@ import { EscalationStage } from '../types';
 interface StatusIndicatorProps {
   stage: EscalationStage;
   isActive: boolean;
+  deadlineVerification?:
+    | 'verified_current'
+    | 'verified_projected'
+    | 'unverified';
 }
 
-export function StatusIndicator({ stage, isActive }: StatusIndicatorProps) {
+export function StatusIndicator({
+  stage,
+  isActive,
+  deadlineVerification = 'unverified',
+}: StatusIndicatorProps) {
   const cfg = STAGE_CONFIG[stage] || STAGE_CONFIG[0];
   const iconScale = useRef(new Animated.Value(1)).current;
+  const deadlineVerified =
+    deadlineVerification !== 'unverified';
 
   useEffect(() => {
-    if (isActive && stage >= 1) {
+    if (isActive && deadlineVerified && stage >= 1) {
       const anim = Animated.loop(
         Animated.sequence([
           Animated.timing(iconScale, { toValue: 1.1, duration: 750, useNativeDriver: true }),
@@ -26,21 +36,55 @@ export function StatusIndicator({ stage, isActive }: StatusIndicatorProps) {
     } else {
       iconScale.setValue(1);
     }
-  }, [stage, isActive]);
+  }, [deadlineVerified, stage, isActive]);
 
-  const stageStatus = stage === 4 ? 'Irreversible' : stage === 0 ? 'Healthy' : 'Action required';
-  const label = isActive ? cfg.label : 'Inactive';
-  const color = isActive ? cfg.color : COLORS.textMuted;
+  const stageStatus =
+    deadlineVerification === 'verified_projected'
+      ? 'Recent chain state · projected'
+      : stage === 4
+        ? 'Irreversible'
+        : stage === 0
+          ? 'Healthy'
+          : 'Action required';
+  const label = !isActive
+    ? 'Inactive'
+    : deadlineVerified
+      ? cfg.label
+      : 'Deadline unverified';
+  const color =
+    isActive && deadlineVerified
+      ? cfg.color
+      : isActive
+        ? COLORS.warning
+        : COLORS.textMuted;
+  const verifiedBackground =
+    isActive && deadlineVerified
+      ? cfg.dimColor
+      : isActive
+        ? 'rgba(245,158,11,0.08)'
+        : 'transparent';
+  const verifiedBorder =
+    isActive && deadlineVerified
+      ? cfg.borderColor
+      : isActive
+        ? 'rgba(245,158,11,0.22)'
+        : COLORS.borderLight;
 
   return (
-    <View style={[styles.container, { backgroundColor: isActive ? cfg.dimColor : 'transparent', borderBottomColor: isActive ? cfg.borderColor : COLORS.borderLight }]}>
+    <View style={[styles.container, { backgroundColor: verifiedBackground, borderBottomColor: verifiedBorder }]}>
       <View style={styles.row}>
         <Animated.View
           style={[
             styles.iconBadge,
             {
-              backgroundColor: isActive ? cfg.dimColor : 'rgba(255,255,255,0.06)',
-              borderColor: isActive ? cfg.borderColor : 'rgba(255,255,255,0.1)',
+              backgroundColor:
+                isActive && deadlineVerified
+                  ? cfg.dimColor
+                  : 'rgba(255,255,255,0.06)',
+              borderColor:
+                isActive && deadlineVerified
+                  ? cfg.borderColor
+                  : 'rgba(255,255,255,0.1)',
               transform: [{ scale: iconScale }],
             },
           ]}
@@ -54,11 +98,15 @@ export function StatusIndicator({ stage, isActive }: StatusIndicatorProps) {
         <View style={styles.labelColumn}>
           <Text style={[styles.label, { color }]}>{label}</Text>
           <Text style={styles.sublabel}>
-            {isActive ? `Stage ${stage} \u00B7 ${stageStatus}` : 'Setup Required'}
+            {isActive
+              ? deadlineVerified
+                ? `Stage ${stage} \u00B7 ${stageStatus}`
+                : 'Checking on-chain state'
+              : 'Setup Required'}
           </Text>
         </View>
       </View>
-      <View style={[styles.statusDot, { backgroundColor: cfg.dimColor, borderColor: cfg.borderColor }]}>
+      <View style={[styles.statusDot, { backgroundColor: verifiedBackground, borderColor: verifiedBorder }]}>
         <Text style={{ color, fontSize: 10, fontWeight: '700' }}>{'\u25CF'}</Text>
       </View>
     </View>

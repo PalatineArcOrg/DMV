@@ -82,7 +82,7 @@ function harness(overrides: {
     current: 0,
     persist: 0,
     authoritative: 0,
-    reset: 0,
+    deadlineRefresh: 0,
     reload: 0,
     transition: 0,
     send: 0,
@@ -143,8 +143,8 @@ function harness(overrides: {
       calls.authoritative += 1;
       await overrides.authoritative?.();
     },
-    resetLocalEscalation: () => {
-      calls.reset += 1;
+    refreshAuthoritativeDeadline: async () => {
+      calls.deadlineRefresh += 1;
     },
     reloadVaultState: async () => {
       calls.reload += 1;
@@ -183,7 +183,7 @@ test('successful history status plus verified post-state resolves confirmed with
     '9007199254740994',
   );
   assert.equal(instance.calls.persist, 1);
-  assert.equal(instance.calls.reset, 1);
+  assert.equal(instance.calls.deadlineRefresh, 1);
   assert.equal(instance.calls.send, 0);
   assert.equal(instance.calls.sign, 0);
 });
@@ -220,7 +220,7 @@ test('failed signature status resolves failed with no local liveness mutation', 
   assert.equal((await instance.run()).status, 'reconciled_failed');
   assert.equal(instance.operation.state, 'resolved_failed');
   assert.equal(instance.calls.persist, 0);
-  assert.equal(instance.calls.reset, 0);
+  assert.equal(instance.calls.deadlineRefresh, 0);
 });
 
 test('absent status before expiry remains pending and performs no state fetch', async () => {
@@ -239,7 +239,7 @@ test('absent status after expiry with unchanged chain state resolves expired-not
   });
   assert.equal((await instance.run()).status, 'reconciled_expired');
   assert.equal(instance.operation.state, 'resolved_expired_not_landed');
-  assert.equal(instance.calls.reset, 0);
+  assert.equal(instance.calls.deadlineRefresh, 0);
   assert.equal(instance.calls.persist, 0);
 });
 
@@ -261,7 +261,7 @@ test('expired operation with advanced chain state is authoritative but unattribu
   );
   assert.equal(instance.calls.authoritative, 1);
   assert.equal(instance.calls.persist, 0);
-  assert.equal(instance.calls.reset, 1);
+  assert.equal(instance.calls.deadlineRefresh, 1);
 });
 
 test('status, block-height, and post-state RPC failures preserve an unresolved record', async (context) => {

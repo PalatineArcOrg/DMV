@@ -113,7 +113,7 @@ function makeHarness(overrides: {
     send: 0,
     verify: 0,
     persist: 0,
-    reset: 0,
+    deadlineRefresh: 0,
     notification: 0,
     reload: 0,
   };
@@ -193,9 +193,9 @@ function makeHarness(overrides: {
         events.push('persist local');
         await overrides.persist?.(input);
       },
-      resetLocalEscalation: () => {
-        counters.reset += 1;
-        events.push('reset');
+      refreshAuthoritativeDeadline: async () => {
+        counters.deadlineRefresh += 1;
+        events.push('refresh deadline');
       },
       sendLocalConfirmationNotification: async () => {
         counters.notification += 1;
@@ -231,7 +231,7 @@ function assertNoLocalSuccess(
   harness: ReturnType<typeof makeHarness>,
 ): void {
   assert.equal(harness.counters.persist, 0);
-  assert.equal(harness.counters.reset, 0);
+  assert.equal(harness.counters.deadlineRefresh, 0);
   assert.equal(harness.counters.notification, 0);
   assert.equal(
     harness.publications.some(
@@ -263,7 +263,7 @@ test('successful operation has exact journal-first authoritative ordering', asyn
     'verify',
     'persist local',
     'journal resolved_confirmed',
-    'reset',
+    'refresh deadline',
     'notification',
     'publish confirmed_success',
     'reload',
@@ -460,7 +460,7 @@ test('local-history failure records sync-pending but does not negate verified ch
     harness.events.includes('journal confirmed_local_sync_pending'),
     true,
   );
-  assert.equal(harness.counters.reset, 1);
+  assert.equal(harness.counters.deadlineRefresh, 1);
 });
 
 test('single-flight blocks a concurrent reconciliation/readiness and releases afterward', async () => {

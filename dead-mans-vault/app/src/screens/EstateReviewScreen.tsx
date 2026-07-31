@@ -29,6 +29,7 @@ import { clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionR
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
 import { StepIndicator } from '../components/StepIndicator';
+import { getDeadlineStageDurations } from '../utils/deadlineStageConfig';
 
 // Agent only needs heartbeat fees now — execution is permissionless and nothing
 // refunds the agent on autonomous execution (D7).
@@ -45,11 +46,14 @@ export function EstateReviewScreen() {
 
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
 
-  const gracePeriod = isDemoMode
-    ? 90 // 30s per escalation stage in demo mode
-    : escalationConfig.stage1Duration +
-      escalationConfig.stage2Duration +
-      escalationConfig.stage3Duration;
+  const deadlineStages = getDeadlineStageDurations(
+    isDemoMode,
+    escalationConfig,
+  );
+  const gracePeriod =
+    deadlineStages.stage1Duration +
+    deadlineStages.stage2Duration +
+    deadlineStages.stage3Duration;
 
   const handleRegister = useCallback(async () => {
     if (!publicKey || !heartbeatConfig) {
@@ -165,10 +169,8 @@ export function EstateReviewScreen() {
         'confirmed',
       );
 
-      // Reset stale state from any previous vault session
-      // This prevents the EscalationService from immediately jumping to Stage 4
-      // Execution logs are preserved so the user can still review past executions —
-      // they get cleared by ExecutionService when a new execution actually starts.
+      // Reset local diagnostic/history state from any previous vault session.
+      // Deadline authority is fetched from the newly created canonical accounts.
       const ownerWallet = publicKey.toString();
       await clearHeartbeatHistory();
       await clearDistributableSnapshot(ownerWallet);

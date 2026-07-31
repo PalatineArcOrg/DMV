@@ -29,7 +29,7 @@ import { RpcStatusBanner } from '../components/RpcStatusBanner';
 import { EscalationBanner } from '../components/EscalationBanner';
 import { BrandMark } from '../components/BrandMark';
 import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/constants';
-import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
+import { formatDuration, formatUsd, formatTokenAmount, truncateAddress } from '../utils/formatting';
 import { EscalationStage } from '../types';
 import { VaultTransactionService } from '../services/VaultTransactionService';
 import {
@@ -106,12 +106,10 @@ export function DashboardScreen() {
   const navigation = useNavigation<any>();
   const { publicKey, connected, connect, signTransaction } = useWallet();
   const { balances, defiPositions: portfolioDefi, totalUsdValue, solBalance, isLoading, error, refresh } = usePortfolio();
-  const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } = useVaultProgram();
+  const { fetchVaultConfig, getVaultPDA } = useVaultProgram();
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
-  const executionStarted = useEscalationStore((s) => s.state.executionStarted);
   const [vaultData, setVaultData] = useState<any>(null);
   const [executionCompleted, setExecutionCompleted] = useState(false);
-  const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
   const executionJustCompleted = useVaultStore((s) => s.executionJustCompleted);
   const storeDefiPositions = useVaultStore((s) => s.defiPositions);
@@ -134,9 +132,9 @@ export function DashboardScreen() {
   const {
     recordConfirmedHeartbeat,
     recordAuthoritativeUnattributedHeartbeat,
-    resetAfterConfirmedHeartbeat,
+    refreshAuthoritativeDeadline,
     sendConfirmedHeartbeatNotification,
-    status: heartbeatStatus,
+    deadlineState,
     escalationStage,
     secondsRemaining,
   } = useHeartbeat(isVaultSetup && (vaultData?.active ?? false), publicKey ?? null);
@@ -148,31 +146,22 @@ export function DashboardScreen() {
     setIsLoadingVault(true);
     try {
       const vault: any = await fetchVaultConfig(publicKey);
-      setVaultData(vault);
-      if (!vault && useVaultStore.getState().vaultConfig) {
-        // Vault PDAs closed — sync Zustand so Vault tab reflects this
-        // Only clear if we previously had a vault; don't wipe mid-setup state
-        useVaultStore.getState().setVaultConfig(null);
-        // Check if execution completed
-        const escState = useEscalationStore.getState().state;
-        if (escState.executionStarted) {
-          setExecutionCompleted(true);
-          useEscalationStore.getState().reset();
+      if (!vault) {
+        // This fetch boundary collapses "missing" and RPC failure. Preserve a
+        // previously loaded vault and let the hardened deadline service publish
+        // vault_missing/RPC state; never infer execution from local flags.
+        if (!useVaultStore.getState().vaultConfig) {
+          setVaultData(null);
+          setExecutionCompleted(false);
         }
-      } else if (!vault && !useVaultStore.getState().vaultConfig) {
-        // No vault on-chain and none in store — clear any stale execution state
-        setExecutionCompleted(false);
-      }
-      if (vault) {
+      } else {
+        setVaultData(vault);
         if (vault.executed) {
           setExecutionCompleted(true);
           useEscalationStore.getState().reset();
         }
         useVaultStore.getState().setVaultConfig(vault);
         const [vaultPda] = getVaultPDA(publicKey);
-        const hb = await fetchHeartbeatRecord(vaultPda);
-        setHeartbeatData(hb);
-
         // Fetch vault PDA balance for deposit card
         try {
           const txService = new VaultTransactionService();
@@ -216,7 +205,7 @@ export function DashboardScreen() {
     } finally {
       setIsLoadingVault(false);
     }
-  }, [publicKey, fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA]);
+  }, [publicKey, fetchVaultConfig, getVaultPDA]);
 
   const handleDeposit = useCallback(async (lamports: number) => {
     if (!publicKey || !signTransaction) throw new Error('Wallet not connected');
@@ -324,7 +313,6 @@ export function DashboardScreen() {
     const currentKey = publicKey?.toBase58() ?? '';
     if (prevPublicKey.current && currentKey && prevPublicKey.current !== currentKey) {
       setVaultData(null);
-      setHeartbeatData(null);
       setExecutionCompleted(false);
     }
     prevPublicKey.current = currentKey;
@@ -334,7 +322,6 @@ export function DashboardScreen() {
   useEffect(() => {
     if (executionJustCompleted) {
       setVaultData(null);
-      setHeartbeatData(null);
       setExecutionCompleted(true);
       setVaultBalance(0);
       setVaultTokenBalances([]);
@@ -357,8 +344,12 @@ export function DashboardScreen() {
   );
 
   const onRefresh = useCallback(async () => {
-    await Promise.all([refresh(), loadVaultState()]);
-  }, [refresh, loadVaultState]);
+    await Promise.all([
+      refresh(),
+      loadVaultState(),
+      refreshAuthoritativeDeadline(),
+    ]);
+  }, [refresh, loadVaultState, refreshAuthoritativeDeadline]);
 
   const [lastConfirmedHeartbeatTx, setLastConfirmedHeartbeatTx] =
     useState<string | null>(null);
@@ -394,7 +385,7 @@ export function DashboardScreen() {
         heartbeatOperationService.reconcile(operation, {
           recordConfirmedHeartbeat,
           recordAuthoritativeUnattributedHeartbeat,
-          resetLocalEscalation: resetAfterConfirmedHeartbeat,
+          refreshAuthoritativeDeadline,
           reloadVaultState: loadVaultState,
         }),
       checkAgentReadiness: () =>
@@ -426,7 +417,7 @@ export function DashboardScreen() {
       verifyHeartbeatConfirmation: (input) =>
         createDefaultHeartbeatConfirmationVerifier().verify(input),
       recordConfirmedHeartbeat,
-      resetLocalEscalation: resetAfterConfirmedHeartbeat,
+      refreshAuthoritativeDeadline,
       sendLocalConfirmationNotification:
         sendConfirmedHeartbeatNotification,
       reloadVaultState: loadVaultState,
@@ -461,13 +452,14 @@ export function DashboardScreen() {
     publicKey,
     recordAuthoritativeUnattributedHeartbeat,
     recordConfirmedHeartbeat,
-    resetAfterConfirmedHeartbeat,
+    refreshAuthoritativeDeadline,
     sendConfirmedHeartbeatNotification,
   ]);
 
   useFocusEffect(
     useCallback(() => {
       if (!connected || !publicKey) return;
+      void refreshAuthoritativeDeadline();
       let active = true;
       const reconcileOnFocus = async () => {
         try {
@@ -486,7 +478,7 @@ export function DashboardScreen() {
             {
               recordConfirmedHeartbeat,
               recordAuthoritativeUnattributedHeartbeat,
-              resetLocalEscalation: resetAfterConfirmedHeartbeat,
+              refreshAuthoritativeDeadline,
               reloadVaultState: loadVaultState,
             },
           );
@@ -585,7 +577,7 @@ export function DashboardScreen() {
       publicKey,
       recordAuthoritativeUnattributedHeartbeat,
       recordConfirmedHeartbeat,
-      resetAfterConfirmedHeartbeat,
+      refreshAuthoritativeDeadline,
     ]),
   );
 
@@ -611,16 +603,47 @@ export function DashboardScreen() {
               ? 'Pending reconciliation'
               : 'Tx — heartbeat state unverified';
 
-  // Heartbeat stats
-  const lastBeatLabel = heartbeatData
-    ? timeAgo(heartbeatData.lastHeartbeat.toNumber())
-    : heartbeatStatus?.lastHeartbeat
-      ? timeAgo(heartbeatStatus.lastHeartbeat)
-      : 'N/A';
+  const authoritativeSnapshot =
+    'snapshot' in deadlineState
+      ? deadlineState.snapshot
+      : deadlineState.lastVerified;
+  const formatRelativeToChain = (timestamp: number): string => {
+    if (!authoritativeSnapshot) return 'N/A';
+    const delta = timestamp - authoritativeSnapshot.chainUnixTime;
+    if (delta > 0) return `in ${formatDuration(delta)}`;
+    const elapsed = Math.abs(delta);
+    return elapsed < 60 ? 'just now' : `${formatDuration(elapsed)} ago`;
+  };
+  const lastBeatLabel = authoritativeSnapshot
+    ? formatRelativeToChain(authoritativeSnapshot.lastHeartbeat)
+    : 'N/A';
+  const nextDueLabel = authoritativeSnapshot
+    ? authoritativeSnapshot.chainUnixTime > authoritativeSnapshot.nextDue
+      ? 'Overdue'
+      : formatRelativeToChain(authoritativeSnapshot.nextDue)
+    : 'N/A';
 
-  const nextDueLabel = escalationStage === 0
-    ? (heartbeatStatus?.nextDue ? timeAgo(heartbeatStatus.nextDue).replace(' ago', '') : 'N/A')
-    : 'Overdue';
+  const deadlineStatusMessage =
+    deadlineState.status === 'verified_projected'
+      ? 'Deadline display is projected from a recent verified Solana chain-time observation.'
+      : deadlineState.status === 'checking' ||
+          deadlineState.status === 'stale'
+        ? 'Checking the current on-chain deadline…'
+        : deadlineState.status === 'rpc_unavailable' ||
+            deadlineState.status === 'chain_time_unavailable'
+          ? 'The on-chain heartbeat deadline could not be refreshed. The last verified state is shown as stale; no execution action was started by this device.'
+          : deadlineState.status === 'invalid_on_chain_state'
+            ? 'The vault’s on-chain heartbeat state could not be validated. Deadline and escalation actions are paused on this device.'
+              : deadlineState.status ===
+                'stage_configuration_invalid'
+              ? 'The warning-stage configuration does not match the vault’s on-chain grace period. This device will not infer escalation or start execution until the configuration is corrected.'
+              : deadlineState.status === 'vault_missing'
+                ? 'The canonical vault account could not be found. Deadline monitoring is paused on this device; execution was not inferred.'
+                : deadlineState.status === 'vault_inactive'
+                  ? 'This vault is inactive. Heartbeat deadline monitoring and execution actions are stopped on this device.'
+                  : deadlineState.status === 'vault_executed'
+                    ? 'This vault is already executed on-chain. Deadline monitoring and execution actions have stopped.'
+              : null;
 
   const beneficiaryCount = vaultData?.beneficiaries?.length ?? storeBeneficiaryCount;
 
@@ -683,11 +706,48 @@ export function DashboardScreen() {
         </View>
       )}
 
+      {deadlineStatusMessage && isVaultSetup && !vaultData?.executed && (
+        <View style={styles.deadlineStatusBanner}>
+          <MaterialCommunityIcons
+            name={
+              deadlineState.status === 'verified_projected'
+                ? 'clock-check-outline'
+                : 'cloud-sync-outline'
+            }
+            size={16}
+            color={
+              deadlineState.status === 'verified_projected'
+                ? COLORS.textSecondary
+                : COLORS.warning
+            }
+          />
+          <Text
+            style={[
+              styles.deadlineStatusText,
+              deadlineState.status === 'verified_projected' && {
+                color: COLORS.textSecondary,
+              },
+            ]}
+          >
+            {deadlineStatusMessage}
+          </Text>
+        </View>
+      )}
+
       {/* === VAULT STATUS CARD (MOVED TO TOP) === */}
       {isVaultSetup && !vaultData?.executed && (
         <View style={[styles.vaultCard, { borderColor: cfg.borderColor }]}>
           {/* Status Header */}
-          <StatusIndicator stage={escalationStage} isActive={vaultData?.active ?? false} />
+          <StatusIndicator
+            stage={escalationStage}
+            isActive={vaultData?.active ?? false}
+            deadlineVerification={
+              deadlineState.status === 'verified_current' ||
+              deadlineState.status === 'verified_projected'
+                ? deadlineState.status
+                : 'unverified'
+            }
+          />
 
           {/* Heartbeat Button */}
           <View style={styles.heartbeatContainer}>
@@ -1195,6 +1255,25 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   demoWarningText: {
+    flex: 1,
+    color: COLORS.warning,
+    fontSize: 11,
+    fontFamily: FONTS.primary,
+    lineHeight: 16,
+  },
+  deadlineStatusBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.22)',
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  deadlineStatusText: {
     flex: 1,
     color: COLORS.warning,
     fontSize: 11,

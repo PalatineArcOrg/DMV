@@ -97,7 +97,7 @@ export interface HeartbeatOperationReconcilerDependencies {
     lastHeartbeat: number;
     totalHeartbeats: bigint;
   }) => Promise<void>;
-  resetLocalEscalation: () => void;
+  refreshAuthoritativeDeadline: () => Promise<void>;
   reloadVaultState: () => Promise<void>;
   transitionOperation: (
     signature: string,
@@ -168,9 +168,9 @@ async function resetAndReload(
   dependencies: HeartbeatOperationReconcilerDependencies,
 ): Promise<void> {
   try {
-    dependencies.resetLocalEscalation();
+    await dependencies.refreshAuthoritativeDeadline();
   } catch {
-    // Canonical chain truth remains authoritative.
+    // A later lifecycle refresh repairs deadline UI from chain truth.
   }
   try {
     await dependencies.reloadVaultState();

@@ -42,7 +42,7 @@ export interface HeartbeatReconciliationCallbacks {
   recordAuthoritativeUnattributedHeartbeat: (
     input: AuthoritativeHeartbeatCacheInput,
   ) => Promise<void>;
-  resetLocalEscalation: () => void;
+  refreshAuthoritativeDeadline: () => Promise<void>;
   reloadVaultState: () => Promise<void>;
 }
 
@@ -219,7 +219,8 @@ export class DefaultHeartbeatOperationService {
           source: 'chain_advanced_unattributed',
         });
       },
-      resetLocalEscalation: callbacks.resetLocalEscalation,
+      refreshAuthoritativeDeadline:
+        callbacks.refreshAuthoritativeDeadline,
       reloadVaultState: callbacks.reloadVaultState,
       transitionOperation: (signature, state, patch) =>
         this.transition(signature, state, patch),

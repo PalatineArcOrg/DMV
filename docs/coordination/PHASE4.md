@@ -130,7 +130,7 @@ Confirmation-unknown and post-state-unverified signatures are exposed as distinc
 linkable UI states but are not durably persisted. They are never retried
 automatically. Durable restart reconciliation remains WP 4.4.
 
-## Verified current mutations and failure boundaries
+## Baseline mutations and failure boundaries before WP 4.3
 
 ### Local state
 
@@ -307,16 +307,32 @@ action occurred. WP 4.5 remains separately gated.
 
 ### Work Package 5: Deadline and escalation correctness
 
-- Make local countdown and escalation reset follow the confirmed onchain heartbeat
-  timestamp and onchain interval/grace configuration.
-- Test just-before, exact and just-after deadline behavior against the program's
-  `now < deadline` rule.
-- Ensure a pending or failed heartbeat never cancels warnings or marks the vault
-  healthy.
-- Keep server notification registration behavior out of this work package except
-  where a confirmed heartbeat must drive an already-registered vault's state.
+- Implemented canonical, hardened vault/heartbeat reads pinned at or after a
+  confirmed Solana chain-time slot.
+- Implemented safe deadline arithmetic and exact program parity:
+  `now < finalDeadline` remains heartbeat-permitted by time and
+  `now >= finalDeadline` is executable by time.
+- Implemented positive safe stage-duration validation whose exact sum must equal
+  the canonical on-chain grace period.
+- Replaced SQLite/device-wall-clock escalation authority with explicit verified
+  snapshots.
+- Added a 30-second monotonic-only display projection. It may display stages 0–3
+  but cannot enter executable Stage 4; the boundary forces a fresh read.
+- Added a one-attempt-per-vault/deadline mobile execution guard and removed the
+  old execution wait/poll loop.
+- Made immediate and reconciled heartbeat outcomes refresh the canonical
+  deadline rather than reset it from local cache.
+- Demoted confirmed history, unattributed cache and owner-activity rows to
+  diagnostics/history/repair roles.
+- Centralized explicit demo versus production stage durations across vault
+  creation, mobile evaluation and deliberate notify-server registration.
+- Corrected cancel-only notification timeline comments. Stage 1–3 pushes remain
+  notify-server-only and notification registration remains independent.
 
-Exit: app boundary tests and existing local-validator freeze tests pass.
+Exit: PASS. App boundary tests cover exact program boundaries, stale/regressing
+time, canonical account validation, projection, Stage 4 guards, reconciliation
+refresh and local-history separation. No live RPC or execution action occurred.
+WP 4.6 remains separately gated.
 
 ### Work Package 6: Agent fee-state handling
 

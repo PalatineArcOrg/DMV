@@ -115,7 +115,11 @@ test('HeartbeatService refreshes Zustand only after confirmed persistence', () =
 
   assert.match(
     source,
-    /await persistConfirmedHeartbeat\(input\);[\s\S]*await this\.getStatus\(\);[\s\S]*useHeartbeatStore\.getState\(\)\.setStatus\(status\)/,
+    /await persistConfirmedHeartbeat\(input\);[\s\S]*await this\.getLocalHistoryStatus\(\);[\s\S]*useHeartbeatStore\.getState\(\)\.setStatus\(status\)/,
+  );
+  assert.match(
+    source,
+    /Activity\/history display only[\s\S]*never used[\s\S]*authoritative deadline/,
   );
   assert.match(source, /recordNonAuthoritativeActivityHeartbeat/);
   assert.doesNotMatch(source, /async confirmHeartbeat/);

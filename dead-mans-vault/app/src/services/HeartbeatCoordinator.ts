@@ -174,7 +174,7 @@ export interface HeartbeatCoordinatorDependencies {
   recordConfirmedHeartbeat: (
     input: ConfirmedHeartbeatLocalInput,
   ) => Promise<void>;
-  resetLocalEscalation: () => void;
+  refreshAuthoritativeDeadline: () => Promise<void>;
   sendLocalConfirmationNotification: (
     nextDueDate: Date,
   ) => void | Promise<void>;
@@ -574,9 +574,9 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
         }
 
         try {
-          dependencies.resetLocalEscalation();
+          await dependencies.refreshAuthoritativeDeadline();
         } catch {
-          // In-memory cache failure cannot negate verified chain success.
+          // A later lifecycle refresh repairs deadline UI from chain truth.
         }
 
         const nextDueSeconds =

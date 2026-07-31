@@ -26,7 +26,7 @@ export class HeartbeatService {
     input: ConfirmedHeartbeatInsert,
   ): Promise<void> {
     await persistConfirmedHeartbeat(input);
-    const status = await this.getStatus();
+    const status = await this.getLocalHistoryStatus();
     useHeartbeatStore.getState().setStatus(status);
   }
 
@@ -34,7 +34,7 @@ export class HeartbeatService {
     input: Parameters<typeof recordAuthoritativeHeartbeatCache>[0],
   ): Promise<void> {
     await recordAuthoritativeHeartbeatCache(input);
-    const status = await this.getStatus();
+    const status = await this.getLocalHistoryStatus();
     useHeartbeatStore.getState().setStatus(status);
   }
 
@@ -42,11 +42,15 @@ export class HeartbeatService {
     method: HeartbeatMethod,
   ): Promise<void> {
     await recordNonAuthoritativeLocalHeartbeat(method);
-    const status = await this.getStatus();
+    const status = await this.getLocalHistoryStatus();
     useHeartbeatStore.getState().setStatus(status);
   }
 
-  async getStatus(): Promise<HeartbeatStatus> {
+  /**
+   * Activity/history display only. This device-clock projection is never used
+   * for authoritative deadline, escalation, or execution decisions.
+   */
+  async getLocalHistoryStatus(): Promise<HeartbeatStatus> {
     const last = await getLastHeartbeat();
     const totalCount = await getHeartbeatCount();
 
@@ -80,6 +84,8 @@ export class HeartbeatService {
     ownerPubkey: PublicKey,
     intervalMs: number = 60000,
   ): void {
+    // Disabled unless explicitly configured. Detected owner activity creates a
+    // non-authoritative history row only; it cannot reset chain liveness.
     if (!this.config.methods.includes('on_chain_activity')) return;
     if (this.monitoringInterval) return;
 
