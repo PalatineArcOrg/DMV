@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# Controlled Android artifact wrapper retained for a later explicit gate.
-# Phase 4 source is devnet-only and rejects mainnet before prebuild.
+# Authoritative local Android release wrapper (WP1 Phase 1, §1.2).
+# The ONLY documented way to produce a production DMV APK. It runs the fail-closed manifest +
+# preflight checks, records provenance, then prebuilds + gradle-assembles the release APK and writes
+# a release-attestation file. Exits non-zero on any failed check.
 #
-#   DMV_APP_VARIANT=legacy_bridge|successor \
-#   EXPO_PUBLIC_EXPECTED_CLUSTER=devnet \
+#   EXPO_PUBLIC_EXPECTED_CLUSTER=mainnet-beta \
+#   EXPO_PUBLIC_RPC_URL=https://<mainnet-rpc> \
+#   EXPO_PUBLIC_NOTIFY_URL=https://notify.palatinearc.com \
+#   EXPO_PUBLIC_PROGRAM_ID=<program-id> \
 #     bash dead-mans-vault/release-tools/build-android-release.sh
 #
-# WP 4.8 does not authorise running this script or producing an APK.
+# NEVER call `gradlew assembleRelease` / `eas build` directly for a production APK — go through this.
+# The Android APK's trust boundary is this controlled host + wrapper (the program .so is CI-built and
+# attested separately). See docs/MAINNET-REMEDIATION-STATUS.md.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,9 +27,6 @@ log() { echo "→ $*"; }
 trap 'echo "✗ build-android-release aborted (line $LINENO). Partial android/ output is safe to discard (prebuild --clean regenerates it)." >&2' ERR
 
 CLUSTER="${EXPO_PUBLIC_EXPECTED_CLUSTER:-devnet}"
-if [ "$CLUSTER" != "devnet" ]; then
-  fail "Phase 4 Android builds are devnet-only; mainnet remains NO-GO."
-fi
 
 # 1. Working-tree cleanliness. Production prohibits the override.
 DIRTY="$(cd "$ROOT" && git status --porcelain)"

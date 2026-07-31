@@ -19,6 +19,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#080A0F"
       },
+      "package": "com.romulusol.deadmansvault",
+      "googleServicesFile": "./google-services.json",
       "versionCode": 107,
       "allowBackup": false,
       "permissions": [
@@ -40,6 +42,11 @@
       ],
       "expo-font",
       "expo-local-authentication"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b1221e75-1816-4ff6-80bf-8f15f31b27d9"
+      }
+    }
   }
 }

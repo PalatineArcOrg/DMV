@@ -2,7 +2,6 @@ import * as SQLite from 'expo-sqlite';
 import { HEARTBEAT_OPERATION_SCHEMA_SQL } from './heartbeatOperationRepoCore';
 import { AGENT_ROTATION_SCHEMA_SQL } from './agentRotationRepoCore';
 import { AGENT_CANDIDATE_FUNDING_SCHEMA_SQL } from './agentCandidateFundingRepoCore';
-import { SIGNING_MIGRATION_SCHEMA_SQL } from './signingMigrationRepoCore';
 
 let db: SQLite.SQLiteDatabase | null = null;
 
@@ -21,7 +20,6 @@ export async function initDatabase(): Promise<void> {
     ${HEARTBEAT_OPERATION_SCHEMA_SQL}
     ${AGENT_ROTATION_SCHEMA_SQL}
     ${AGENT_CANDIDATE_FUNDING_SCHEMA_SQL}
-    ${SIGNING_MIGRATION_SCHEMA_SQL}
 
     CREATE TABLE IF NOT EXISTS authoritative_heartbeat_cache (
       cluster TEXT NOT NULL,

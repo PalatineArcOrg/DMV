@@ -25,7 +25,6 @@ import { loadRpcOverride, verifyNetwork, type NetworkVerification } from './src/
 import { useNetworkStore } from './src/store/useNetworkStore';
 import { NetworkGateScreen } from './src/screens/NetworkGateScreen';
 import { COLORS, FONTS } from './src/utils/constants';
-import { BuildIdentityBanner } from './src/components/BuildIdentityBanner';
 
 const queryClient = new QueryClient();
 
@@ -134,7 +133,6 @@ export default function App() {
       <ConnectionProvider config={{ commitment: 'confirmed' }}>
         <SafeAreaProvider>
           <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
-          <BuildIdentityBanner />
           <RootNavigator />
         </SafeAreaProvider>
       </ConnectionProvider>

@@ -4,29 +4,35 @@
     "appVersionSource": "local"
   },
   "build": {
-    "legacy-bridge": {
+    "development": {
+      "developmentClient": true,
       "distribution": "internal",
-      "channel": "legacy-bridge-devnet",
       "env": {
-        "DMV_APP_VARIANT": "legacy_bridge",
-        "DMV_BUILD_MODE": "controlled_release",
         "EXPO_PUBLIC_EXPECTED_CLUSTER": "devnet"
       },
       "android": {
         "buildType": "apk"
       }
     },
-    "successor-devnet": {
+    "preview": {
       "distribution": "internal",
-      "channel": "successor-devnet",
       "env": {
-        "DMV_APP_VARIANT": "successor",
-        "DMV_BUILD_MODE": "controlled_release",
         "EXPO_PUBLIC_EXPECTED_CLUSTER": "devnet"
       },
       "android": {
         "buildType": "apk"
       }
+    },
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_EXPECTED_CLUSTER": "mainnet-beta"
+      },
+      "android": {
+        "buildType": "apk"
+      }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }

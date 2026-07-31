@@ -1,4 +1,8 @@
-import { Keypair, PublicKey, type Transaction } from '@solana/web3.js';
+import {
+  Keypair,
+  PublicKey,
+  type Transaction,
+} from '@solana/web3.js';
 import bs58 from 'bs58';
 
 export type AgentKeySlot = 'active' | 'candidate' | 'previous';
@@ -15,7 +19,11 @@ export type StoredAgentResolution =
 
 export interface AgentKeySlotStorage {
   get: (key: string, authenticated: boolean) => Promise<string | null>;
-  set: (key: string, value: string, authenticated: boolean) => Promise<boolean>;
+  set: (
+    key: string,
+    value: string,
+    authenticated: boolean,
+  ) => Promise<boolean>;
   remove: (key: string) => Promise<void>;
 }
 
@@ -29,9 +37,8 @@ export interface AgentKeySlotManager {
   resolveForOnChainPublicKey: (
     publicKey: string,
   ) => Promise<StoredAgentResolution>;
-  promoteCandidate: (oldAgent: string, candidateAgent: string) => Promise<void>;
-  promoteIncomingCandidate: (
-    legacyAgent: string,
+  promoteCandidate: (
+    oldAgent: string,
     candidateAgent: string,
   ) => Promise<void>;
   removeSlot: (slot: AgentKeySlot) => Promise<void>;
@@ -95,7 +102,10 @@ class CorruptSlotError extends Error {
 
 function isCanonicalPublicKey(value: string): boolean {
   try {
-    return value.length <= 64 && new PublicKey(value).toBase58() === value;
+    return (
+      value.length <= 64 &&
+      new PublicKey(value).toBase58() === value
+    );
   } catch {
     return false;
   }
@@ -119,7 +129,9 @@ export function createAgentKeySlotManager(
 ): AgentKeySlotManager {
   const cache = new Map<AgentKeySlot, Keypair>();
 
-  async function readMetadata(slot: AgentKeySlot): Promise<{
+  async function readMetadata(
+    slot: AgentKeySlot,
+  ): Promise<{
     publicKey: string | null;
     auth: string | null;
     complete: string | null;
@@ -152,7 +164,11 @@ export function createAgentKeySlotManager(
     }
     if (
       metadata.publicKey === null ||
-      (metadata.auth !== '0' && metadata.auth !== '1' && !isLegacyActive) ||
+      (
+        metadata.auth !== '0' &&
+        metadata.auth !== '1' &&
+        !isLegacyActive
+      ) ||
       (metadata.complete !== '1' && !isLegacyActive)
     ) {
       throw new CorruptSlotError(slot);
@@ -209,7 +225,11 @@ export function createAgentKeySlotManager(
       authenticated,
     );
     await storage.set(names.publicKey, publicKey, false);
-    await storage.set(names.auth, actualAuthenticated ? '1' : '0', false);
+    await storage.set(
+      names.auth,
+      actualAuthenticated ? '1' : '0',
+      false,
+    );
     await storage.set(names.complete, '1', false);
 
     const oldCached = cache.get(slot);
@@ -239,7 +259,11 @@ export function createAgentKeySlotManager(
       slot: AgentKeySlot;
       keypair: Keypair;
     }> = [];
-    for (const slot of ['active', 'candidate', 'previous'] as const) {
+    for (const slot of [
+      'active',
+      'candidate',
+      'previous',
+    ] as const) {
       try {
         const loaded = await readSlot(slot);
         if (loaded.publicKey === publicKey) {
@@ -396,58 +420,6 @@ export function createAgentKeySlotManager(
         retained.publicKey !== oldAgent
       ) {
         throw new Error('Agent key promotion read-back validation failed');
-      }
-      await removeSlot('candidate');
-    },
-    promoteIncomingCandidate: async (_legacyAgent, candidateAgent) => {
-      const activeMetadata = await readMetadata('active');
-      const previousMetadata = await readMetadata('previous');
-      if (
-        previousMetadata.publicKey !== null ||
-        previousMetadata.auth !== null ||
-        previousMetadata.complete !== null
-      ) {
-        throw new Error('Incoming promotion cannot overwrite a previous slot');
-      }
-
-      // Idempotent restart repair after active was copied.
-      if (activeMetadata.publicKey === candidateAgent) {
-        const active = await readSlot('active');
-        if (active.publicKey !== candidateAgent) {
-          throw new CorruptSlotError('active');
-        }
-        const candidateMetadata = await readMetadata('candidate');
-        if (candidateMetadata.publicKey === candidateAgent) {
-          await removeSlot('candidate');
-        } else if (candidateMetadata.publicKey !== null) {
-          throw new CorruptSlotError('candidate');
-        }
-        return;
-      }
-      if (
-        activeMetadata.publicKey !== null ||
-        activeMetadata.auth !== null ||
-        activeMetadata.complete !== null
-      ) {
-        throw new Error(
-          'Incoming promotion requires an empty successor active slot',
-        );
-      }
-      const candidate = await readSlot('candidate');
-      if (candidate.publicKey !== candidateAgent) {
-        throw new Error(
-          'Candidate slot does not match the verified on-chain agent',
-        );
-      }
-      await writeSlot(
-        'active',
-        Keypair.fromSecretKey(candidate.keypair.secretKey),
-        candidate.authenticated,
-      );
-      if ((await readSlot('active')).publicKey !== candidateAgent) {
-        throw new Error(
-          'Successor candidate promotion read-back validation failed',
-        );
       }
       await removeSlot('candidate');
     },

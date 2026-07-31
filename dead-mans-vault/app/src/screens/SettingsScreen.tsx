@@ -33,14 +33,9 @@ import { registerMessageV2, deregisterMessageV2, generateNonceV2 } from '../util
 import { getDeadlineStageDurations, toNotificationStageDurations } from '../utils/deadlineStageConfig';
 import { PushRegistrationService } from '../services/PushRegistrationService';
 import { useEscalationStore } from '../store/useEscalationStore';
+import appJson from '../../app.json';
 import { AgentFeeCard } from '../components/AgentFeeCard';
 import { AgentRotationCard } from '../components/AgentRotationCard';
-import { BuildIdentityCard } from '../components/BuildIdentityCard';
-import { getRuntimeBuildIdentity } from '../config/runtimeIdentity';
-import {
-  getSigningMigration,
-  transitionStoredSigningMigration,
-} from '../db/signingMigrationRepo';
 
 function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -50,7 +45,6 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 export function SettingsScreen() {
-  const buildIdentity = getRuntimeBuildIdentity();
   const navigation = useNavigation<any>();
   const { publicKey, connected, connect, disconnect, signTransaction, signMessage } = useWallet();
   const { isDemoMode, setDemoMode, incrementTap } = useDemoStore();
@@ -61,12 +55,6 @@ export function SettingsScreen() {
   const [copied, setCopied] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
   const [notifStatus, setNotifStatus] = useState<string>('...');
-  const [successorTokenEligible, setSuccessorTokenEligible] =
-    useState(buildIdentity.variant === 'legacy_bridge');
-  const [
-    successorTokenObservationAllowed,
-    setSuccessorTokenObservationAllowed,
-  ] = useState(buildIdentity.variant === 'legacy_bridge');
 
   // Custom RPC setting
   const [rpcInput, setRpcInput] = useState('');
@@ -171,57 +159,6 @@ export function SettingsScreen() {
   const notifCluster = isDevnet() ? 'devnet' : 'mainnet-beta';
   const mapLifecycleToUi = useCallback((s: LifecycleState): NotifRegState => (s === 'error' ? 'failed' : (s as NotifRegState)), []);
 
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      if (buildIdentity.variant === 'legacy_bridge') {
-        setSuccessorTokenEligible(true);
-        setSuccessorTokenObservationAllowed(true);
-        return () => {
-          active = false;
-        };
-      }
-      if (!publicKey) {
-        setSuccessorTokenEligible(false);
-        setSuccessorTokenObservationAllowed(false);
-        return () => {
-          active = false;
-        };
-      }
-      const owner = publicKey.toBase58();
-      const vault = deriveVaultB58(owner);
-      getSigningMigration({
-        cluster: 'devnet',
-        programId: PROGRAM_ID,
-        owner,
-        vault,
-      })
-        .then((record) => {
-          if (!active) return;
-          setSuccessorTokenEligible(
-            Boolean(
-              record &&
-                (record.state ===
-                  'notification_decision_required' ||
-                  record.notificationDecision === 'registered'),
-            ),
-          );
-          setSuccessorTokenObservationAllowed(
-            record?.notificationDecision === 'registered',
-          );
-        })
-        .catch(() => {
-          if (active) {
-            setSuccessorTokenEligible(false);
-            setSuccessorTokenObservationAllowed(false);
-          }
-        });
-      return () => {
-        active = false;
-      };
-    }, [buildIdentity.variant, deriveVaultB58, publicKey]),
-  );
-
   // WP6 — token lifecycle: LOCAL-ONLY observation. Derives the notification state
   // (enabled / update_required / token_unavailable / owner_mismatch / disabled) by
   // comparing the current device-token fingerprint to the confirmed record, and on a
@@ -238,10 +175,7 @@ export function SettingsScreen() {
       programId: PROGRAM_ID,
       getConnectedOwner: () => publicKey?.toBase58() ?? null,
       deriveVault: deriveVaultB58,
-      getCurrentToken: () =>
-        successorTokenObservationAllowed
-          ? PushRegistrationService.getDeviceToken()
-          : Promise.resolve(null),
+      getCurrentToken: () => PushRegistrationService.getDeviceToken(),
       sha256Hex: notifSha256Hex,
       getSetting,
       setSetting,
@@ -270,7 +204,7 @@ export function SettingsScreen() {
       observer.dispose();
       notifObserverRef.current = null;
     };
-  }, [publicKey, notifCluster, deriveVaultB58, notifSha256Hex, mapLifecycleToUi, successorTokenObservationAllowed]);
+  }, [publicKey, notifCluster, deriveVaultB58, notifSha256Hex, mapLifecycleToUi]);
 
   // Re-reconcile on Settings focus (LOCAL only — never signs or mutates the server). The
   // observer's checkNow durably repairs a pending local tombstone (LOCAL write only) before
@@ -286,17 +220,6 @@ export function SettingsScreen() {
     if (notifReg.state === 'registering' || notifBusyRef.current) return; // single-flight
     if (!publicKey) {
       setNotifReg({ state: 'failed', message: 'Connect your wallet first.' });
-      return;
-    }
-    if (
-      buildIdentity.variant === 'successor' &&
-      !successorTokenEligible
-    ) {
-      setNotifReg({
-        state: 'failed',
-        message:
-          'Confirm a deliberate successor heartbeat before requesting this installation’s notification token.',
-      });
       return;
     }
     const owner = publicKey.toBase58();
@@ -349,29 +272,6 @@ export function SettingsScreen() {
       }
       const result = ex.value;
       if (result.ok) {
-        setSuccessorTokenObservationAllowed(true);
-        if (buildIdentity.variant === 'successor') {
-          try {
-            const migrationIdentity = {
-              cluster: 'devnet' as const,
-              programId: PROGRAM_ID,
-              owner,
-              vault,
-            };
-            await transitionStoredSigningMigration(
-              migrationIdentity,
-              'notification_registered',
-              { notificationDecision: 'registered' },
-            );
-            await transitionStoredSigningMigration(
-              migrationIdentity,
-              'bridge_retention',
-            );
-          } catch {
-            // Server registration remains valid. The durable migration
-            // decision can be repaired without another registration.
-          }
-        }
         // Re-derive authoritatively from storage + the latest token. This bumps the observer
         // generation (so no stale in-flight check can stomp this result) and naturally
         // implements the §6 token-change race: enabled only if the accepted token is still the
@@ -396,7 +296,6 @@ export function SettingsScreen() {
       notifObserverRef.current?.invalidate(); // kill any stale in-flight check so it can't stomp the terminal state
     }
   }, [
-    buildIdentity.variant,
     deriveVaultB58,
     escalationConfig,
     isDemoMode,
@@ -405,53 +304,6 @@ export function SettingsScreen() {
     notifSha256Hex,
     publicKey,
     signMessage,
-    successorTokenEligible,
-  ]);
-
-  const handleDeferSuccessorNotifications = useCallback(async () => {
-    if (
-      buildIdentity.variant !== 'successor' ||
-      !successorTokenEligible ||
-      !publicKey
-    ) {
-      return;
-    }
-    const owner = publicKey.toBase58();
-    const identity = {
-      cluster: 'devnet' as const,
-      programId: PROGRAM_ID,
-      owner,
-      vault: deriveVaultB58(owner),
-    };
-    try {
-      await transitionStoredSigningMigration(
-        identity,
-        'notification_declined',
-        { notificationDecision: 'declined' },
-      );
-      await transitionStoredSigningMigration(
-        identity,
-        'bridge_retention',
-      );
-      setSuccessorTokenEligible(false);
-      setSuccessorTokenObservationAllowed(false);
-      setNotifReg({
-        state: 'not_enabled',
-        message:
-          'Successor notifications were explicitly deferred. Heartbeat authority and permissionless execution are unchanged.',
-      });
-    } catch {
-      setNotifReg({
-        state: 'failed',
-        message:
-          'The notification decision could not be recorded. No registration was changed.',
-      });
-    }
-  }, [
-    buildIdentity.variant,
-    deriveVaultB58,
-    publicKey,
-    successorTokenEligible,
   ]);
 
   // WP6: DELIBERATE owner-signed DEREGISTRATION core. Only ever called from a confirmed
@@ -747,7 +599,6 @@ export function SettingsScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Text style={styles.header}>Settings</Text>
-      <BuildIdentityCard />
 
       {/* Vault Status */}
       {vaultConfig && isOwner && (
@@ -885,9 +736,9 @@ export function SettingsScreen() {
                 vault the register just fails ownership gracefully. */}
             {notifReg.state !== 'enabled' ? (
               <TouchableOpacity
-                disabled={notifReg.state === 'registering' || notifReg.state === 'disabling' || notifReg.state === 'checking' || !connected || (buildIdentity.variant === 'successor' && !successorTokenEligible)}
+                disabled={notifReg.state === 'registering' || notifReg.state === 'disabling' || notifReg.state === 'checking' || !connected}
                 onPress={handleEnableSignedNotifications}
-                style={[styles.netBtn, (notifReg.state === 'registering' || notifReg.state === 'disabling' || notifReg.state === 'checking' || !connected || (buildIdentity.variant === 'successor' && !successorTokenEligible)) && { opacity: 0.5 }]}
+                style={[styles.netBtn, (notifReg.state === 'registering' || notifReg.state === 'disabling' || notifReg.state === 'checking' || !connected) && { opacity: 0.5 }]}
               >
                 <Text style={styles.netBtnText}>
                   {notifReg.state === 'registering'
@@ -901,26 +752,6 @@ export function SettingsScreen() {
                           : 'Enable notifications (signed)'}
                 </Text>
               </TouchableOpacity>
-            ) : null}
-
-            {buildIdentity.variant === 'successor' &&
-            successorTokenEligible &&
-            notifReg.state !== 'enabled' ? (
-              <TouchableOpacity
-                onPress={handleDeferSuccessorNotifications}
-                style={{ marginTop: 8, paddingVertical: 10, alignItems: 'center' }}
-              >
-                <Text style={{ color: COLORS.warning, fontFamily: FONTS.primaryMedium, fontSize: 13 }}>
-                  Defer successor notifications
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-
-            {buildIdentity.variant === 'successor' &&
-            !successorTokenEligible ? (
-              <Text style={{ color: COLORS.textSecondary, fontFamily: FONTS.primaryMedium, fontSize: 12, marginTop: 8 }}>
-                Notification-token access remains paused until this successor proves a separate deliberate heartbeat.
-              </Text>
             ) : null}
 
             {/* Disable (when a registration exists on this device). */}
@@ -1135,7 +966,7 @@ export function SettingsScreen() {
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <View style={styles.card}>
           <TouchableOpacity onPress={incrementTap} activeOpacity={0.7}>
-            <SettingRow icon="information-outline" iconColor="rgba(255,255,255,0.3)" label="Version" value={`v${buildIdentity.version}`} />
+            <SettingRow icon="information-outline" iconColor="rgba(255,255,255,0.3)" label="Version" value={`v${appJson.expo.version}`} />
           </TouchableOpacity>
           <View style={styles.rowDivider} />
           <SettingRow icon="cellphone" iconColor="rgba(255,255,255,0.3)" label="Built for" value="Solana Seeker" />
