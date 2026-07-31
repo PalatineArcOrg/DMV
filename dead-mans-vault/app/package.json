@@ -7,12 +7,12 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "build:eas:preview": "npx eas build --profile preview --platform android",
-    "build:eas:preview:local": "npx eas build --profile preview --platform android --local",
-    "build:eas:dev": "npx eas build --profile development --platform android",
+    "config:identity": "npx expo config --type public",
+    "build:eas:legacy-bridge": "npx eas build --profile legacy-bridge --platform android",
+    "build:eas:successor-devnet": "npx eas build --profile successor-devnet --platform android",
     "preflight:release": "node ../release-tools/verify-manifest.mjs && node ../release-tools/preflight-prod-build.mjs --surface app",
-    "build:production": "bash ../release-tools/build-android-release.sh",
-    "test": "node --test 'src/**/*.test.ts'"
+    "verify:android-artifact": "node scripts/verify-android-artifact.mjs",
+    "test": "node --test 'src/**/*.test.ts' 'scripts/**/*.test.mjs'"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
@@ -30,6 +30,7 @@
     "buffer": "^6.0.3",
     "date-fns": "4.4.0",
     "expo": "^52.0.43",
+    "expo-constants": "~17.0.8",
     "expo-clipboard": "~7.0.1",
     "expo-crypto": "~14.0.2",
     "expo-dev-client": "~5.0.19",

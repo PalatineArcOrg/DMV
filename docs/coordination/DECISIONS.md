@@ -353,3 +353,51 @@ old application remains installed
 Status: Implemented and covered by app tests plus a disposable local-validator
 integration. No live vault, Fox, program/IDL, Android signing, APK or deployment
 action was performed.
+
+## WP 4.8 side-by-side Android identity boundary
+
+WP 4.8 uses two simultaneously installed Android identities.
+
+The legacy bridge retains the historical package and signing certificate only
+to preserve the existing device-held agent key and provide rollback. It is a
+private devnet bridge and must never be publicly distributed.
+
+The successor uses a permanently distinct Android package, EAS project,
+Firebase Android client and controlled signing certificate. No agent secret is
+copied between applications.
+
+Authority is transferred through owner-authorised, successor-agent-proven
+on-chain rotation. Migration is not complete until the successor submits and
+verifies a separate deliberate heartbeat.
+
+The legacy bridge remains installed until a later explicit cleanup gate.
+
+The permanent successor package is a provisioning decision, not a source
+default. `DMV_SUCCESSOR_ANDROID_PACKAGE` and the successor EAS/Firebase/URI
+identity values are required. Controlled release configuration rejects the
+legacy package and temporary fixture suffixes.
+
+The applications share no UID, storage, backup, content provider or secret
+transport. The successor intentionally starts with empty package-specific
+SecureStore and proves only its replacement key; it never receives or needs the
+legacy secret.
+
+Both build identities are devnet-only. The Phase 4 source has no active mainnet
+Android profile, and dynamic configuration rejects every non-devnet cluster.
+
+Firebase package metadata is checked before prebuild. Certificate SHA-256
+fingerprint, rather than certificate subject, is the future artifact authority.
+No real Firebase file or signing credential is committed or exposed.
+
+The successor may request its own notification token only after a separate
+confirmed successor heartbeat. Signed notification registration or explicit
+decline remains deliberate and does not change heartbeat authority or
+permissionless execution.
+
+Rollback reuses the WP 4.7 proof model: the retained bridge key is the proposed
+replacement and transaction payer, while the owner authorises `rotate_agent`.
+It is journalled before send, reconciled without resend and never automatic.
+
+Status: Source architecture and disposable tests implemented. Permanent
+package/EAS/Firebase/certificate provisioning, artifacts, installation, live
+migration and bridge cleanup remain separate explicit gates.

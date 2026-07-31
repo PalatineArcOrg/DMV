@@ -26,6 +26,10 @@ import {
   needsAgentRotationForState,
 } from '../services/AgentMigrationFlow';
 import { COLORS, FONTS } from '../utils/constants';
+import {
+  classifyMissingAgentForIdentity,
+  getRuntimeBuildIdentity,
+} from '../config/runtimeIdentity';
 
 const Tab = createBottomTabNavigator();
 const DashboardStack = createNativeStackNavigator();
@@ -140,6 +144,7 @@ const DMVDarkTheme = {
     primary: COLORS.accent,
   },
 };
+const BUILD_IDENTITY = getRuntimeBuildIdentity();
 
 export function RootNavigator() {
   const { publicKey, connected } = useWallet();
@@ -216,6 +221,22 @@ export function RootNavigator() {
               );
 
               if (needsRotation) {
+                const missingState =
+                  classifyMissingAgentForIdentity({
+                    identity: BUILD_IDENTITY,
+                    hasEverEstablishedActiveKey: hasKey,
+                  });
+                if (
+                  missingState === 'incoming_migration_available' &&
+                  !hasKey
+                ) {
+                  Alert.alert(
+                    'Incoming migration available',
+                    'This successor installation has its own empty secure key store. The current on-chain legacy agent remains unchanged.\n\nOpen Settings only when you are ready to begin the deliberate side-by-side migration. No key, funding, wallet approval, rotation, heartbeat or notification registration has started automatically.',
+                    [{ text: 'OK', style: 'cancel' }],
+                  );
+                  return;
+                }
                 Alert.alert(
                   'Agent Recovery Required',
                   'The on-chain heartbeat agent does not match a usable active key on this installation. No key was replaced and no rotation was submitted.\n\nDo not uninstall the app or clear its data. Open Settings to inspect the deliberate recovery flow.',

@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { SchedulableTriggerInputTypes } from 'expo-notifications';
+import { getRuntimeBuildIdentity } from '../config/runtimeIdentity';
 
 // Show notifications when app is in foreground
 Notifications.setNotificationHandler({
@@ -16,6 +17,9 @@ const CHANNELS = {
   escalation: 'escalation',
   execution: 'execution',
 } as const;
+const BUILD_IDENTITY = getRuntimeBuildIdentity();
+const notificationTitle = (title: string) =>
+  `${BUILD_IDENTITY.variant === 'legacy_bridge' ? 'Legacy Bridge' : 'Successor'} · ${title}`;
 
 export function formatDuration(seconds: number): string {
   const days = Math.floor(seconds / 86400);
@@ -40,20 +44,20 @@ export class NotificationService {
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync(CHANNELS.heartbeat, {
-        name: 'Heartbeat Reminders',
+        name: `${BUILD_IDENTITY.notificationChannelLabel} Heartbeats`,
         importance: Notifications.AndroidImportance.HIGH,
         sound: 'default',
       });
 
       await Notifications.setNotificationChannelAsync(CHANNELS.escalation, {
-        name: 'Escalation Alerts',
+        name: `${BUILD_IDENTITY.notificationChannelLabel} Escalation`,
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         sound: 'default',
       });
 
       await Notifications.setNotificationChannelAsync(CHANNELS.execution, {
-        name: 'Execution Warnings',
+        name: `${BUILD_IDENTITY.notificationChannelLabel} Execution`,
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 500, 250, 500],
         sound: 'default',
@@ -68,7 +72,7 @@ export class NotificationService {
   static async sendHeartbeatReminder(): Promise<void> {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'Heartbeat due',
+        title: notificationTitle('Heartbeat due'),
         body: "Your Dead Man's Vault check-in is overdue. Open the app to confirm you're OK and reset the timer.",
         ...(Platform.OS === 'android' && { channelId: CHANNELS.heartbeat }),
       },
@@ -82,7 +86,7 @@ export class NotificationService {
       : '';
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'Heartbeat overdue',
+        title: notificationTitle('Heartbeat overdue'),
         body: `Still no check-in. Confirm soon, or your estate plan begins distributing to your beneficiaries.${beneficiaryText}`,
         ...(Platform.OS === 'android' && { channelId: CHANNELS.escalation }),
       },
@@ -94,7 +98,7 @@ export class NotificationService {
     const timeText = formatDuration(secondsRemaining);
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'Final warning',
+        title: notificationTitle('Final warning'),
         body: `Your estate plan executes in ${timeText}. Confirm your heartbeat now to cancel it.`,
         ...(Platform.OS === 'android' && { channelId: CHANNELS.execution }),
       },
@@ -105,7 +109,7 @@ export class NotificationService {
   static async sendExecutionStarted(): Promise<void> {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'Estate plan executing',
+        title: notificationTitle('Estate plan executing'),
         body: 'The grace period elapsed. Your assets are being distributed to your beneficiaries on-chain — automatically, nothing to do.',
         ...(Platform.OS === 'android' && { channelId: CHANNELS.execution }),
       },
@@ -124,7 +128,7 @@ export class NotificationService {
     });
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'Heartbeat confirmed',
+        title: notificationTitle('Heartbeat confirmed'),
         body: `Your vault is secure. Next check-in due ${formatted}.`,
         ...(Platform.OS === 'android' && { channelId: CHANNELS.heartbeat }),
       },
@@ -141,7 +145,9 @@ export class NotificationService {
   ): Promise<void> {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: `Distributing… (${stepNum}/${totalSteps})`,
+        title: notificationTitle(
+          `Distributing… (${stepNum}/${totalSteps})`,
+        ),
         body: description,
         ...(Platform.OS === 'android' && { channelId: CHANNELS.execution }),
       },
@@ -155,7 +161,7 @@ export class NotificationService {
   ): Promise<void> {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'Estate plan complete',
+        title: notificationTitle('Estate plan complete'),
         body: `${transferCount} transfer${transferCount !== 1 ? 's' : ''} · ${totalSolDisplay} SOL distributed to your beneficiaries.`,
         ...(Platform.OS === 'android' && { channelId: CHANNELS.execution }),
       },
@@ -166,7 +172,7 @@ export class NotificationService {
   static async sendExecutionFailed(stepDescription: string): Promise<void> {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: 'Execution paused',
+        title: notificationTitle('Execution paused'),
         body: `Distribution halted at: ${stepDescription}. It will resume automatically.`,
         ...(Platform.OS === 'android' && { channelId: CHANNELS.execution }),
       },

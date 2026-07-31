@@ -116,6 +116,13 @@ export class KeyManager {
     await this.slots.promoteCandidate(oldAgent, candidateAgent);
   }
 
+  async promoteIncomingCandidate(
+    legacyAgent: string,
+    candidateAgent: string,
+  ): Promise<void> {
+    await this.slots.promoteIncomingCandidate(legacyAgent, candidateAgent);
+  }
+
   async deleteSlot(slot: AgentKeySlot): Promise<void> {
     await this.slots.removeSlot(slot);
   }

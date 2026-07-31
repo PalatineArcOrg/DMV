@@ -15,6 +15,7 @@ import { toUint8Array } from "js-base64";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { isDevnet } from "./rpcConfig";
+import { getRuntimeBuildIdentity } from "../config/runtimeIdentity";
 
 const CHAIN = "solana";
 // Cluster follows the active RPC URL (devnet today, mainnet on a mainnet build)
@@ -107,9 +108,10 @@ async function persistAuthorization(
   await AsyncStorage.setItem(AUTHORIZATION_STORAGE_KEY, JSON.stringify(auth));
 }
 
+const buildIdentity = getRuntimeBuildIdentity();
 export const APP_IDENTITY = {
-  name: "Dead Man's Vault",
-  uri: "https://deadmansvault.app",
+  name: buildIdentity.appName,
+  uri: buildIdentity.walletIdentityUri,
 };
 
 export function useAuthorization() {

@@ -248,23 +248,24 @@ yarn install
 
 ### Build the App
 
-**Production APK — authoritative path.** The local release wrapper is the only supported way to
-produce a release APK; it runs the fail-closed manifest + preflight checks and writes an attestation:
+**Android migration artifacts are not authorised by WP 4.8.** A later
+explicit gate may use the devnet-only wrapper after identity provisioning:
 
 ```bash
 cd app
+DMV_APP_VARIANT=legacy_bridge \
 EXPO_PUBLIC_EXPECTED_CLUSTER=devnet \
-  bash ../release-tools/build-android-release.sh    # or: npm run build:production
-# → android/app/build/outputs/apk/release/app-release.apk (+ release-attestation.json)
-# For mainnet: EXPO_PUBLIC_EXPECTED_CLUSTER=mainnet-beta + the mainnet RPC/notify/program env.
+  bash ../release-tools/build-android-release.sh
+# Phase 4 Android identity configuration rejects mainnet.
 ```
 
 Non-authoritative helpers (development/troubleshooting only — they **skip** the preflight/attestation,
 so never use them as a production-release path):
 
 ```bash
-# EAS cloud preview/dev builds:
-npm run build:eas:preview      # (or build:eas:dev)
+# EAS profile names reserved for the later controlled gate:
+npm run build:eas:legacy-bridge
+npm run build:eas:successor-devnet
 # Raw native steps the wrapper runs internally:
 npx expo prebuild --platform android --clean && (cd android && ./gradlew assembleRelease)
 ```

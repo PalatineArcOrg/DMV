@@ -26,10 +26,7 @@ function managerWithKeys(keys: Array<Keypair>) {
   let index = 0;
   return {
     ...memory,
-    manager: createAgentKeySlotManager(
-      memory.storage,
-      () => keys[index++],
-    ),
+    manager: createAgentKeySlotManager(memory.storage, () => keys[index++]),
   };
 }
 
@@ -82,7 +79,10 @@ test('incomplete candidate metadata is detected without corrupting active', asyn
   const active = Keypair.generate();
   const { manager, values } = managerWithKeys([active]);
   await manager.generateActive();
-  values.set('dmv_agent_candidate_public_key', Keypair.generate().publicKey.toBase58());
+  values.set(
+    'dmv_agent_candidate_public_key',
+    Keypair.generate().publicKey.toBase58(),
+  );
 
   const resolution = await manager.resolveForOnChainPublicKey(
     active.publicKey.toBase58(),
@@ -102,11 +102,7 @@ test('resolver reports active, candidate and previous matches exactly', async ()
   const active = Keypair.generate();
   const candidate = Keypair.generate();
   const nextCandidate = Keypair.generate();
-  const { manager } = managerWithKeys([
-    active,
-    candidate,
-    nextCandidate,
-  ]);
+  const { manager } = managerWithKeys([active, candidate, nextCandidate]);
   await manager.generateActive();
   await manager.generateCandidate();
   await manager.promoteCandidate(
@@ -116,11 +112,8 @@ test('resolver reports active, candidate and previous matches exactly', async ()
   await manager.generateCandidate();
 
   assert.equal(
-    (
-      await manager.resolveForOnChainPublicKey(
-        candidate.publicKey.toBase58(),
-      )
-    ).status,
+    (await manager.resolveForOnChainPublicKey(candidate.publicKey.toBase58()))
+      .status,
     'active_match',
   );
   assert.equal(
@@ -132,11 +125,8 @@ test('resolver reports active, candidate and previous matches exactly', async ()
     'candidate_match',
   );
   assert.equal(
-    (
-      await manager.resolveForOnChainPublicKey(
-        active.publicKey.toBase58(),
-      )
-    ).status,
+    (await manager.resolveForOnChainPublicKey(active.publicKey.toBase58()))
+      .status,
     'previous_match',
   );
 });
@@ -187,15 +177,11 @@ test('loading by public key requires an exact single match', async () => {
   await manager.generateActive();
 
   await assert.rejects(
-    manager.loadByExactPublicKey(
-      Keypair.generate().publicKey.toBase58(),
-    ),
+    manager.loadByExactPublicKey(Keypair.generate().publicKey.toBase58()),
   );
   assert.equal(
     (
-      await manager.loadByExactPublicKey(
-        active.publicKey.toBase58(),
-      )
+      await manager.loadByExactPublicKey(active.publicKey.toBase58())
     ).publicKey.toBase58(),
     active.publicKey.toBase58(),
   );
@@ -208,10 +194,7 @@ test('legacy active slot without auth/complete markers remains readable and exac
     'dmv_agent_secret_key',
     (await import('bs58')).default.encode(key.secretKey),
   );
-  values.set(
-    'dmv_agent_public_key',
-    key.publicKey.toBase58(),
-  );
+  values.set('dmv_agent_public_key', key.publicKey.toBase58());
 
   assert.equal(
     (await manager.loadSlot('active')).publicKey.toBase58(),
@@ -232,11 +215,11 @@ test('promotion retains previous, activates candidate and removes only duplicate
   );
 
   assert.equal(
-    (await manager.getPublicKey('active')),
+    await manager.getPublicKey('active'),
     candidate.publicKey.toBase58(),
   );
   assert.equal(
-    (await manager.getPublicKey('previous')),
+    await manager.getPublicKey('previous'),
     active.publicKey.toBase58(),
   );
   assert.equal(await manager.getPublicKey('candidate'), null);
@@ -344,6 +327,42 @@ test('slot signing never serialises or persists the private key', async () => {
   assert.equal(
     Array.from(values.keys()).some((key) => key.includes('transaction')),
     false,
+  );
+});
+
+test('side-by-side successor promotes a verified candidate from an empty active slot', async () => {
+  const candidate = Keypair.generate();
+  const legacyPublicKey = Keypair.generate().publicKey.toBase58();
+  const { manager } = managerWithKeys([candidate]);
+  await manager.generateCandidate();
+
+  await manager.promoteIncomingCandidate(
+    legacyPublicKey,
+    candidate.publicKey.toBase58(),
+  );
+  await manager.promoteIncomingCandidate(
+    legacyPublicKey,
+    candidate.publicKey.toBase58(),
+  );
+
+  assert.equal(
+    await manager.getPublicKey('active'),
+    candidate.publicKey.toBase58(),
+  );
+  assert.equal(await manager.getPublicKey('candidate'), null);
+  assert.equal(await manager.getPublicKey('previous'), null);
+});
+
+test('ordinary same-installation promotion still requires its active old key', async () => {
+  const candidate = Keypair.generate();
+  const { manager } = managerWithKeys([candidate]);
+  await manager.generateCandidate();
+  await assert.rejects(
+    manager.promoteCandidate(
+      Keypair.generate().publicKey.toBase58(),
+      candidate.publicKey.toBase58(),
+    ),
+    /missing/i,
   );
 });
 
