@@ -50,18 +50,24 @@ program was not queried in this no-live-action gate.
 
 ## Signing-identity migration safety
 
-A future Android signing-certificate migration must use side-by-side identities and
-staged key material. The existing key and app remain intact until an owner-signed
-rotation is confirmed, the new agent is funded and the new key proves it can submit
-a heartbeat. The current destroy-first `MigrationService.executeRotation` sequence
-is not an acceptable continuity mechanism.
+The destroy-first `MigrationService.executeRotation` sequence is not an acceptable
+continuity mechanism: it removed the only usable agent key before the replacement
+was confirmed on-chain. It has been removed and replaced by the WP 4.7 primitive —
+the existing key stays intact until an owner-signed rotation is confirmed, the new
+agent is funded, and the new key proves it can sign.
+
+The residual constraint is recorded but not being solved now: a differently signed
+Android APK cannot read the current app's Keystore-backed SecureStore, so a
+signing-identity change cannot carry the existing agent key across.
 
 No APK build, install, uninstall, app-data clear or signing-identity change is
 authorized by this decision.
 
-Status: The crash-safe rotation primitive is implemented in WP 4.7. The
-side-by-side Android package/signing migration remains unimplemented and separately
-gated as WP 4.8.
+Status: The crash-safe rotation primitive is implemented in WP 4.7 and is the
+accepted answer for device and key migration within one app. The side-by-side
+Android package/signing direction (WP 4.8) is **cancelled** — see PHASE4.md. DMV
+remains one app, `com.romulusol.deadmansvault`. If signing identity must change in
+future, that is new separately gated work starting from the WP 4.7 primitive.
 
 ## WP 4.1 characterization boundary
 
@@ -337,18 +343,21 @@ not change unexpectedly, vault timestamps did not regress, the heartbeat timesta
 was reset consistently and `total_heartbeats` did not increment. Only then may
 candidate promotion occur.
 
-WP 4.8 must use this primitive as:
+Within the single DMV app the primitive is used as:
 
 ```text
-old application remains installed
-→ new separately signed/package-distinct application generates candidate
-→ candidate is funded
-→ owner authorises rotation
-→ candidate signs as rotation payer
-→ chain confirms candidate
-→ new app proves heartbeat capability
-→ only then old app is removed
+active key remains authorised and untouched
+→ candidate generated into its own SecureStore slot
+→ candidate deliberately funded
+→ owner authorises rotation; candidate signs as rotation fee payer
+→ chain confirms the candidate as the authorised agent
+→ canonical post-state verified
+→ candidate promoted, old key retained in the previous slot
 ```
+
+The cross-application variant of this sequence belonged to WP 4.8 and is cancelled
+with it. Any future signing-identity change starts from this primitive as new,
+separately gated work.
 
 Status: Implemented and covered by app tests plus a disposable local-validator
 integration. No live vault, Fox, program/IDL, Android signing, APK or deployment

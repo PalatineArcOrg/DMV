@@ -4,8 +4,13 @@
 
 Make the existing onchain heartbeat flow transactionally honest from the app's
 perspective, make ambiguous outcomes recoverable, make missing or mismatched agent
-states explicit, and design safe agent continuity for a future Android
-signing-certificate migration.
+states explicit, and make agent rotation crash-safe so the last usable key is never
+destroyed.
+
+Scope note: an earlier revision of this objective also covered designing agent
+continuity across a future Android signing-certificate migration. That direction
+became Work Package 8 and was cancelled (see below). Phase 4 delivers WP 4.1–4.7
+and ends there. DMV remains one app; mainnet remains NO-GO.
 
 Phase 4 is not an implementation of onchain heartbeat from scratch. The app already
 submits `record_heartbeat` with the device agent as signer and fee payer.
@@ -397,20 +402,32 @@ possession proof and crash-safe key continuity. The program still permits an
 owner-only rotation from another client; protocol-enforced new-agent proof would
 require a separately gated program/IDL upgrade. No live action occurred.
 
-### Work Package 8: Side-by-side Android signing-identity migration architecture
+### Work Package 8: CANCELLED — side-by-side Android signing-identity migration
 
-- Treat differently signed apps as separate Android identities with isolated secure
-  storage; do not assume the existing key can be read or copied.
-- Add staged-key storage rather than overwriting the active key.
-- Let the future side-by-side app generate and prove access to a candidate key,
-  then construct an owner-reviewed rotate-and-fund transaction.
-- Retain the old app and old key until the rotation is confirmed, reconciled and a
-  heartbeat signed by the new key succeeds.
-- Define rollback for cancellation, expiry, mismatch and a new key that cannot sign.
-- Do not change signing identity, build an APK, uninstall the current app or clear
-  app data in this work package.
+Implemented as `55a4a43` and reverted by the owner as `daf594e`. The resulting tree
+is byte-identical to the accepted WP 4.7 tree.
 
-Exit: architecture and tests reviewed; Android signing remains a separate gate.
+It was cancelled on product grounds, not on implementation quality. The package had
+begun introducing a second Android identity — a distinct package name, a second EAS
+project, a second Firebase Android client, a new signing identity and a legacy
+bridge app installed alongside the current one. DMV is one app
+(`com.romulusol.deadmansvault`), the live vault is devnet, and a second installable
+product is not a cost the current problem justifies.
+
+None of the following is to be pursued: `com.palatinearc.dmv`; a second DMV app; a
+second EAS project; a second Firebase Android client; side-by-side installation; a
+legacy bridge; a signing-migration ceremony. A prospective WP 4.9 built on the same
+direction produced nothing and is cancelled with it.
+
+The underlying constraint remains real and is recorded in `DECISIONS.md`: a
+differently signed APK cannot read the current app's Keystore-backed SecureStore.
+WP 4.7 already delivers the primitive any future answer would build on (candidate
+slot → deliberate funding → owner-signed rotation → chain-verified promotion → old
+key retained). Should signing identity ever need to change, that is a new,
+separately gated piece of work starting from the WP 4.7 primitive — not a
+resumption of this package.
+
+Exit: cancelled. Phase 4 ends at WP 4.7; the sequence continues at Work Package 9.
 
 ### Work Package 9: Tests and local-validator validation
 

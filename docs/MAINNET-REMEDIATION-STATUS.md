@@ -4,9 +4,10 @@ Public status tracker for the pre-mainnet hardening + protocol-redesign work. Th
 sanitized companion to a private authoritative implementation plan (see **Plan authority** below).
 It intentionally contains **no exploit mechanics** — only phase/branch/status information.
 
-**Overall status:** IN PROGRESS — Phases 1–2 complete (merged to `devnet`); Phases 3–10 not started.
+**Overall status:** IN PROGRESS — Phases 1–3 complete (merged to `devnet`); Phase 4 in review (draft PR,
+not merged); Phases 5–10 not started.
 **Mainnet:** NO-GO until the Track B phases (6–10) ship and pass an external implementation review.
-**Last updated:** 2026-07-16.
+**Last updated:** 2026-07-31.
 
 ---
 
@@ -36,8 +37,8 @@ remediation log. This file is updated as phases complete.
 |---|-------|--------|-------|--------|-------|
 | 1 | Production build preflight enforcement | `wp1-production-preflight-enforcement` | A | ✅ **Complete** — merged to `devnet` `6255e18` ([PR #39](https://github.com/Romulus-Sol/DMV/pull/39)) | CI green ([run 29279995835](https://github.com/Romulus-Sol/DMV/actions/runs/29279995835)) |
 | 2 | Server & keeper operational-readiness | `wp1-operational-readiness` | A | ✅ **Complete** — merged to `devnet` `2beba3f` ([PR #41](https://github.com/Romulus-Sol/DMV/pull/41)) | CI green ([run 29501916126](https://github.com/Romulus-Sol/DMV/actions/runs/29501916126)); notify-server 183 + keeper-bot 86 unit tests |
-| 3 | Owner-signed notification registration | `wp1-signed-notification-auth` | A | Not started | — |
-| 4 | Verified heartbeat transport | `wp1-heartbeat-verified-fallback` | A | Not started | — |
+| 3 | Owner-signed notification registration | `wp1-signed-notification-auth` | A | ✅ **Complete** — merged to `devnet` `c0723a0` ([PR #48](https://github.com/Romulus-Sol/DMV/pull/48)) | CI green |
+| 4 | Verified heartbeat transport | `phase4-transactional-heartbeat` | A | 🔍 **In review** — draft PR open, **not merged**; on-device acceptance testing outstanding | app 525/525 + tsc + Metro/Hermes bundle; disposable local-validator rotation 2/2 |
 | 5 | Release artifact & IDL provenance | `wp1-release-provenance` | A | Not started | — |
 | 6 | Decouple SOL finalization from token bequests | `wp2-sol-finalization` | B | Not started | — |
 | 7 | Persistent vault authority + logical revocation | `wp2-persistent-vault-authority` | B | Not started | — |
@@ -56,6 +57,7 @@ before the next begins.
 2. **Operational readiness** — mainnet services fail closed on static misconfiguration, degrade (not crash) on transient dependency loss, and never let an executor problem silence owner notifications; separate `apiReady / fcmReady / networkVerified / pollerReady / executorReady / escalationReady` health domains.
 3. **Signed notifications** — mainnet notification registration/deregistration proves control of the owner wallet; token-refresh is reconciled deliberately rather than in the background.
 4. **Heartbeat transport** — heartbeat *submission* fails open; heartbeat *confirmation* fails closed via independently verified RPC endpoints in distinct failure domains.
+   > **Delivered scope note (Phase 4 branch).** The confirmation half is complete and then some: transaction results are classified structurally (`value.err` inspected, ambiguous outcomes preserved as recoverable), post-state is verified against the canonical `HeartbeatRecord`, submitted signatures are journalled durably before send and reconciled read-only without automatic resend, and deadline/escalation authority is pinned to confirmed chain time. **The multi-endpoint half is not delivered** — every read and write uses one RPC connection, so there is currently no second failure domain. Separately, the readiness preflight means a tap now requires two successful account reads before submission, which narrows "submission fails open" relative to the prior behaviour. Both are recorded as open review items in `docs/coordination/STATUS.md`; neither is a devnet blocker.
 5. **Release provenance** — one enforced IDL across build variants; a clean CI-built, hash-attested production program artifact; enforceable dependency waivers; documented required checks.
 6. **SOL-finalization decoupling** — SOL inheritance finalizes independently of token/NFT bequests; a stuck token can never block it.
 7. **Persistent authority** — no v1 instruction destroys the core vault account; revocation is a logical, terminal deactivation that preserves owner withdrawal rights.
