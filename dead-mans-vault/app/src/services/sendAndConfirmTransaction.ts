@@ -57,6 +57,15 @@ export interface SendAndConfirmDependencies<
   ) => Promise<unknown>;
 }
 
+export type PreparedSendAndConfirmDependencies<
+  PublicKeyType,
+  SignerType,
+  TransactionType extends SignableTransaction<PublicKeyType, SignerType>,
+> = Omit<
+  SendAndConfirmDependencies<PublicKeyType, SignerType, TransactionType>,
+  'getLatestBlockhash'
+>;
+
 export type SendAndConfirmResult =
   | {
       status: 'confirmed';
@@ -164,12 +173,45 @@ export async function signSendAndConfirmTransaction<
   >,
   lifecycle: SendAndConfirmLifecycle,
 ): Promise<SendAndConfirmResult> {
+  let blockhashValidity: BlockhashValidity;
+  try {
+    transaction.feePayer = payer.publicKey;
+    blockhashValidity = await dependencies.getLatestBlockhash();
+    transaction.recentBlockhash = blockhashValidity.blockhash;
+  } catch (error: unknown) {
+    return { status: 'preparation_failed', error };
+  }
+  return signSendAndConfirmPreparedTransaction(
+    transaction,
+    payer,
+    extraSigners,
+    blockhashValidity,
+    dependencies,
+    lifecycle,
+  );
+}
+
+export async function signSendAndConfirmPreparedTransaction<
+  PublicKeyType,
+  SignerType,
+  TransactionType extends SignableTransaction<PublicKeyType, SignerType>,
+>(
+  transaction: TransactionType,
+  payer: SignerType & TransactionPayer<PublicKeyType>,
+  extraSigners: Array<SignerType>,
+  blockhashValidity: BlockhashValidity,
+  dependencies: PreparedSendAndConfirmDependencies<
+    PublicKeyType,
+    SignerType,
+    TransactionType
+  >,
+  lifecycle: SendAndConfirmLifecycle,
+): Promise<SendAndConfirmResult> {
   let prepared: PreparedTransaction;
   let serializedTransaction: Uint8Array;
 
   try {
     transaction.feePayer = payer.publicKey;
-    const blockhashValidity = await dependencies.getLatestBlockhash();
     transaction.recentBlockhash = blockhashValidity.blockhash;
     transaction.sign(payer, ...extraSigners);
     const signature = dependencies.deriveExpectedSignature(

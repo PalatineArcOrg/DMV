@@ -34,6 +34,7 @@ import { getDeadlineStageDurations, toNotificationStageDurations } from '../util
 import { PushRegistrationService } from '../services/PushRegistrationService';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
+import { AgentFeeCard } from '../components/AgentFeeCard';
 
 function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -639,6 +640,10 @@ export function SettingsScreen() {
           </View>
         </View>
       )}
+
+      {vaultConfig && isOwner && vaultConfig.active && !vaultConfig.executed ? (
+        <AgentFeeCard owner={publicKey} />
+      ) : null}
 
       {/* Inheritances */}
       <View style={styles.sectionBlock}>

@@ -16,14 +16,31 @@ export function getHeartbeatAttemptMessage(
 ): HeartbeatAttemptMessage | null {
   switch (result.status) {
     case 'confirmed_on_chain':
-      return result.localSync === 'complete'
-        ? null
-        : {
-            tone: 'warning',
-            text:
-              'Heartbeat confirmed on Solana. This device could not update its local history, ' +
-              'but your on-chain liveness deadline was reset successfully.',
-          };
+      if (result.localSync !== 'complete') {
+        return {
+          tone: 'warning',
+          text:
+            'Heartbeat confirmed on Solana. This device could not update its local history, ' +
+            'but your on-chain liveness deadline was reset successfully.',
+        };
+      }
+      if (result.feeReadiness === 'low_reserve') {
+        return {
+          tone: 'warning',
+          text:
+            'Heartbeat confirmed on Solana. The agent can pay for this heartbeat, ' +
+            'but its SOL reserve is running low.',
+        };
+      }
+      if (result.feeReadiness === 'check_unavailable') {
+        return {
+          tone: 'warning',
+          text:
+            'Heartbeat confirmed on Solana. The auxiliary agent fee check was unavailable; ' +
+            'Solana enforced the actual transaction fee.',
+        };
+      }
+      return null;
     case 'heartbeat_in_flight':
       return {
         tone: 'pending',
@@ -144,6 +161,13 @@ export function getHeartbeatAttemptMessage(
         text:
           'The on-chain vault state could not be validated safely. ' +
           'No local or on-chain heartbeat was recorded.',
+      };
+    case 'insufficient_agent_funds':
+      return {
+        tone: 'critical',
+        text:
+          'The heartbeat agent does not have enough SOL to submit a heartbeat. ' +
+          'No heartbeat transaction was sent.',
       };
     case 'preparation_failed':
       return {

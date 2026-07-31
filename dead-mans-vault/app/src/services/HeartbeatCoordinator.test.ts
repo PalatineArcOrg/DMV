@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import bs58 from 'bs58';
-import { Keypair, PublicKey } from '@solana/web3.js';
+import { Keypair, PublicKey, Transaction } from '@solana/web3.js';
 import {
   createPreparedHeartbeatOperation,
   transitionHeartbeatOperation,
@@ -22,6 +22,10 @@ import type {
   SendAndConfirmLifecycle,
   SendAndConfirmResult,
 } from './sendAndConfirmTransaction.ts';
+import type {
+  PreparedHeartbeatTransaction,
+  PrepareHeartbeatTransactionResult,
+} from './VaultTransactionService.ts';
 
 const OWNER = new PublicKey(Buffer.alloc(32, 2));
 const VAULT = new PublicKey(Buffer.alloc(32, 3));
@@ -32,6 +36,23 @@ const PREPARED: PreparedTransaction = {
   signature: EXPECTED_SIGNATURE,
   blockhash: Keypair.generate().publicKey.toBase58(),
   lastValidBlockHeight: 123,
+};
+const PREPARED_HEARTBEAT: PreparedHeartbeatTransaction = {
+  transaction: new Transaction(),
+  agent: AGENT.publicKey,
+  blockhashValidity: {
+    blockhash: PREPARED.blockhash,
+    lastValidBlockHeight: PREPARED.lastValidBlockHeight,
+  },
+  feeReadiness: {
+    status: 'ready',
+    agent: AGENT.publicKey,
+    balanceLamports: 5_000_000,
+    feeLamports: 5_000,
+    reserveTargetLamports: 5_000_000,
+    estimatedHeartbeatsRemaining: 1_000,
+    observedSlot: 10,
+  },
 };
 
 const READY: AgentReadinessResult = {
@@ -91,6 +112,7 @@ function makeHarness(overrides: {
   ) => Promise<HeartbeatReconciliationResult>;
   readiness?: () => Promise<AgentReadinessResult>;
   prepare?: () => Promise<void>;
+  feePreparation?: () => Promise<PrepareHeartbeatTransactionResult>;
   transaction?: (
     lifecycle: SendAndConfirmLifecycle,
   ) => Promise<SendAndConfirmResult>;
@@ -109,6 +131,7 @@ function makeHarness(overrides: {
     unresolved: 0,
     reconcile: 0,
     readiness: 0,
+    feePreparation: 0,
     transaction: 0,
     send: 0,
     verify: 0,
@@ -163,9 +186,21 @@ function makeHarness(overrides: {
         );
         return currentOperation;
       },
-      recordHeartbeatOnChain: async (agent, lifecycle) => {
+      prepareHeartbeatTransaction: async (agent) => {
+        counters.feePreparation += 1;
+        events.push('prepare exact transaction and check fee');
+        assert.ok(agent.equals(AGENT.publicKey));
+        return overrides.feePreparation
+          ? overrides.feePreparation()
+          : {
+              status: 'prepared',
+              prepared: PREPARED_HEARTBEAT,
+            };
+      },
+      recordHeartbeatOnChain: async (agent, prepared, lifecycle) => {
         counters.transaction += 1;
         assert.strictEqual(agent, AGENT);
+        assert.ok(prepared.agent.equals(AGENT.publicKey));
         events.push('build/sign');
         if (overrides.transaction) {
           return overrides.transaction(lifecycle);
@@ -250,11 +285,13 @@ test('successful operation has exact journal-first authoritative ordering', asyn
     lastHeartbeat: 1_001,
     totalHeartbeats: 5n,
     localSync: 'complete',
+    feeReadiness: 'ready',
   });
   assert.deepEqual(harness.events, [
     'in flight true',
     'check journal',
     'readiness',
+    'prepare exact transaction and check fee',
     'build/sign',
     'persist prepared',
     'send',
@@ -269,6 +306,84 @@ test('successful operation has exact journal-first authoritative ordering', asyn
     'reload',
     'in flight false',
   ]);
+});
+
+test('verified insufficient agent funds blocks before signing, journal, send, and local success', async () => {
+  const harness = makeHarness({
+    feePreparation: async () => ({
+      status: 'insufficient',
+      agent: AGENT.publicKey,
+      balanceLamports: 4_999,
+      feeLamports: 5_000,
+      shortfallLamports: 1,
+      reserveTargetLamports: 5_000_000,
+      observedSlot: 10,
+    }),
+  });
+  const result = await harness.run();
+  assert.deepEqual(result, {
+    status: 'insufficient_agent_funds',
+    agent: AGENT.publicKey.toBase58(),
+    balanceLamports: 4_999,
+    feeLamports: 5_000,
+    shortfallLamports: 1,
+  });
+  assert.equal(harness.counters.transaction, 0);
+  assert.equal(harness.counters.send, 0);
+  assert.equal(harness.events.includes('persist prepared'), false);
+  assertNoLocalSuccess(harness);
+});
+
+test('low reserve and unavailable auxiliary checks both allow one journalled deliberate heartbeat', async (context) => {
+  const cases = [
+    {
+      name: 'low reserve',
+      feeReadiness: {
+        status: 'low_reserve' as const,
+        agent: AGENT.publicKey,
+        balanceLamports: 6_000,
+        feeLamports: 5_000,
+        reserveTargetLamports: 5_000_000,
+        topUpLamports: 4_994_000,
+        estimatedHeartbeatsRemaining: 1,
+        observedSlot: 10,
+      },
+      expected: 'low_reserve',
+    },
+    {
+      name: 'check unavailable',
+      feeReadiness: {
+        status: 'check_unavailable' as const,
+        reason: 'balance_unavailable' as const,
+      },
+      expected: 'check_unavailable',
+    },
+  ];
+  for (const scenario of cases) {
+    await context.test(scenario.name, async () => {
+      const harness = makeHarness({
+        feePreparation: async () => ({
+          status: 'prepared',
+          prepared: {
+            ...PREPARED_HEARTBEAT,
+            feeReadiness: scenario.feeReadiness,
+          },
+        }),
+      });
+      const result = await harness.run();
+      assert.equal(result.status, 'confirmed_on_chain');
+      if (result.status !== 'confirmed_on_chain') return;
+      assert.equal(result.feeReadiness, scenario.expected);
+      assert.equal(harness.counters.transaction, 1);
+      assert.equal(harness.counters.send, 1);
+      assert.equal(
+        harness.events.filter(
+          (event) => event === 'persist prepared',
+        ).length,
+        1,
+      );
+    });
+  }
 });
 
 test('journal failure prevents send and every local success effect', async () => {

@@ -27,13 +27,15 @@ import {
 } from '../db/heartbeatRepo';
 import { clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
 import { truncateAddress, formatDuration } from '../utils/formatting';
-import { COLORS, FONTS, PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
+import {
+  COLORS,
+  FONTS,
+  PROGRAM_ID,
+  KEEPER_BOUNTY_LAMPORTS,
+} from '../utils/constants';
+import { AGENT_RECOMMENDED_RESERVE_LAMPORTS } from '../services/agentFundingPolicy';
 import { StepIndicator } from '../components/StepIndicator';
 import { getDeadlineStageDurations } from '../utils/deadlineStageConfig';
-
-// Agent only needs heartbeat fees now — execution is permissionless and nothing
-// refunds the agent on autonomous execution (D7).
-const AGENT_FUNDING_LAMPORTS = Math.floor(0.005 * LAMPORTS_PER_SOL);
 
 export function EstateReviewScreen() {
   const navigation = useNavigation<any>();
@@ -132,7 +134,10 @@ export function EstateReviewScreen() {
       // Fund agent key so it can pay TX fees for heartbeats + execution
       // Skip if agent already has sufficient balance (e.g. reusing key after revoke)
       const agentBalance = await connection.getBalance(agentPubkey);
-      const fundingNeeded = Math.max(0, AGENT_FUNDING_LAMPORTS - agentBalance);
+      const fundingNeeded = Math.max(
+        0,
+        AGENT_RECOMMENDED_RESERVE_LAMPORTS - agentBalance,
+      );
       if (fundingNeeded > 0) {
         vaultTx.add(
           SystemProgram.transfer({

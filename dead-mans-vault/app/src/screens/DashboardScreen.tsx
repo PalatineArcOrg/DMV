@@ -28,6 +28,7 @@ import { HeartbeatButton } from '../components/HeartbeatButton';
 import { RpcStatusBanner } from '../components/RpcStatusBanner';
 import { EscalationBanner } from '../components/EscalationBanner';
 import { BrandMark } from '../components/BrandMark';
+import { AgentFeeCard } from '../components/AgentFeeCard';
 import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/constants';
 import { formatDuration, formatUsd, formatTokenAmount, truncateAddress } from '../utils/formatting';
 import { EscalationStage } from '../types';
@@ -402,15 +403,22 @@ export function DashboardScreen() {
           state,
           patch,
         ),
-      recordHeartbeatOnChain: (agentKeypair, lifecycle) => {
+      prepareHeartbeatTransaction: (agent) => {
         if (!publicKey) {
           throw new Error('Connected owner became unavailable');
         }
         const txService = new VaultTransactionService();
-        return txService.recordHeartbeatOnChain(
-          agentKeypair,
+        return txService.prepareHeartbeatTransaction(
+          agent,
           publicKey,
           'active_tap',
+        );
+      },
+      recordHeartbeatOnChain: (agentKeypair, prepared, lifecycle) => {
+        const txService = new VaultTransactionService();
+        return txService.recordHeartbeatOnChain(
+          agentKeypair,
+          prepared,
           lifecycle,
         );
       },
@@ -847,6 +855,17 @@ export function DashboardScreen() {
           )}
         </View>
       )}
+
+      {isVaultSetup && vaultData?.active && !vaultData?.executed ? (
+        <AgentFeeCard
+          owner={publicKey}
+          refreshKey={
+            lastConfirmedHeartbeatTx ??
+            currentHeartbeatTx?.signature ??
+            null
+          }
+        />
+      ) : null}
 
       {/* Escalation Banner */}
       {escalationStage > 0 && escalationStage < 4 && (

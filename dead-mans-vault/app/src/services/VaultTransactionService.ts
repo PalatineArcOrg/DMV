@@ -3,6 +3,7 @@ import {
   PublicKey,
   Keypair,
   Transaction,
+  Message,
   TransactionInstruction,
   SystemProgram,
   ComputeBudgetProgram,
@@ -36,9 +37,15 @@ import { rpcWithRetry } from '../utils/fetchWithRetry';
 import { range, chunk, unpaidIndices, fullU32Mask } from '../utils/crankMath';
 import {
   signSendAndConfirmTransaction,
+  signSendAndConfirmPreparedTransaction,
+  type BlockhashValidity,
   type SendAndConfirmLifecycle,
   type SendAndConfirmResult,
 } from './sendAndConfirmTransaction';
+import {
+  createAgentFeeReadinessService,
+  type AgentFeeReadinessResult,
+} from './AgentFeeReadinessService';
 import type { PriorityFeeEstimateResult } from '../types/api';
 import type { AssetAssignment } from '../types/vault';
 import {
@@ -59,6 +66,29 @@ const DISC_EXECUTION_LOG = '739734d563abc8f0';
 const DISC_ASSET_PLAN = 'b273a24f4e46c32d';
 const DISC_TOKEN_DIST = 'fafdae6f2a52b22a';
 const DISC_HEARTBEAT = '1d0450269f346acb';
+
+export type ProceedingAgentFeeReadiness = Exclude<
+  AgentFeeReadinessResult,
+  { status: 'insufficient' }
+>;
+
+export interface PreparedHeartbeatTransaction {
+  transaction: Transaction;
+  agent: PublicKey;
+  blockhashValidity: BlockhashValidity;
+  feeReadiness: ProceedingAgentFeeReadiness;
+}
+
+export type PrepareHeartbeatTransactionResult =
+  | {
+      status: 'prepared';
+      prepared: PreparedHeartbeatTransaction;
+    }
+  | Extract<AgentFeeReadinessResult, { status: 'insufficient' }>
+  | {
+      status: 'preparation_failed';
+      error: unknown;
+    };
 
 /** On-chain beneficiary shape (UI Beneficiary carries extra display-only fields). */
 type OnChainBeneficiary = { wallet: PublicKey; shareBps: number };
@@ -121,25 +151,6 @@ export class VaultTransactionService {
       signAllTransactions: async (txs: Transaction[]) => txs,
     };
     const provider = new AnchorProvider(this.connection, readonlyWallet as any, {
-      commitment: 'confirmed',
-    });
-    return new Program<DeadMansVault>(idl as any, provider);
-  }
-
-  /** Program bound to a keypair wallet (used by the agent-signed heartbeat). */
-  private getProgram(agentKeypair: Keypair): Program<DeadMansVault> {
-    const wallet = {
-      publicKey: agentKeypair.publicKey,
-      signTransaction: async (tx: Transaction) => {
-        tx.partialSign(agentKeypair);
-        return tx;
-      },
-      signAllTransactions: async (txs: Transaction[]) => {
-        txs.forEach((tx) => tx.partialSign(agentKeypair));
-        return txs;
-      },
-    };
-    const provider = new AnchorProvider(this.connection, wallet as any, {
       commitment: 'confirmed',
     });
     return new Program<DeadMansVault>(idl as any, provider);
@@ -348,19 +359,18 @@ export class VaultTransactionService {
     return this.addPriorityFee(tx, [owner, vaultPda, heartbeatPda], 250_000);
   }
 
-  async recordHeartbeatOnChain(
-    agentKeypair: Keypair,
+  async prepareHeartbeatTransaction(
+    agentPubkey: PublicKey,
     ownerPubkey: PublicKey,
     method: HeartbeatMethod,
-    lifecycle: SendAndConfirmLifecycle,
-  ): Promise<SendAndConfirmResult> {
+  ): Promise<PrepareHeartbeatTransactionResult> {
     // NOTE: deliberately NOT network-gated. The heartbeat is a liveness signal that moves
     // no funds — it must fail OPEN. Blocking it on an unverified-but-possibly-fine network
     // (the UNKNOWN "continue anyway" path) looks exactly like death and could drive the
     // dead-man's switch to a premature, irreversible execution. Fund-moving writes fail
     // closed (see assertNetworkVerified call sites); the heartbeat must not.
     try {
-      const program = this.getProgram(agentKeypair);
+      const program = this.programAs(agentPubkey);
       const [vaultPda] = this.getVaultPDA(ownerPubkey);
       const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
 
@@ -371,23 +381,107 @@ export class VaultTransactionService {
       const instruction = await program.methods
         .recordHeartbeat(methodEnum as any)
         .accountsPartial({
-          agent: agentKeypair.publicKey,
+          agent: agentPubkey,
           vaultConfig: vaultPda,
           heartbeatRecord: heartbeatPda,
         })
         .instruction();
 
-      return this.sendWithPayerResult(
-        [instruction],
-        agentKeypair,
-        [vaultPda, heartbeatPda, agentKeypair.publicKey],
+      const baseTransaction = new Transaction().add(instruction);
+      const transaction = await this.addPriorityFee(
+        baseTransaction,
+        [vaultPda, heartbeatPda, agentPubkey],
         80_000,
-        [],
-        lifecycle,
       );
+      transaction.feePayer = agentPubkey;
+      const blockhashValidity =
+        await this.connection.getLatestBlockhash('confirmed');
+      transaction.recentBlockhash = blockhashValidity.blockhash;
+      const message = transaction.compileMessage();
+      const feeReadinessService =
+        createAgentFeeReadinessService<Message>({
+          getFeeForMessage: (exactMessage) =>
+            this.connection.getFeeForMessage(
+              exactMessage,
+              'confirmed',
+            ),
+          getAgentBalance: (agent, minimumContextSlot) =>
+            this.connection.getBalanceAndContext(agent, {
+              commitment: 'confirmed',
+              minContextSlot: minimumContextSlot,
+            }),
+        });
+      const feeReadiness = await feeReadinessService.check(
+        agentPubkey,
+        message,
+      );
+      if (feeReadiness.status === 'insufficient') {
+        return feeReadiness;
+      }
+      return {
+        status: 'prepared',
+        prepared: {
+          transaction,
+          agent: agentPubkey,
+          blockhashValidity,
+          feeReadiness,
+        },
+      };
     } catch (error: unknown) {
       return { status: 'preparation_failed', error };
     }
+  }
+
+  async recordHeartbeatOnChain(
+    agentKeypair: Keypair,
+    prepared: PreparedHeartbeatTransaction,
+    lifecycle: SendAndConfirmLifecycle,
+  ): Promise<SendAndConfirmResult> {
+    if (!agentKeypair.publicKey.equals(prepared.agent)) {
+      return {
+        status: 'preparation_failed',
+        error: new Error('Prepared heartbeat agent changed before signing'),
+      };
+    }
+    return signSendAndConfirmPreparedTransaction<
+      PublicKey,
+      Keypair,
+      Transaction
+    >(
+      prepared.transaction,
+      agentKeypair,
+      [],
+      prepared.blockhashValidity,
+      {
+        deriveExpectedSignature: (signedTransaction, expectedPayer) => {
+          const payerEntry = signedTransaction.signatures.find(
+            (entry) =>
+              entry.publicKey.equals(expectedPayer.publicKey),
+          );
+          if (!payerEntry?.signature) {
+            throw new Error('Agent payer signature is unavailable');
+          }
+          const firstSignature = signedTransaction.signature;
+          if (
+            !firstSignature ||
+            !Buffer.from(firstSignature).equals(payerEntry.signature)
+          ) {
+            throw new Error(
+              'Agent payer signature is not the transaction ID signature',
+            );
+          }
+          return bs58.encode(payerEntry.signature);
+        },
+        sendRawTransaction: (serializedTransaction) =>
+          this.connection.sendRawTransaction(serializedTransaction, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          }),
+        confirmTransaction: (strategy) =>
+          this.connection.confirmTransaction(strategy, 'confirmed'),
+      },
+      lifecycle,
+    );
   }
 
   async buildUpdateVaultTx(

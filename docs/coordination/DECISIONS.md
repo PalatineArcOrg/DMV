@@ -238,3 +238,43 @@ Status: Implemented and covered by offline tests. No live RPC, local warning
 fallback, notification registration mutation, heartbeat submission, execution
 submission, program/IDL, keeper/notify-server rule, rotation, migration, Android
 signing or deployment action was performed.
+
+## WP 4.6 agent fee-readiness boundary
+
+WP 4.6 checks the authorised agent’s balance against the exact fee of the
+heartbeat transaction being prepared.
+
+Only verified evidence that balance is below the exact transaction fee blocks
+submission. A low recommended reserve produces a warning but does not block a
+currently affordable heartbeat.
+
+Failure of the auxiliary fee or balance check does not prove insufficient
+funds and therefore does not manufacture a false death condition. A deliberate
+heartbeat may continue through the existing signed, journalled and
+post-state-verified path.
+
+Agent top-up is a separate explicit owner-signed transfer to the canonical
+on-chain agent. It is never hidden inside a heartbeat and never counts as
+liveness.
+
+The exact heartbeat transaction is constructed once with the selected priority
+price, 80,000-CU limit, agent payer and one confirmed blockhash. Its compiled
+message is passed to `getFeeForMessage`; the context slot returned by that RPC
+is the minimum accepted context for `getBalanceAndContext(agent)`. The same
+transaction and blockhash then enter agent signing, durable PREPARED persistence
+and the sole send.
+
+The existing activation target is authoritative for product policy:
+`5,000,000` lamports (`0.005 SOL`). It is a recommended reserve, not an on-chain
+minimum. `balance < exactFee` is the only verified-insufficiency block.
+
+Top-up reuses the full WP 4.2 readiness boundary immediately before constructing
+the transfer. It can target only the verified `vault.agentPubkey`, transfers the
+integer-lamport difference to the reserve, uses the owner as fee payer, asks for
+one explicit wallet signature, sends once and inspects confirmation `value.err`.
+It never updates heartbeat history, deadline/escalation state, notification
+registration or the heartbeat-operation journal.
+
+Status: Implemented and covered by offline tests. No live RPC, heartbeat,
+automatic funding/retry, program/IDL, rotation, migration, Android signing or
+deployment action was performed.

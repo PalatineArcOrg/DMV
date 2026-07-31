@@ -88,6 +88,7 @@ test('verified chain success and local-cache failure are distinguished', () => {
     lastHeartbeat: 1_001,
     totalHeartbeats: 5n,
     localSync: 'complete',
+    feeReadiness: 'ready',
   });
   const cacheFailed = getHeartbeatAttemptMessage({
     status: 'confirmed_on_chain',
@@ -95,6 +96,7 @@ test('verified chain success and local-cache failure are distinguished', () => {
     lastHeartbeat: 1_001,
     totalHeartbeats: 5n,
     localSync: 'failed',
+    feeReadiness: 'ready',
   });
 
   assert.equal(synced, null);
@@ -104,6 +106,35 @@ test('verified chain success and local-cache failure are distinguished', () => {
     /on-chain liveness deadline was reset successfully/,
   );
   assert.doesNotMatch(cacheFailed?.text ?? '', /tap again/i);
+});
+
+test('fee readiness messages distinguish low reserve, degraded check, and verified insufficiency', () => {
+  const base = {
+    status: 'confirmed_on_chain' as const,
+    signature: 'confirmed-signature',
+    lastHeartbeat: 1_001,
+    totalHeartbeats: 5n,
+    localSync: 'complete' as const,
+  };
+  const low = getHeartbeatAttemptMessage({
+    ...base,
+    feeReadiness: 'low_reserve',
+  });
+  const unavailable = getHeartbeatAttemptMessage({
+    ...base,
+    feeReadiness: 'check_unavailable',
+  });
+  const insufficient = getHeartbeatAttemptMessage({
+    status: 'insufficient_agent_funds',
+    agent: 'agent',
+    balanceLamports: 4_999,
+    feeLamports: 5_000,
+    shortfallLamports: 1,
+  });
+  assert.match(low?.text ?? '', /reserve is running low/);
+  assert.match(unavailable?.text ?? '', /fee check was unavailable/);
+  assert.match(insufficient?.text ?? '', /No heartbeat transaction was sent/);
+  assert.doesNotMatch(insufficient?.text ?? '', /Vault Secured/);
 });
 
 test('ambiguous and failed transaction messages never claim success', () => {

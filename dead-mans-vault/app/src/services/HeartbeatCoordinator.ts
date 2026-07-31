@@ -1,4 +1,4 @@
-import type { Keypair } from '@solana/web3.js';
+import type { Keypair, PublicKey } from '@solana/web3.js';
 import type {
   HeartbeatOperationErrorCode,
   HeartbeatOperationRecord,
@@ -18,6 +18,15 @@ import type {
   SendAndConfirmResult,
   SubmissionUnknownCode,
 } from './sendAndConfirmTransaction';
+import type {
+  PreparedHeartbeatTransaction,
+  PrepareHeartbeatTransactionResult,
+} from './VaultTransactionService';
+
+export type HeartbeatFeeReadiness =
+  | 'ready'
+  | 'low_reserve'
+  | 'check_unavailable';
 
 export type HeartbeatExplorerTransactionStatus =
   | 'confirmed_success'
@@ -34,6 +43,7 @@ export type HeartbeatAttemptResult =
       lastHeartbeat: number;
       totalHeartbeats: bigint;
       localSync: 'complete' | 'failed';
+      feeReadiness: HeartbeatFeeReadiness;
     }
   | {
       status: 'heartbeat_in_flight';
@@ -105,6 +115,13 @@ export type HeartbeatAttemptResult =
       status: 'invalid_on_chain_state';
     }
   | {
+      status: 'insufficient_agent_funds';
+      agent: string;
+      balanceLamports: number;
+      feeLamports: number;
+      shortfallLamports: number;
+    }
+  | {
       status: 'preparation_failed';
       error: unknown;
     }
@@ -164,8 +181,12 @@ export interface HeartbeatCoordinatorDependencies {
     state: HeartbeatOperationState,
     patch?: HeartbeatOperationTransitionPatch,
   ) => Promise<HeartbeatOperationRecord>;
+  prepareHeartbeatTransaction: (
+    agent: PublicKey,
+  ) => Promise<PrepareHeartbeatTransactionResult>;
   recordHeartbeatOnChain: (
     agentKeypair: Keypair,
+    prepared: PreparedHeartbeatTransaction,
     lifecycle: SendAndConfirmLifecycle,
   ) => Promise<SendAndConfirmResult>;
   verifyHeartbeatConfirmation: (
@@ -406,6 +427,18 @@ function createJournalLifecycle(
   };
 }
 
+function summarizeFeeReadiness(
+  prepared: PreparedHeartbeatTransaction,
+): HeartbeatFeeReadiness {
+  if (prepared.feeReadiness.status === 'ready') {
+    return 'ready';
+  }
+  if (prepared.feeReadiness.status === 'low_reserve') {
+    return 'low_reserve';
+  }
+  return 'check_unavailable';
+}
+
 export function createHeartbeatCoordinator(): HeartbeatCoordinator {
   let inFlight = false;
 
@@ -452,11 +485,37 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
           return readinessFailureResult(readiness);
         }
 
+        let preparation: PrepareHeartbeatTransactionResult;
+        try {
+          preparation =
+            await dependencies.prepareHeartbeatTransaction(
+              readiness.localAgent,
+            );
+        } catch (error: unknown) {
+          return { status: 'preparation_failed', error };
+        }
+        if (preparation.status === 'insufficient') {
+          return {
+            status: 'insufficient_agent_funds',
+            agent: preparation.agent.toBase58(),
+            balanceLamports: preparation.balanceLamports,
+            feeLamports: preparation.feeLamports,
+            shortfallLamports: preparation.shortfallLamports,
+          };
+        }
+        if (preparation.status === 'preparation_failed') {
+          return preparation;
+        }
+        const feeReadiness = summarizeFeeReadiness(
+          preparation.prepared,
+        );
+
         let transactionResult: SendAndConfirmResult;
         try {
           transactionResult =
             await dependencies.recordHeartbeatOnChain(
               readiness.keypair,
+              preparation.prepared,
               createJournalLifecycle(dependencies, readiness),
             );
         } catch (error: unknown) {
@@ -611,6 +670,7 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
           lastHeartbeat: verification.lastHeartbeat,
           totalHeartbeats: verification.totalHeartbeats,
           localSync,
+          feeReadiness,
         };
       } finally {
         inFlight = false;

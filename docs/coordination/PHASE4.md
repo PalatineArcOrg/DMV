@@ -336,14 +336,31 @@ WP 4.6 remains separately gated.
 
 ### Work Package 6: Agent fee-state handling
 
-- Preflight the agent balance against an estimated heartbeat fee and return a typed
-  insufficient-fee state.
-- Design an owner-approved funding action; never request or submit it implicitly.
-- For rotation, prefer one owner-signed transaction that rotates and funds the staged
-  new agent atomically when compatible with the existing program.
-- Test low balance, exact threshold, RPC estimation failure and successful recovery.
+- Implemented exact-message fee estimation for the one heartbeat transaction
+  later signed and submitted. Transaction construction, priority-fee selection
+  and blockhash acquisition occur once.
+- Reads the authorised agent balance at confirmed commitment with a minimum
+  context slot from the exact fee response.
+- Implements `ready`, `low_reserve`, `insufficient`, `check_unavailable` and
+  `invalid_response` states using safe integer lamports.
+- Blocks verified insufficiency before signing, journal persistence, send or
+  local liveness effects. Low reserve and unavailable auxiliary reads do not
+  block a currently deliberate heartbeat.
+- Centralizes the existing `5,000,000`-lamport activation funding target without
+  changing product economics.
+- Adds read-only, identity-scoped Dashboard and Settings reserve visibility with
+  bounded focus/foreground/outcome refresh and explicit stale display.
+- Adds a separate owner-signed System Program top-up to only the currently
+  validated canonical agent. The amount is the exact shortfall to the existing
+  reserve and is disclosed with the owner transaction fee before signing.
+- Keeps top-up entirely separate from heartbeat history, escalation, notification
+  registration and the heartbeat journal. It has no automatic retry.
+- Leaves candidate funding and rotation wiring for the separately gated rotation
+  and migration packages.
 
-Exit: no heartbeat is attempted with a knowingly unusable fee state.
+Exit: PASS. No heartbeat reaches signing with verified fee insufficiency; low
+reserve and unavailable auxiliary checks preserve deliberate liveness. Offline
+tests pass and no live action occurred. WP 4.7 remains separately gated.
 
 ### Work Package 7: Existing `rotate_agent` security analysis
 

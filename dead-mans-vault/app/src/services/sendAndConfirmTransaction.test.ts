@@ -9,6 +9,7 @@ import {
 } from '@solana/web3.js';
 import {
   signSendAndConfirmTransaction,
+  signSendAndConfirmPreparedTransaction,
   type SendAndConfirmLifecycle,
   type SignableTransaction,
 } from './sendAndConfirmTransaction.ts';
@@ -113,6 +114,37 @@ test('signature is derived after signing and PREPARED is durable before one RPC 
     'submitted journal',
     'confirm',
   ]);
+  assert.equal(harness.sendCalls(), 1);
+  assert.equal(harness.confirmCalls(), 1);
+});
+
+test('a pre-blockhashed exact transaction is signed and sent without obtaining another blockhash', async () => {
+  const harness = makeHarness();
+  let unexpectedBlockhashCalls = 0;
+  harness.dependencies.getLatestBlockhash = async () => {
+    unexpectedBlockhashCalls += 1;
+    throw new Error('must not obtain another blockhash');
+  };
+  harness.transaction.feePayer = harness.payer.publicKey;
+  harness.transaction.recentBlockhash = 'exact-message-blockhash';
+  const result = await signSendAndConfirmPreparedTransaction(
+    harness.transaction,
+    harness.payer,
+    [],
+    {
+      blockhash: 'exact-message-blockhash',
+      lastValidBlockHeight: 4321,
+    },
+    {
+      deriveExpectedSignature:
+        harness.dependencies.deriveExpectedSignature,
+      sendRawTransaction: harness.dependencies.sendRawTransaction,
+      confirmTransaction: harness.dependencies.confirmTransaction,
+    },
+    harness.lifecycle,
+  );
+  assert.equal(result.status, 'confirmed');
+  assert.equal(unexpectedBlockhashCalls, 0);
   assert.equal(harness.sendCalls(), 1);
   assert.equal(harness.confirmCalls(), 1);
 });
@@ -372,7 +404,7 @@ test('helper has one send site and persists neither transaction bytes nor key ma
   assert.doesNotMatch(source, /console\.|JSON\.stringify/);
 });
 
-test('recordHeartbeatOnChain remains agent-signed and requires a journal lifecycle', () => {
+test('heartbeat preparation and submission preserve exact agent-paid transaction and journal lifecycle', () => {
   const source = readFileSync(
     new URL('./VaultTransactionService.ts', import.meta.url),
     'utf8',
@@ -381,9 +413,23 @@ test('recordHeartbeatOnChain remains agent-signed and requires a journal lifecyc
     source.indexOf('async recordHeartbeatOnChain'),
     source.indexOf('async buildUpdateVaultTx'),
   );
+  const preparationMethod = source.slice(
+    source.indexOf('async prepareHeartbeatTransaction'),
+    source.indexOf('async recordHeartbeatOnChain'),
+  );
   assert.match(heartbeatMethod, /lifecycle: SendAndConfirmLifecycle/);
-  assert.match(heartbeatMethod, /this\.getProgram\(agentKeypair\)/);
-  assert.match(heartbeatMethod, /agent: agentKeypair\.publicKey/);
+  assert.match(
+    heartbeatMethod,
+    /signSendAndConfirmPreparedTransaction/,
+  );
+  assert.match(
+    heartbeatMethod,
+    /agentKeypair\.publicKey\.equals\(prepared\.agent\)/,
+  );
+  assert.match(preparationMethod, /agent: agentPubkey/);
+  assert.match(preparationMethod, /transaction\.compileMessage\(\)/);
+  assert.match(preparationMethod, /getFeeForMessage/);
+  assert.match(preparationMethod, /getBalanceAndContext/);
   assert.match(
     source,
     /payerEntry[\s\S]*signedTransaction\.signature[\s\S]*bs58\.encode/,
