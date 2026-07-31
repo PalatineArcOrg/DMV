@@ -33,6 +33,7 @@ import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils
 import { EscalationStage } from '../types';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
+import { coordinateHeartbeat } from '../services/HeartbeatCoordinator';
 import { PortfolioScanner } from '../services/PortfolioScanner';
 import { DepositModal } from '../components/DepositModal';
 import { PublicKey, LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
@@ -353,28 +354,40 @@ export function DashboardScreen() {
   const [onChainBeatError, setOnChainBeatError] = useState(false);
 
   const handleHeartbeat = useCallback(async () => {
-    try {
-      await confirmHeartbeat('active_tap');
-      // Also record on-chain via the agent key. This is the AUTHORITATIVE liveness proof
-      // the notify-server + keeper watch; if it silently fails the on-chain clock keeps
-      // aging toward execution while the UI looks healthy — so surface any failure.
+    if (!publicKey) {
       try {
-        const keyManager = KeyManager.getInstance();
-        const keypair = await keyManager.getKeypair();
-        if (keypair && publicKey) {
-          const txService = new VaultTransactionService();
-          const sig = await txService.recordHeartbeatOnChain(keypair, publicKey, 'activeTap');
-          lastOnChainTxRef.current = sig;
-          setLastOnChainTx(sig);
-          setOnChainBeatError(false);
+        await confirmHeartbeat('active_tap');
+        try {
+          await KeyManager.getInstance().getKeypair();
+        } catch {
+          setOnChainBeatError(true);
         }
+        await loadVaultState();
       } catch {
-        setOnChainBeatError(true);
+        // Preserve the existing fail-soft disconnected edge.
       }
-      await loadVaultState();
-    } catch {
-      // Error handling
+      return;
     }
+
+    await coordinateHeartbeat({
+      confirmLocalHeartbeat: () => confirmHeartbeat('active_tap'),
+      loadAgentKeypair: () =>
+        KeyManager.getInstance().getKeypair(),
+      recordHeartbeatOnChain: (agentKeypair) => {
+        const txService = new VaultTransactionService();
+        return txService.recordHeartbeatOnChain(
+          agentKeypair,
+          publicKey,
+          'activeTap',
+        );
+      },
+      reloadVaultState: loadVaultState,
+      publishExplorerSignature: (signature) => {
+        lastOnChainTxRef.current = signature;
+        setLastOnChainTx(signature);
+      },
+      publishOnChainError: setOnChainBeatError,
+    });
   }, [confirmHeartbeat, loadVaultState, publicKey]);
 
   // Heartbeat stats

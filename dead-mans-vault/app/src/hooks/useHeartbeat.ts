@@ -11,6 +11,9 @@ import { useDemoStore } from '../store/useDemoStore';
 import { NotificationService } from '../notifications/NotificationService';
 import { getSetting } from '../db/settingsRepo';
 import { successKey } from '../services/NotificationRegistrationService';
+import {
+  confirmLocalHeartbeat,
+} from '../services/HeartbeatCoordinator';
 import { isDevnet } from '../utils/rpcConfig';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS, PROGRAM_ID } from '../utils/constants';
 
@@ -174,16 +177,20 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
       if (!heartbeatServiceRef.current) return;
       setIsConfirming(true);
       try {
-        await heartbeatServiceRef.current.confirmHeartbeat(method);
-        if (escalationServiceRef.current) {
-          escalationServiceRef.current.resetEscalation();
-        }
-        setSecondsRemaining(0);
-
-        // Notify user of successful heartbeat with next due date
         const intervalSeconds = heartbeatConfig?.intervalSeconds ?? 86400;
         const nextDue = new Date(Date.now() + intervalSeconds * 1000);
-        try { NotificationService.sendHeartbeatConfirmed(nextDue); } catch {}
+        await confirmLocalHeartbeat({
+          recordLocalHeartbeat: () =>
+            heartbeatServiceRef.current!.confirmHeartbeat(method),
+          resetLocalEscalation: () => {
+            if (escalationServiceRef.current) {
+              escalationServiceRef.current.resetEscalation();
+            }
+            setSecondsRemaining(0);
+          },
+          sendLocalConfirmationNotification: () =>
+            NotificationService.sendHeartbeatConfirmed(nextDue),
+        });
       } finally {
         setIsConfirming(false);
       }

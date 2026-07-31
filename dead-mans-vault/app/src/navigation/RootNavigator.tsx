@@ -21,6 +21,10 @@ import { useWallet } from '../hooks/useWallet';
 import { useVaultStore } from '../store/useVaultStore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 import { useEscalationStore } from '../store/useEscalationStore';
+import {
+  isStartupMigrationCheckDue,
+  needsAgentRotationForState,
+} from '../services/AgentMigrationFlow';
 import { COLORS, FONTS } from '../utils/constants';
 
 const Tab = createBottomTabNavigator();
@@ -183,20 +187,26 @@ export function RootNavigator() {
 
             // Skip for freshly created vaults (< 2 min old)
             const createdAt = vault.createdAt?.toNumber?.() ?? 0;
-            const ageSeconds = Math.floor(Date.now() / 1000) - createdAt;
-            if (ageSeconds > 120) {
+            if (isStartupMigrationCheckDue(
+              createdAt,
+              Math.floor(Date.now() / 1000),
+            )) {
               const { KeyManager } = require('../tee/KeyManager');
               const keyManager = KeyManager.getInstance();
               const hasKey = await keyManager.hasAgentKey();
-              let needsRotation = false;
-
-              if (!hasKey) {
-                needsRotation = true;
-              } else {
-                const localPubkey = await keyManager.getAgentPublicKey();
-                const onChainAgent = vault.agentPubkey?.toBase58?.() ?? '';
-                needsRotation = localPubkey !== onChainAgent;
-              }
+              const localPubkey = hasKey
+                ? await keyManager.getAgentPublicKey()
+                : null;
+              const needsRotation = needsAgentRotationForState(
+                {
+                  active: vault.active,
+                  executed: vault.executed,
+                  agentPublicKey:
+                    vault.agentPubkey?.toBase58?.() ?? '',
+                },
+                hasKey,
+                localPubkey,
+              );
 
               if (needsRotation) {
                 const { MigrationService } = require('../services/MigrationService');

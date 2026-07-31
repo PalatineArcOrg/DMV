@@ -30,8 +30,8 @@ coordination was moved to the normal branch `phase4-transactional-heartbeat` bas
 exactly on `origin/devnet` at
 `cd0264bb209c0bdc2cf4a576b48ce7d6372c69aa`.
 
-Status: Coordination baseline established; user approval is still required before
-implementation.
+Status: Coordination baseline accepted. WP 4.1 was explicitly authorized and is
+complete; later work packages remain separately gated.
 
 ## Program compatibility
 
@@ -60,3 +60,21 @@ No APK build, install, uninstall, app-data clear or signing-identity change is
 authorized by this decision.
 
 Status: Design constraint accepted for Phase 4 planning; implementation not started.
+
+## WP 4.1 characterization boundary
+
+WP 4.1 preserves the existing unsafe ordering only to create a test boundary.
+It is not the desired Phase 4 behaviour.
+The next work package will introduce explicit agent readiness before changing
+authoritative heartbeat ordering.
+
+The coordinator result distinguishes confirmed onchain, missing-agent,
+onchain-failed and local-failed outcomes, but Dashboard behavior remains unchanged.
+No `confirmation_unknown` state was added because the current transaction API does
+not expose that distinction at the coordinator boundary.
+
+Concurrent calls remain possible and are now characterized rather than locked.
+The current resolved-`value.err` confirmation defect and destroy-first migration
+sequence are likewise preserved only as explicitly named current-behavior tests.
+
+Status: Accepted for WP 4.1 implementation; not a security invariant.

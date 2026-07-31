@@ -2,43 +2,61 @@
 
 ## Repository
 - Branch: `phase4-transactional-heartbeat`
-- HEAD: `cd0264bb209c0bdc2cf4a576b48ce7d6372c69aa`
+- HEAD: WP 4.1 implementation commit `test: characterise heartbeat and migration orchestration` (exact SHA recorded in the handoff)
 - Base: `origin/devnet` at `cd0264bb209c0bdc2cf4a576b48ce7d6372c69aa`
-- Worktree: Coordination files modified or added; no product code changed.
+- Worktree: Clean after the WP 4.1 implementation commit.
 
 ## Current Work Package
-- Name: Phase 4 source-grounded baseline and coordination
+- Name: WP 4.1 — Heartbeat testability and behavioural characterisation
 - State: PASS
 
 ## Completed
-- Captured the initial repository state: clean detached HEAD at `54101af2f8e9affa9af76399abd4e46a80fce0eb`.
-- Verified `origin/devnet` at `cd0264bb209c0bdc2cf4a576b48ce7d6372c69aa`.
-- Verified the initial detached history and `origin/devnet` had diverged by five and seven commits respectively.
-- Created a normal Phase 4 coordination branch directly from `origin/devnet`.
-- Inspected the dashboard heartbeat path, local service/repository/store, agent signing, transaction submission/confirmation, onchain heartbeat and rotation instructions, migration flow and relevant tests.
-- Corrected the missing-key assumption: the normal path throws and shows a generic warning; it does not silently skip, but it remains non-specific and follows premature local success.
-- Produced the Phase 4 work-package design without selecting a program change.
+- Committed the reviewed Phase 4 coordination baseline as `c512e9c`.
+- Extracted dashboard heartbeat orchestration into a dependency-injected coordinator while preserving its current order and UI behavior.
+- Extracted the existing sign/send/confirm sequence without changing its confirmation semantics.
+- Extracted the destroy-first migration sequence and startup mismatch predicates for offline tests without changing migration behavior.
+- Added seven heartbeat coordinator, three transaction confirmation and six migration/startup characterization cases.
+- Confirmed that `KeyManager.getKeypair()` returns `Promise<Keypair>` and throws when secure-store key material is absent; it does not return null.
+- Confirmed that concurrent coordinator calls are possible: two simultaneous calls independently record two local heartbeats and submit two onchain transactions. No locking or coalescing was added.
+
+## Files Changed
+- `dead-mans-vault/app/src/services/HeartbeatCoordinator.ts`
+- `dead-mans-vault/app/src/services/HeartbeatCoordinator.test.ts`
+- `dead-mans-vault/app/src/services/sendAndConfirmTransaction.ts`
+- `dead-mans-vault/app/src/services/sendAndConfirmTransaction.test.ts`
+- `dead-mans-vault/app/src/services/AgentMigrationFlow.ts`
+- `dead-mans-vault/app/src/services/AgentMigrationFlow.test.ts`
+- `dead-mans-vault/app/src/hooks/useHeartbeat.ts`
+- `dead-mans-vault/app/src/screens/DashboardScreen.tsx`
+- `dead-mans-vault/app/src/services/VaultTransactionService.ts`
+- `dead-mans-vault/app/src/services/MigrationService.ts`
+- `dead-mans-vault/app/src/navigation/RootNavigator.tsx`
+- `docs/coordination/STATUS.md`
+- `docs/coordination/DECISIONS.md`
 
 ## Tests
-- Source comparison confirmed the heartbeat, key, migration, transaction, program and relevant test paths inspected on the initial checkout match `origin/devnet`; only notification-registration integration in `useHeartbeat` differed.
-- `cd dead-mans-vault/app && npm test`: PASS (9/9 files, 0 failures).
-- `git diff --check`: PASS.
-- Program/local-validator tests: not run for this documentation-only gate.
+- `cd dead-mans-vault/app && npm test`: PASS (12/12 test files, 0 failures).
+- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (214/214 cases).
+- Focused WP 4.1 characterization tests: PASS (16/16 cases).
+- `cd dead-mans-vault/app && ./node_modules/.bin/tsc --noEmit`: PASS.
+- `git diff --cached --check`: PASS.
+- Staged changed-file secret scan: PASS (1,034 added lines, 0 suspicious values, 0 forbidden artifacts).
+- Tests use injected mocks, local fixtures and in-memory state; the new test modules do not instantiate `Connection`, `KeyManager`, wallet adapters or notification services and perform no network calls.
+- No existing test was deleted or weakened.
 
 ## Findings
-- Local SQLite, Zustand escalation state, countdown, notification and button success update before the authoritative transaction.
-- The agent builds, signs and pays for `record_heartbeat`; the transaction is submitted and confirmation is awaited.
-- The submitted signature is not durable until after confirmation, and the confirmation response's `value.err` is not checked.
-- Ambiguous outcomes have no restart-time reconciliation.
-- Missing and mismatched agent states collapse into a transient generic warning on the dashboard.
-- Current migration destroys the old key before rotation is confirmed and does not fund the new agent.
-- Existing `rotate_agent` is owner-authorized and deadline-frozen but does not require proof of possession from the new agent.
-- App-only Phase 4 work appears compatible with the existing instruction interface; stronger program-enforced rotation semantics would require a separate upgrade gate.
+- Current order remains: local heartbeat → local escalation reset → local success notification → agent-key load → onchain submission/confirmation → signature or warning publication → vault reload.
+- Local success state survives an onchain failure, as intentionally characterized for later correction.
+- Explorer state is published only after `recordHeartbeatOnChain` resolves.
+- A thrown confirmation error rejects, but a resolved confirmation object with `value.err` is currently treated as success.
+- The current migration removes the active key before replacement generation, owner signing or confirmation; owner cancellation and confirmation failure leave the old key removed.
+- Candidate-agent funding is absent from the current migration transaction.
+- The current MigrationService must not be used for Fox or signing-identity migration.
+  It destroys the active agent key before replacement authority is proven.
 
 ## Decisions Needed
-- Approve this `origin/devnet`-based branch as the Phase 4 implementation base.
-- Approve Work Package 1 only; no later work package starts automatically.
-- Later, decide whether owner authorization plus app-side staged-key proof is sufficient or program-enforced new-agent proof is required.
+- None for the completed WP 4.1 characterization boundary.
+- A separate user gate is required before WP 4.2.
 
 ## Live Actions
 - None.
@@ -47,4 +65,4 @@
 - Untouched.
 
 ## Exact Next Action
-- Stop for user review of the baseline and request authorization before starting Work Package 1.
+- Stop for user review. The next recommended work package is WP 4.2 — explicit agent readiness. Do not begin authoritative-ordering changes automatically.

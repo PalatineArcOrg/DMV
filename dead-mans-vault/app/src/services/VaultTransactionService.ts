@@ -33,6 +33,7 @@ import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS, FEE_WAL
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
 import { range, chunk, unpaidIndices, fullU32Mask } from '../utils/crankMath';
+import { signSendAndConfirmTransaction } from './sendAndConfirmTransaction';
 import type { PriorityFeeEstimateResult } from '../types/api';
 import type { AssetAssignment } from '../types/vault';
 
@@ -218,19 +219,22 @@ export class VaultTransactionService {
     const tx = new Transaction();
     for (const ix of instructions) tx.add(ix);
     const priorityTx = await this.addPriorityFee(tx, accountKeys, cuLimit);
-    priorityTx.feePayer = payer.publicKey;
-    const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
-    priorityTx.recentBlockhash = blockhash;
-    priorityTx.sign(payer, ...extraSigners);
-    const sig = await this.connection.sendRawTransaction(priorityTx.serialize(), {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-    });
-    await this.connection.confirmTransaction(
-      { signature: sig, blockhash, lastValidBlockHeight },
-      'confirmed',
+    return signSendAndConfirmTransaction(
+      priorityTx,
+      payer,
+      extraSigners,
+      {
+        getLatestBlockhash: () =>
+          this.connection.getLatestBlockhash('confirmed'),
+        sendRawTransaction: (serializedTransaction) =>
+          this.connection.sendRawTransaction(serializedTransaction, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          }),
+        confirmTransaction: (strategy) =>
+          this.connection.confirmTransaction(strategy, 'confirmed'),
+      },
     );
-    return sig;
   }
 
   // ─── Vault setup / owner instructions ───
