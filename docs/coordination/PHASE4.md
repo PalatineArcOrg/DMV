@@ -89,6 +89,47 @@ a later package.
 Agent balance and estimated-fee readiness are deferred. WP 4.2 does not introduce
 an `insufficient_agent_funds` state.
 
+## WP 4.3 authoritative confirmation boundary
+
+WP 4.3 replaces the temporary local-first tail with:
+
+```text
+readiness and verified pre-state
+→ agent build/sign/send
+→ structural confirmation classification
+→ canonical heartbeat post-state fetch
+→ advancement verification
+→ confirmed local history write
+→ escalation/countdown reset
+→ best-effort success notification
+→ confirmed Explorer publication
+→ onchain UI reload
+```
+
+Transaction lifecycle results are:
+
+- `submission_failed`: no signature was returned;
+- `confirmed_failed`: a signature was returned and confirmation resolved with a
+  non-null `value.err`;
+- `confirmation_unknown`: a signature was returned but confirmation threw or had
+  a malformed response;
+- `confirmed`: a signature was returned and confirmation explicitly resolved with
+  `value.err === null`.
+
+Only `confirmed` proceeds to post-state verification. The canonical heartbeat
+account must remain program-owned and structurally valid, reference the canonical
+vault, retain the canonical bump, match the submitted method, have a timestamp at
+least as high as the readiness snapshot and have a strictly higher total count.
+
+Local history stores `HeartbeatRecord.lastHeartbeat` and the confirmed signature.
+The success notification uses `lastHeartbeat + heartbeatInterval`; it does not use
+button time. A verified chain success remains successful when local cache,
+notification or reload work fails.
+
+Confirmation-unknown and post-state-unverified signatures are exposed as distinct
+linkable UI states but are not durably persisted. They are never retried
+automatically. Durable restart reconciliation remains WP 4.4.
+
 ## Verified current mutations and failure boundaries
 
 ### Local state
@@ -226,23 +267,22 @@ or rotation was performed. WP 4.3 remains separately gated.
 
 ### Work Package 3: Authoritative heartbeat success ordering
 
-- First correct the existing confirmation-integrity defect: a resolved
-  `confirmTransaction` result containing `value.err` must not be accepted as
-  successful confirmation.
-- Make a single orchestration boundary own key validation, submission,
-  confirmation, local persistence, escalation reset, success notification and UI
-  completion.
-- Keep the button pending through authoritative completion.
-- Commit the local success record, signature and authoritative timestamp only after
-  successful confirmation.
-- Reload the heartbeat account and derive UI state from it before displaying
-  `Vault Secured`.
+- Implemented structural confirmation classification, including non-null
+  `value.err` rejection and signature-preserving unknown outcomes.
+- Implemented canonical post-state verification against the readiness snapshot.
+- Moved local persistence, escalation reset, countdown reset, notification and
+  success UI behind verified chain advancement.
+- Stored the verified chain timestamp and confirmed signature in local history.
+- Preserved verified chain success across local-cache, notification and reload
+  failures.
 
-Exit: ordering tests prove no local success effect occurs on build, signing,
-submission, program or confirmation failure.
+Exit: PASS. Ordering tests prove no local success effect occurs before conclusive
+confirmation and verified post-state advancement. No live action occurred.
 
 ### Work Package 4: Durable pending-transaction reconciliation
 
+- Persist confirmation-unknown and post-state-unverified signatures before process
+  control can be lost.
 - Add an explicit SQLite migration and repository for heartbeat attempts.
 - Persist owner/vault/agent/method, signature, blockhash expiry information,
   timestamps and a state such as `SUBMITTED`, `CONFIRMED`, `FAILED`, `EXPIRED` or

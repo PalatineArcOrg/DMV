@@ -118,3 +118,41 @@ still appear as `on_chain_failed` until the fee-state work package.
 Status: Implemented and covered by offline tests. No live RPC, program, IDL,
 rotation, migration, Android signing or notification-registration action was
 performed.
+
+## WP 4.3 authoritative confirmation boundary
+
+WP 4.3 makes a heartbeat locally successful only after the agent-signed
+transaction is conclusively confirmed and the canonical HeartbeatRecord is
+verified to have advanced.
+
+Local history, escalation reset, countdown reset and success notifications now
+follow confirmed on-chain truth.
+
+A submitted signature whose confirmation or post-state cannot be established is
+not treated as failure or success and is never automatically resubmitted.
+
+Durable persistence and restart reconciliation of those ambiguous signatures is
+deferred to WP 4.4.
+
+Confirmation requires a structurally valid response with `value.err === null`.
+A non-null `value.err` is a conclusive transaction failure. A thrown confirmation
+or malformed response is `confirmation_unknown`, preserving the submitted
+signature.
+
+Confirmation alone is insufficient for local success. The canonical,
+program-owned heartbeat account must parse safely, retain its canonical vault and
+bump, match the submitted method, not regress in timestamp and have a strictly
+higher heartbeat count than the verified readiness snapshot.
+
+The verified Solana timestamp and confirmed signature are written into the
+existing heartbeat-history schema. Notification due time derives from that
+timestamp plus the verified vault heartbeat interval.
+
+Verified chain success wins over local cache failure. A SQLite/Zustand sync
+failure returns `confirmed_on_chain` with `localSync: failed`, resets in-memory
+escalation from chain truth, publishes the confirmed transaction and presents a
+non-fatal cache warning.
+
+Status: Implemented and covered by offline tests. No live RPC, resend, durable
+pending-attempt persistence, program, IDL, rotation, migration, Android signing or
+notification-registration change was performed.

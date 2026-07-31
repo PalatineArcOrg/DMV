@@ -11,11 +11,9 @@ import { useDemoStore } from '../store/useDemoStore';
 import { NotificationService } from '../notifications/NotificationService';
 import { getSetting } from '../db/settingsRepo';
 import { successKey } from '../services/NotificationRegistrationService';
-import {
-  confirmLocalHeartbeat,
-} from '../services/HeartbeatCoordinator';
 import { isDevnet } from '../utils/rpcConfig';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS, PROGRAM_ID } from '../utils/constants';
+import type { ConfirmedHeartbeatInsert } from '../db/heartbeatRepoCore';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
   methods: ['active_tap'],
@@ -32,12 +30,17 @@ export const DEV_ESCALATION = {
 };
 
 interface UseHeartbeatResult {
-  confirmHeartbeat: (method?: HeartbeatMethod) => Promise<void>;
+  recordConfirmedHeartbeat: (
+    input: ConfirmedHeartbeatInsert,
+  ) => Promise<void>;
+  resetAfterConfirmedHeartbeat: () => void;
+  sendConfirmedHeartbeatNotification: (
+    nextDueDate: Date,
+  ) => Promise<void>;
   status: HeartbeatStatus | null;
   escalationStage: EscalationStage;
   secondsRemaining: number;
   isMonitoring: boolean;
-  isConfirming: boolean;
 }
 
 export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null = null): UseHeartbeatResult {
@@ -52,7 +55,6 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [isMonitoring, setIsMonitoring] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
 
   // Create/destroy services based on vault active state
@@ -172,38 +174,36 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
     };
   }, [vaultActive, heartbeatConfig, isDemoMode, ownerPubkey]);
 
-  const confirmHeartbeat = useCallback(
-    async (method: HeartbeatMethod = 'active_tap') => {
-      if (!heartbeatServiceRef.current) return;
-      setIsConfirming(true);
-      try {
-        const intervalSeconds = heartbeatConfig?.intervalSeconds ?? 86400;
-        const nextDue = new Date(Date.now() + intervalSeconds * 1000);
-        await confirmLocalHeartbeat({
-          recordLocalHeartbeat: () =>
-            heartbeatServiceRef.current!.confirmHeartbeat(method),
-          resetLocalEscalation: () => {
-            if (escalationServiceRef.current) {
-              escalationServiceRef.current.resetEscalation();
-            }
-            setSecondsRemaining(0);
-          },
-          sendLocalConfirmationNotification: () =>
-            NotificationService.sendHeartbeatConfirmed(nextDue),
-        });
-      } finally {
-        setIsConfirming(false);
+  const recordConfirmedHeartbeat = useCallback(
+    async (input: ConfirmedHeartbeatInsert) => {
+      if (!heartbeatServiceRef.current) {
+        throw new Error('Heartbeat service is unavailable');
       }
+      await heartbeatServiceRef.current.recordConfirmedHeartbeat(input);
     },
-    [heartbeatConfig],
+    [],
+  );
+
+  const resetAfterConfirmedHeartbeat = useCallback(() => {
+    if (escalationServiceRef.current) {
+      escalationServiceRef.current.resetEscalation();
+    }
+    setSecondsRemaining(0);
+  }, []);
+
+  const sendConfirmedHeartbeatNotification = useCallback(
+    (nextDueDate: Date) =>
+      NotificationService.sendHeartbeatConfirmed(nextDueDate),
+    [],
   );
 
   return {
-    confirmHeartbeat,
+    recordConfirmedHeartbeat,
+    resetAfterConfirmedHeartbeat,
+    sendConfirmedHeartbeatNotification,
     status: heartbeatStatus,
     escalationStage: escalationState.stage,
     secondsRemaining,
     isMonitoring,
-    isConfirming,
   };
 }

@@ -1,5 +1,10 @@
 import { getDb } from './database';
 import { HeartbeatMethod } from '../types/heartbeat';
+import {
+  insertConfirmedHeartbeat,
+  insertNonAuthoritativeLocalHeartbeat,
+  type ConfirmedHeartbeatInsert,
+} from './heartbeatRepoCore';
 
 export interface HeartbeatHistoryEntry {
   id: number;
@@ -9,15 +14,26 @@ export interface HeartbeatHistoryEntry {
   createdAt: number;
 }
 
-export async function recordHeartbeat(
+export async function recordConfirmedHeartbeat(
+  input: ConfirmedHeartbeatInsert,
+): Promise<void> {
+  const db = getDb();
+  await insertConfirmedHeartbeat(input, async (statement, values) => {
+    await db.runAsync(statement, values);
+  });
+}
+
+export async function recordNonAuthoritativeLocalHeartbeat(
   method: HeartbeatMethod,
-  onChainTx?: string,
 ): Promise<void> {
   const db = getDb();
   const timestamp = Math.floor(Date.now() / 1000);
-  await db.runAsync(
-    'INSERT INTO heartbeat_history (timestamp, method, on_chain_tx) VALUES (?, ?, ?)',
-    [timestamp, method, onChainTx ?? null],
+  await insertNonAuthoritativeLocalHeartbeat(
+    method,
+    timestamp,
+    async (statement, values) => {
+      await db.runAsync(statement, values);
+    },
   );
 }
 

@@ -5,6 +5,30 @@ import type {
   RawVaultConfig,
 } from '../utils/rawAccountParsers';
 
+function toSafeOnChainInteger(
+  value: { toNumber: () => number },
+): number | null {
+  try {
+    const converted = value.toNumber();
+    return Number.isSafeInteger(converted) ? converted : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface VerifiedVaultSnapshot {
+  heartbeatInterval: number;
+  gracePeriod: number;
+  active: boolean;
+  executed: boolean;
+}
+
+export interface VerifiedHeartbeatSnapshot {
+  lastHeartbeat: number;
+  lastMethod: number;
+  totalHeartbeats: bigint;
+}
+
 export type AgentReadinessResult =
   | {
       status: 'ready';
@@ -14,6 +38,8 @@ export type AgentReadinessResult =
       localAgent: PublicKey;
       onChainAgent: PublicKey;
       keypair: Keypair;
+      vaultConfig: VerifiedVaultSnapshot;
+      heartbeatBefore: VerifiedHeartbeatSnapshot;
     }
   | {
       status: 'owner_missing';
@@ -159,6 +185,23 @@ export function createAgentReadinessService(
         );
       }
 
+      const heartbeatInterval = toSafeOnChainInteger(
+        vaultConfig.heartbeatInterval,
+      );
+      const gracePeriod = toSafeOnChainInteger(vaultConfig.gracePeriod);
+      const lastHeartbeat = toSafeOnChainInteger(
+        heartbeatRecord.lastHeartbeat,
+      );
+      if (
+        heartbeatInterval === null ||
+        gracePeriod === null ||
+        lastHeartbeat === null
+      ) {
+        return invalidOnChainState(
+          'onchain heartbeat timing exceeds safe numeric bounds',
+        );
+      }
+
       let keypair: Keypair;
       try {
         keypair = await dependencies.loadAgentKeypair();
@@ -187,6 +230,17 @@ export function createAgentReadinessService(
         localAgent,
         onChainAgent,
         keypair,
+        vaultConfig: {
+          heartbeatInterval,
+          gracePeriod,
+          active: vaultConfig.active,
+          executed: vaultConfig.executed,
+        },
+        heartbeatBefore: {
+          lastHeartbeat,
+          lastMethod: heartbeatRecord.lastMethod,
+          totalHeartbeats: heartbeatRecord.totalHeartbeats,
+        },
       };
     },
   };

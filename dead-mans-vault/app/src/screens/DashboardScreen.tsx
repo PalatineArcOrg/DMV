@@ -32,8 +32,12 @@ import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/con
 import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
 import { EscalationStage } from '../types';
 import { VaultTransactionService } from '../services/VaultTransactionService';
-import { createHeartbeatCoordinator } from '../services/HeartbeatCoordinator';
+import {
+  createHeartbeatCoordinator,
+  type HeartbeatExplorerTransactionStatus,
+} from '../services/HeartbeatCoordinator';
 import { createDefaultAgentReadinessService } from '../services/DefaultAgentReadinessService';
+import { createDefaultHeartbeatConfirmationVerifier } from '../services/DefaultHeartbeatConfirmationVerifier';
 import {
   getHeartbeatAttemptMessage,
   type HeartbeatAttemptMessage,
@@ -127,11 +131,12 @@ export function DashboardScreen() {
   const isVaultSetup = vaultData !== null;
 
   const {
-    confirmHeartbeat,
+    recordConfirmedHeartbeat,
+    resetAfterConfirmedHeartbeat,
+    sendConfirmedHeartbeatNotification,
     status: heartbeatStatus,
     escalationStage,
     secondsRemaining,
-    isConfirming,
   } = useHeartbeat(isVaultSetup && (vaultData?.active ?? false), publicKey ?? null);
 
   const cfg = STAGE_CONFIG[escalationStage] || STAGE_CONFIG[0];
@@ -353,8 +358,15 @@ export function DashboardScreen() {
     await Promise.all([refresh(), loadVaultState()]);
   }, [refresh, loadVaultState]);
 
-  const lastOnChainTxRef = useRef<string | null>(null);
-  const [lastOnChainTx, setLastOnChainTx] = useState<string | null>(null);
+  const [lastConfirmedHeartbeatTx, setLastConfirmedHeartbeatTx] =
+    useState<string | null>(null);
+  const [currentHeartbeatTx, setCurrentHeartbeatTx] = useState<{
+    signature: string;
+    status: Exclude<
+      HeartbeatExplorerTransactionStatus,
+      'confirmed_success'
+    >;
+  } | null>(null);
   const [heartbeatAttemptMessage, setHeartbeatAttemptMessage] =
     useState<HeartbeatAttemptMessage | null>(null);
   const [isHeartbeatAttemptInFlight, setIsHeartbeatAttemptInFlight] =
@@ -366,11 +378,12 @@ export function DashboardScreen() {
   const handleHeartbeat = useCallback(async () => {
     setHeartbeatConfirmationSucceeded(false);
     setHeartbeatAttemptMessage(null);
+    setCurrentHeartbeatTx(null);
 
     const result = await heartbeatCoordinator.attempt({
+      method: 'active_tap',
       checkAgentReadiness: () =>
         createDefaultAgentReadinessService().check(publicKey ?? null),
-      confirmLocalHeartbeat: () => confirmHeartbeat('active_tap'),
       recordHeartbeatOnChain: (agentKeypair) => {
         if (!publicKey) {
           throw new Error('Connected owner became unavailable');
@@ -379,24 +392,22 @@ export function DashboardScreen() {
         return txService.recordHeartbeatOnChain(
           agentKeypair,
           publicKey,
-          'activeTap',
+          'active_tap',
         );
       },
+      verifyHeartbeatConfirmation: (input) =>
+        createDefaultHeartbeatConfirmationVerifier().verify(input),
+      recordConfirmedHeartbeat,
+      resetLocalEscalation: resetAfterConfirmedHeartbeat,
+      sendLocalConfirmationNotification:
+        sendConfirmedHeartbeatNotification,
       reloadVaultState: loadVaultState,
-      publishExplorerSignature: (signature) => {
-        lastOnChainTxRef.current = signature;
-        setLastOnChainTx(signature);
-      },
-      publishOnChainError: (hasError) => {
-        if (hasError) {
-          setHeartbeatAttemptMessage(
-            getHeartbeatAttemptMessage({
-              status: 'on_chain_failed',
-              error: new Error('on-chain heartbeat failed'),
-            }),
-          );
+      publishExplorerTransaction: (signature, status) => {
+        if (status === 'confirmed_success') {
+          setLastConfirmedHeartbeatTx(signature);
+          setCurrentHeartbeatTx(null);
         } else {
-          setHeartbeatAttemptMessage(null);
+          setCurrentHeartbeatTx({ signature, status });
         }
       },
       publishInFlightState: (isInFlight) => {
@@ -415,11 +426,31 @@ export function DashboardScreen() {
     );
     setHeartbeatAttemptMessage(getHeartbeatAttemptMessage(result));
   }, [
-    confirmHeartbeat,
     heartbeatCoordinator,
     loadVaultState,
     publicKey,
+    recordConfirmedHeartbeat,
+    resetAfterConfirmedHeartbeat,
+    sendConfirmedHeartbeatNotification,
   ]);
+
+  const displayedHeartbeatTx = currentHeartbeatTx ?? (
+    lastConfirmedHeartbeatTx
+      ? {
+          signature: lastConfirmedHeartbeatTx,
+          status: 'confirmed_success' as const,
+        }
+      : null
+  );
+
+  const displayedHeartbeatTxLabel =
+    displayedHeartbeatTx?.status === 'confirmed_success'
+      ? 'Last confirmed tx'
+      : displayedHeartbeatTx?.status === 'confirmed_failed'
+        ? 'Confirmed failed tx'
+        : displayedHeartbeatTx?.status === 'confirmation_unknown'
+          ? 'Submitted tx — confirmation unknown'
+          : 'Tx — heartbeat state unverified';
 
   // Heartbeat stats
   const lastBeatLabel = heartbeatData
@@ -504,7 +535,7 @@ export function DashboardScreen() {
             <HeartbeatButton
               onPress={handleHeartbeat}
               disabled={!isVaultSetup || isHeartbeatAttemptInFlight}
-              loading={isHeartbeatAttemptInFlight || isConfirming}
+              loading={isHeartbeatAttemptInFlight}
               confirmationSucceeded={heartbeatConfirmationSucceeded}
               label={
                 isHeartbeatAttemptInFlight
@@ -535,8 +566,7 @@ export function DashboardScreen() {
             </View>
           </View>
 
-          {/* On-chain heartbeat failed — liveness NOT recorded on-chain. Surface it so the
-              owner knows to retry (a silent failure lets the on-chain clock keep aging). */}
+          {/* Typed attempt state remains distinct from confirmed success. */}
           {heartbeatAttemptMessage ? (
             <View style={styles.onChainTxRow}>
               <MaterialCommunityIcons
@@ -549,7 +579,9 @@ export function DashboardScreen() {
                 color={
                   heartbeatAttemptMessage.tone === 'pending'
                     ? COLORS.accent
-                    : COLORS.warning
+                    : heartbeatAttemptMessage.tone === 'critical'
+                      ? COLORS.critical
+                      : COLORS.warning
                 }
               />
               <Text
@@ -559,25 +591,40 @@ export function DashboardScreen() {
                     color:
                       heartbeatAttemptMessage.tone === 'pending'
                         ? COLORS.accent
-                        : COLORS.warning,
+                        : heartbeatAttemptMessage.tone === 'critical'
+                          ? COLORS.critical
+                          : COLORS.warning,
                   },
                 ]}
               >
                 {heartbeatAttemptMessage.text}
               </Text>
             </View>
-          ) : (
-            lastOnChainTx && (
-              <TouchableOpacity
-                style={styles.onChainTxRow}
-                onPress={() => Linking.openURL(explorerTx(lastOnChainTx))}
-              >
-                <MaterialCommunityIcons name="open-in-new" size={10} color={COLORS.accent} />
-                <Text style={styles.onChainTxText}>
-                  Last tx: {lastOnChainTx.slice(0, 8)}...{lastOnChainTx.slice(-4)}
-                </Text>
-              </TouchableOpacity>
-            )
+          ) : null}
+          {displayedHeartbeatTx && (
+            <TouchableOpacity
+              style={styles.onChainTxRow}
+              onPress={() =>
+                Linking.openURL(
+                  explorerTx(displayedHeartbeatTx.signature),
+                )
+              }
+            >
+              <MaterialCommunityIcons
+                name="open-in-new"
+                size={10}
+                color={
+                  displayedHeartbeatTx.status === 'confirmed_success'
+                    ? COLORS.accent
+                    : COLORS.warning
+                }
+              />
+              <Text style={styles.onChainTxText}>
+                {displayedHeartbeatTxLabel}:{' '}
+                {displayedHeartbeatTx.signature.slice(0, 8)}...
+                {displayedHeartbeatTx.signature.slice(-4)}
+              </Text>
+            </TouchableOpacity>
           )}
         </View>
       )}

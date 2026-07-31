@@ -21,7 +21,10 @@ import { useDemoStore } from '../store/useDemoStore';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
 import { useEscalationStore } from '../store/useEscalationStore';
-import { clearHeartbeatHistory, recordHeartbeat } from '../db/heartbeatRepo';
+import {
+  clearHeartbeatHistory,
+  recordNonAuthoritativeLocalHeartbeat,
+} from '../db/heartbeatRepo';
 import { clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
 import { truncateAddress, formatDuration } from '../utils/formatting';
 import { COLORS, FONTS, PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
@@ -170,7 +173,7 @@ export function EstateReviewScreen() {
       await clearHeartbeatHistory();
       await clearDistributableSnapshot(ownerWallet);
       await clearTokenSnapshot(ownerWallet);
-      await recordHeartbeat('active_tap');
+      await recordNonAuthoritativeLocalHeartbeat('active_tap');
       useEscalationStore.getState().reset();
 
       // Sync vault config to store

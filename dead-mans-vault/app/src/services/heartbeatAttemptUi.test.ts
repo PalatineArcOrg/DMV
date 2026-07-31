@@ -70,4 +70,78 @@ test('Dashboard confirmation and pending UI are driven by explicit coordinator s
     dashboard,
     /MigrationService|generateAgentKey|destroyKey|rotateAgent/,
   );
+  assert.doesNotMatch(dashboard, /confirmLocalHeartbeat|confirmHeartbeat\(/);
+  assert.doesNotMatch(
+    dashboard,
+    /recordNonAuthoritativeLocalHeartbeat|Date\.now/,
+  );
+  assert.match(dashboard, /recordConfirmedHeartbeat/);
+  assert.match(dashboard, /verifyHeartbeatConfirmation/);
+  assert.match(dashboard, /lastConfirmedHeartbeatTx/);
+  assert.match(dashboard, /currentHeartbeatTx/);
+});
+
+test('verified chain success and local-cache failure are distinguished', () => {
+  const synced = getHeartbeatAttemptMessage({
+    status: 'confirmed_on_chain',
+    signature: 'confirmed-signature',
+    lastHeartbeat: 1_001,
+    totalHeartbeats: 5n,
+    localSync: 'complete',
+  });
+  const cacheFailed = getHeartbeatAttemptMessage({
+    status: 'confirmed_on_chain',
+    signature: 'confirmed-signature',
+    lastHeartbeat: 1_001,
+    totalHeartbeats: 5n,
+    localSync: 'failed',
+  });
+
+  assert.equal(synced, null);
+  assert.match(cacheFailed?.text ?? '', /confirmed on Solana/);
+  assert.match(
+    cacheFailed?.text ?? '',
+    /on-chain liveness deadline was reset successfully/,
+  );
+  assert.doesNotMatch(cacheFailed?.text ?? '', /tap again/i);
+});
+
+test('ambiguous and failed transaction messages never claim success', () => {
+  const submission = getHeartbeatAttemptMessage({
+    status: 'submission_failed',
+    error: new Error('not shown'),
+  });
+  const failed = getHeartbeatAttemptMessage({
+    status: 'transaction_failed',
+    signature: 'failed-signature',
+    transactionError: { custom: 1 },
+  });
+  const unknown = getHeartbeatAttemptMessage({
+    status: 'confirmation_unknown',
+    signature: 'unknown-signature',
+    error: new Error('not shown'),
+  });
+  const postState = getHeartbeatAttemptMessage({
+    status: 'post_state_unavailable',
+    signature: 'unverified-signature',
+  });
+  const integrity = getHeartbeatAttemptMessage({
+    status: 'post_state_not_advanced',
+    signature: 'integrity-signature',
+  });
+
+  assert.match(submission?.text ?? '', /was not submitted/);
+  assert.match(failed?.text ?? '', /confirmed as failed/);
+  assert.match(unknown?.text ?? '', /Do not tap again yet/);
+  assert.match(postState?.text ?? '', /could not be verified/);
+  assert.equal(integrity?.tone, 'critical');
+  for (const message of [
+    submission,
+    failed,
+    unknown,
+    postState,
+    integrity,
+  ]) {
+    assert.doesNotMatch(message?.text ?? '', /Vault Secured/);
+  }
 });

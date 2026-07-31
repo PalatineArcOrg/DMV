@@ -2,71 +2,82 @@
 
 ## Repository
 - Branch: `phase4-transactional-heartbeat`
-- HEAD: WP 4.2 implementation commit `phase4: add explicit heartbeat agent readiness` (exact SHA recorded in the handoff)
+- HEAD: WP 4.3 implementation commit `phase4: make heartbeat success follow verified chain confirmation` (exact SHA recorded in the handoff)
 - Base: `origin/devnet` at `cd0264bb209c0bdc2cf4a576b48ce7d6372c69aa`
-- Starting HEAD: `b2d8e5a97cb4e8c79848eaf28736371e4b9c8883`
-- Worktree: Clean after the WP 4.2 implementation commit and branch push.
+- Starting HEAD: `28d1ef6b8810da845524636ab52eaaff24539598`
+- Worktree: Clean after the WP 4.3 implementation commit and branch push.
 
 ## Current Work Package
-- Name: WP 4.2 — Explicit agent readiness and heartbeat preflight
+- Name: WP 4.3 — Confirmation integrity and authoritative heartbeat success ordering
 - State: PASS
 
 ## Completed
-- Added a dependency-injected `AgentReadinessService` and a production adapter that reuse `VaultTransactionService` PDA helpers and the existing hardened raw-account parsers.
-- Added a full hardened `HeartbeatRecord` parser alongside the existing `VaultConfig` parser; both account types are checked for program owner, discriminator, bounds and canonical PDA bump.
-- Made the connected owner, current raw onchain accounts and device-held key explicit readiness inputs. Cached Zustand vault state, local SQLite heartbeat state and notification registration are not readiness evidence.
-- Added explicit readiness states: `ready`, `owner_missing`, `agent_missing`, `agent_unavailable`, `agent_mismatch`, `vault_missing`, `vault_inactive`, `vault_executed`, `rpc_unavailable` and `invalid_on_chain_state`.
-- Added `heartbeat_in_flight` at the coordinator boundary and a per-dashboard coordinator lock. The lock is released in `finally` after success and every failure class.
-- Made the dashboard button pending for the full coordinator attempt and made its `Vault Secured` animation depend only on an explicit `confirmed_on_chain` result.
-- Added typed, non-address-bearing dashboard messages for every readiness failure. No automatic key generation, rotation or owner-wallet prompt was added.
-- Preserved the current transaction confirmation behavior and the local-first success mutations after a valid readiness result for correction in WP 4.3.
+- Extended the `ready` result with the already-validated vault timing values and pre-heartbeat account snapshot. Unsafe JavaScript numeric conversions fail closed.
+- Replaced string-only transaction results with `confirmed`, `confirmed_failed`, `confirmation_unknown` and `submission_failed`.
+- A resolved confirmation is successful only when the response structurally contains `value.err === null`. A non-null error is a confirmed transaction failure; a thrown or malformed response preserves the signature as confirmation unknown.
+- Added a dependency-injected post-state verifier and production adapter using the existing canonical PDA helper and hardened heartbeat parser.
+- Removed local-first mutation from the deliberate dashboard heartbeat path.
+- Confirmed local history now stores the verified Solana timestamp, submitted method and confirmed transaction signature in the existing `on_chain_tx` column.
+- Reset, countdown update, notification, success animation and confirmed Explorer publication now follow verified chain advancement.
+- Kept failed, confirmation-unknown and post-state-unverified Explorer signatures distinct from the last confirmed successful heartbeat transaction.
+- Made verified chain success authoritative over SQLite/Zustand cache failure. The app reports a local-sync warning without encouraging another heartbeat.
+- Renamed and isolated the two remaining device-clock local insert paths used by vault initialization and dormant activity monitoring as non-authoritative.
 
 ## Files Changed
-- `dead-mans-vault/app/src/components/HeartbeatButton.tsx`
+- `dead-mans-vault/app/src/db/heartbeatRepo.ts`
+- `dead-mans-vault/app/src/db/heartbeatRepoCore.ts`
+- `dead-mans-vault/app/src/db/heartbeatRepoCore.test.ts`
+- `dead-mans-vault/app/src/hooks/useHeartbeat.ts`
 - `dead-mans-vault/app/src/screens/DashboardScreen.tsx`
+- `dead-mans-vault/app/src/screens/EstateReviewScreen.tsx`
 - `dead-mans-vault/app/src/services/AgentReadinessService.ts`
 - `dead-mans-vault/app/src/services/AgentReadinessService.test.ts`
-- `dead-mans-vault/app/src/services/DefaultAgentReadinessService.ts`
+- `dead-mans-vault/app/src/services/DefaultHeartbeatConfirmationVerifier.ts`
+- `dead-mans-vault/app/src/services/HeartbeatConfirmationVerifier.ts`
+- `dead-mans-vault/app/src/services/HeartbeatConfirmationVerifier.test.ts`
 - `dead-mans-vault/app/src/services/HeartbeatCoordinator.ts`
 - `dead-mans-vault/app/src/services/HeartbeatCoordinator.test.ts`
+- `dead-mans-vault/app/src/services/HeartbeatService.ts`
+- `dead-mans-vault/app/src/services/VaultTransactionService.ts`
 - `dead-mans-vault/app/src/services/heartbeatAttemptUi.ts`
 - `dead-mans-vault/app/src/services/heartbeatAttemptUi.test.ts`
-- `dead-mans-vault/app/src/utils/rawAccountParsers.ts`
-- `dead-mans-vault/app/src/utils/rawAccountParsers.test.ts`
+- `dead-mans-vault/app/src/services/sendAndConfirmTransaction.ts`
+- `dead-mans-vault/app/src/services/sendAndConfirmTransaction.test.ts`
+- `dead-mans-vault/app/src/types/heartbeat.ts`
 - `docs/coordination/STATUS.md`
 - `docs/coordination/DECISIONS.md`
 - `docs/coordination/PHASE4.md`
 
 ## Tests
-- `cd dead-mans-vault/app && npm test`: PASS (14/14 test files, 0 failures).
-- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (248/248 cases).
-- Focused readiness, coordinator, UI and raw-account parser boundary: PASS (51/51 cases).
-- WP 4.2 added 34 net app cases over the accepted 214-case baseline: 18 readiness cases, 12 net coordinator cases, three UI cases and one parser case.
+- `cd dead-mans-vault/app && npm test`: PASS (16/16 test files, 0 failures).
+- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (282/282 cases).
+- Focused transaction, readiness, post-state verifier, coordinator, repository and UI boundary: PASS (77/77 cases).
+- WP 4.3 added 34 net app cases over the accepted 248-case baseline while replacing the obsolete local-first assertions with authoritative-ordering coverage.
 - `cd dead-mans-vault/app && ./node_modules/.bin/tsc --noEmit`: PASS.
 - `git diff --cached --check`: PASS.
 - Staged changed-file secret scan: PASS; no private key, seed phrase, credential, notification token, RPC secret or environment value was found.
 - Forbidden-artifact scan: PASS; no APK, keystore, `.env`, credential or wallet-secret artifact entered Git.
-- Tests use injected account fetches, deterministic in-memory keypair fixtures and static source checks. They do not instantiate the production readiness adapter or make an RPC request.
+- Tests use injected account fetches, transaction transports, local repository runners and generated in-memory keypairs. They do not instantiate production RPC adapters or make an RPC request.
 - No existing security test was weakened or deleted.
 
 ## Findings
-- Connected owner source: `useWallet().publicKey` in `DashboardScreen`.
-- Canonical address source: `VaultTransactionService.getVaultPDA(owner)` and `getHeartbeatPDA(vault)`.
-- Authoritative state source: fresh `Connection.getAccountInfo` reads for the canonical vault and heartbeat accounts, decoded by `parseVaultConfig` and `parseHeartbeatRecord`.
-- Readiness preflight order: require owner → derive canonical vault/heartbeat PDAs and bumps → fetch and validate vault owner/discriminator/PDA/embedded owner/bump → require active → require not executed → fetch and validate heartbeat owner/discriminator/PDA/embedded vault/bump → load device key once → derive local public key → compare with `vault.agentPubkey` → return the exact checked keypair as `ready`.
-- `KeyManager.getKeypair()` returns `Promise<Keypair>`, uses its in-memory cache when populated, otherwise reads the device-only authentication flag and secure-store secret with the matching device-authentication options. A missing secret throws; an authentication/unlock failure is kept distinct as `agent_unavailable`.
-- Existing startup detection remains in `RootNavigator`: after its existing new-vault delay it compares the local public key with the cached vault agent and can offer a deliberate rotation prompt. WP 4.2 does not rely on that check, trigger it or change it.
-- Temporary ready-attempt order: single-flight acquisition → readiness → local SQLite heartbeat → local escalation reset → local success notification → onchain submission/confirmation with the checked keypair → signature or warning publication → vault reload → lock release.
-- The remaining defect is explicit: after readiness succeeds, local liveness, countdown reset and success notification still occur before conclusive onchain confirmation. A chain failure therefore still leaves local success effects.
-- The existing resolved-`confirmTransaction().value.err` defect is intentionally unchanged.
-- Agent balance and fee estimation are not part of readiness in WP 4.2. Insufficient agent funds still surface as `on_chain_failed`.
+- Authoritative order: single-flight acquisition → readiness and verified pre-state → agent build/sign/send → structural confirmation classification → canonical post-state fetch and validation → advancement verification → confirmed local cache write → escalation/countdown reset → best-effort notification → confirmed Explorer publication → onchain UI reload → lock release.
+- Post-state acceptance requires the canonical heartbeat address and bump, DMV program owner, discriminator and valid layout, matching vault reference and method, a non-regressed safe timestamp, and `post.totalHeartbeats > before.totalHeartbeats`.
+- Equal pre/post timestamps are accepted when the count advances because multiple heartbeats can execute within one Solana clock second.
+- `submission_failed` means no signature was returned. `transaction_failed` retains a signature with a conclusive non-null execution error. `confirmation_unknown` retains a submitted signature after confirmation exception or malformed response.
+- A confirmed transaction followed by an unavailable, invalid or non-advanced post-state becomes `post_state_unavailable`, `post_state_invalid` or `post_state_not_advanced`; none produces local success.
+- The local confirmed row timestamp is the verified `HeartbeatRecord.lastHeartbeat`, never button time. The `on_chain_tx` value is the confirmed signature.
+- Notification `nextDue` is `verified lastHeartbeat + verified heartbeatInterval`. Grace-period and escalation-stage definitions are unchanged.
+- A verified chain heartbeat remains `confirmed_on_chain` when local persistence, notification or UI reload fails. SQLite/Zustand failure is reported as `localSync: failed`; reset and chain-success UI still proceed.
+- Submitted ambiguous signatures are currently held only in coordinator results and React state. There is no durable restart reconciliation, pending-attempt table or automatic resend.
+- Agent balance and fee estimation remain deferred. Insufficient agent funds surface through the structured submission or transaction-failure taxonomy.
 - The current MigrationService and startup migration flow were not changed.
 - The current MigrationService must not be used for Fox or signing-identity migration.
   It destroys the active agent key before replacement authority is proven.
 
 ## Decisions Needed
-- None for the completed WP 4.2 boundary.
-- A separate user gate is required before WP 4.3.
+- None for the completed WP 4.3 boundary.
+- A separate user gate is required before WP 4.4.
 
 ## Live Actions
 - None.
@@ -75,4 +86,4 @@
 - Untouched.
 
 ## Exact Next Action
-- Stop for user review. The next recommended work package is WP 4.3 — confirmation integrity and authoritative heartbeat success ordering. Do not begin it automatically.
+- Stop for user review. The next recommended work package is WP 4.4 — durable pending-transaction persistence and restart reconciliation. Do not begin it automatically.

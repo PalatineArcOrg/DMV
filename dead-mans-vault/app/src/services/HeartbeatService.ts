@@ -1,10 +1,12 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { HeartbeatMethod, HeartbeatConfig, HeartbeatStatus } from '../types';
 import {
-  recordHeartbeat,
+  recordConfirmedHeartbeat as persistConfirmedHeartbeat,
+  recordNonAuthoritativeLocalHeartbeat,
   getLastHeartbeat,
   getHeartbeatCount,
 } from '../db/heartbeatRepo';
+import type { ConfirmedHeartbeatInsert } from '../db/heartbeatRepoCore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 
 export class HeartbeatService {
@@ -19,8 +21,18 @@ export class HeartbeatService {
     this.config = config;
   }
 
-  async confirmHeartbeat(method: HeartbeatMethod): Promise<void> {
-    await recordHeartbeat(method);
+  async recordConfirmedHeartbeat(
+    input: ConfirmedHeartbeatInsert,
+  ): Promise<void> {
+    await persistConfirmedHeartbeat(input);
+    const status = await this.getStatus();
+    useHeartbeatStore.getState().setStatus(status);
+  }
+
+  async recordNonAuthoritativeActivityHeartbeat(
+    method: HeartbeatMethod,
+  ): Promise<void> {
+    await recordNonAuthoritativeLocalHeartbeat(method);
     const status = await this.getStatus();
     useHeartbeatStore.getState().setStatus(status);
   }
@@ -100,7 +112,9 @@ export class HeartbeatService {
 
         const last = await getLastHeartbeat();
         if (!last || ownerSignedTx.blockTime > last.timestamp) {
-          await this.confirmHeartbeat('on_chain_activity');
+          await this.recordNonAuthoritativeActivityHeartbeat(
+            'on_chain_activity',
+          );
         }
       } catch {
         // On-chain monitoring failure is non-fatal

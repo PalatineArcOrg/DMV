@@ -3,6 +3,7 @@ import type { HeartbeatAttemptResult } from './HeartbeatCoordinator';
 export type HeartbeatAttemptMessageTone =
   | 'pending'
   | 'warning'
+  | 'critical'
   | 'terminal';
 
 export interface HeartbeatAttemptMessage {
@@ -15,7 +16,14 @@ export function getHeartbeatAttemptMessage(
 ): HeartbeatAttemptMessage | null {
   switch (result.status) {
     case 'confirmed_on_chain':
-      return null;
+      return result.localSync === 'complete'
+        ? null
+        : {
+            tone: 'warning',
+            text:
+              'Heartbeat confirmed on Solana. This device could not update its local history, ' +
+              'but your on-chain liveness deadline was reset successfully.',
+          };
     case 'heartbeat_in_flight':
       return {
         tone: 'pending',
@@ -80,18 +88,41 @@ export function getHeartbeatAttemptMessage(
           'The on-chain vault state could not be validated safely. ' +
           'No local or on-chain heartbeat was recorded.',
       };
-    case 'on_chain_failed':
+    case 'submission_failed':
       return {
         tone: 'warning',
         text:
-          "On-chain heartbeat didn't record — liveness was not updated on-chain. " +
-          'Check the network and try again.',
+          'The heartbeat transaction was not submitted. ' +
+          'No local or on-chain heartbeat was recorded.',
       };
-    case 'local_failed':
+    case 'transaction_failed':
       return {
         tone: 'warning',
         text:
-          'The local heartbeat record could not be saved, so no on-chain heartbeat was attempted.',
+          'The heartbeat transaction was confirmed as failed. ' +
+          'No heartbeat was recorded.',
+      };
+    case 'confirmation_unknown':
+      return {
+        tone: 'warning',
+        text:
+          'The heartbeat transaction was submitted, but its result could not be confirmed. ' +
+          'Do not tap again yet. Check the submitted transaction.',
+      };
+    case 'post_state_unavailable':
+    case 'post_state_invalid':
+      return {
+        tone: 'warning',
+        text:
+          'The transaction reported success, but the updated heartbeat account could not be verified. ' +
+          'Do not submit another heartbeat until the state is reconciled.',
+      };
+    case 'post_state_not_advanced':
+      return {
+        tone: 'critical',
+        text:
+          'Heartbeat integrity warning: the transaction reported success, but the canonical heartbeat record did not advance. ' +
+          'Do not submit another heartbeat until the state is reconciled.',
       };
   }
 }

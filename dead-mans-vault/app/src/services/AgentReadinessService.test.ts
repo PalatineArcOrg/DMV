@@ -20,8 +20,8 @@ const OWNER = new PublicKey(Buffer.alloc(32, 2));
 const VAULT = new PublicKey(Buffer.alloc(32, 3));
 const HEARTBEAT = new PublicKey(Buffer.alloc(32, 4));
 const OTHER_VAULT = new PublicKey(Buffer.alloc(32, 5));
-const AGENT = Keypair.fromSeed(new Uint8Array(32).fill(7));
-const OTHER_AGENT = Keypair.fromSeed(new Uint8Array(32).fill(8));
+const AGENT = Keypair.generate();
+const OTHER_AGENT = Keypair.generate();
 
 const discriminator = (name: string): Buffer =>
   createHash('sha256')
@@ -29,13 +29,13 @@ const discriminator = (name: string): Buffer =>
     .digest()
     .subarray(0, 8);
 
-const i64 = (value: number): Buffer => {
+const i64 = (value: number | bigint): Buffer => {
   const bytes = Buffer.alloc(8);
   bytes.writeBigInt64LE(BigInt(value));
   return bytes;
 };
 
-const u64 = (value: number): Buffer => {
+const u64 = (value: number | bigint): Buffer => {
   const bytes = Buffer.alloc(8);
   bytes.writeBigUInt64LE(BigInt(value));
   return bytes;
@@ -48,13 +48,15 @@ function buildVaultAccount(options: {
   executed?: boolean;
   accountOwner?: PublicKey;
   discriminator?: Buffer;
+  heartbeatInterval?: number | bigint;
+  gracePeriod?: number | bigint;
 } = {}): AccountInfoLike {
   const data = Buffer.concat([
     options.discriminator ?? discriminator('VaultConfig'),
     (options.owner ?? OWNER).toBuffer(),
     (options.agent ?? AGENT.publicKey).toBuffer(),
-    i64(86_400),
-    i64(604_800),
+    i64(options.heartbeatInterval ?? 86_400),
+    i64(options.gracePeriod ?? 604_800),
     Buffer.alloc(4),
     Buffer.from([options.executed ? 1 : 0]),
     Buffer.from([options.active === false ? 0 : 1]),
@@ -70,15 +72,17 @@ function buildHeartbeatAccount(
   vault = VAULT,
   accountOwner = PROGRAM,
   bump = 253,
+  lastHeartbeat: number | bigint = 1_000,
+  totalHeartbeats: number | bigint = 4,
 ): AccountInfoLike {
   return {
     owner: accountOwner,
     data: Buffer.concat([
       discriminator('HeartbeatRecord'),
       vault.toBuffer(),
-      i64(1_000),
+      i64(lastHeartbeat),
       Buffer.from([0]),
-      u64(4),
+      u64(totalHeartbeats),
       Buffer.from([bump]),
       Buffer.alloc(32),
     ]),
@@ -158,6 +162,17 @@ test('matching local and on-chain agent returns ready', async () => {
   assert.equal(result.heartbeat.equals(HEARTBEAT), true);
   assert.equal(result.localAgent.equals(AGENT.publicKey), true);
   assert.equal(result.onChainAgent.equals(AGENT.publicKey), true);
+  assert.deepEqual(result.vaultConfig, {
+    heartbeatInterval: 86_400,
+    gracePeriod: 604_800,
+    active: true,
+    executed: false,
+  });
+  assert.deepEqual(result.heartbeatBefore, {
+    lastHeartbeat: 1_000,
+    lastMethod: 0,
+    totalHeartbeats: 4n,
+  });
 });
 
 test('local key missing returns agent_missing', async () => {
@@ -328,6 +343,45 @@ test('ready result carries the exact validated in-memory keypair', async () => {
   assert.equal(result.status, 'ready');
   if (result.status !== 'ready') return;
   assert.strictEqual(result.keypair, AGENT);
+});
+
+test('readiness snapshot rejects onchain integers outside safe numeric bounds', async () => {
+  const unsafeInteger = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
+  const harness = makeHarness({
+    heartbeatAccount: buildHeartbeatAccount(
+      VAULT,
+      PROGRAM,
+      253,
+      unsafeInteger,
+    ),
+  });
+
+  const result = await createAgentReadinessService(
+    harness.dependencies,
+  ).check(OWNER);
+
+  assert.deepEqual(result, {
+    status: 'invalid_on_chain_state',
+    reason: 'onchain heartbeat timing exceeds safe numeric bounds',
+  });
+  assert.equal(harness.counters.fetch, 2);
+  assert.equal(harness.counters.loadKey, 0);
+});
+
+test('readiness snapshot rejects unsafe vault interval conversion', async () => {
+  const harness = makeHarness({
+    vaultAccount: buildVaultAccount({
+      heartbeatInterval: BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+    }),
+  });
+
+  const result = await createAgentReadinessService(
+    harness.dependencies,
+  ).check(OWNER);
+
+  assert.equal(result.status, 'invalid_on_chain_state');
+  assert.equal(harness.counters.fetch, 2);
+  assert.equal(harness.counters.loadKey, 0);
 });
 
 test('readiness implementation has no logging or persistence capability', () => {

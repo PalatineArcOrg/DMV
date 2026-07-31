@@ -33,9 +33,16 @@ import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS, FEE_WAL
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
 import { rpcWithRetry } from '../utils/fetchWithRetry';
 import { range, chunk, unpaidIndices, fullU32Mask } from '../utils/crankMath';
-import { signSendAndConfirmTransaction } from './sendAndConfirmTransaction';
+import {
+  signSendAndConfirmTransaction,
+  type SendAndConfirmResult,
+} from './sendAndConfirmTransaction';
 import type { PriorityFeeEstimateResult } from '../types/api';
 import type { AssetAssignment } from '../types/vault';
+import {
+  HEARTBEAT_INSTRUCTION_METHOD,
+  type HeartbeatMethod,
+} from '../types/heartbeat';
 
 const programId = new PublicKey(PROGRAM_ID);
 
@@ -209,6 +216,44 @@ export class VaultTransactionService {
    * extra signers), and send via sendRawTransaction (never sendAndConfirmTransaction
    * on mobile — its WebSocket subscription fails under React Native).
    */
+  private async sendWithPayerResult(
+    instructions: TransactionInstruction[],
+    payer: Keypair,
+    accountKeys: PublicKey[],
+    cuLimit: number,
+    extraSigners: Keypair[] = [],
+  ): Promise<SendAndConfirmResult> {
+    try {
+      const transaction = new Transaction();
+      for (const instruction of instructions) {
+        transaction.add(instruction);
+      }
+      const priorityTransaction = await this.addPriorityFee(
+        transaction,
+        accountKeys,
+        cuLimit,
+      );
+      return signSendAndConfirmTransaction(
+        priorityTransaction,
+        payer,
+        extraSigners,
+        {
+          getLatestBlockhash: () =>
+            this.connection.getLatestBlockhash('confirmed'),
+          sendRawTransaction: (serializedTransaction) =>
+            this.connection.sendRawTransaction(serializedTransaction, {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed',
+            }),
+          confirmTransaction: (strategy) =>
+            this.connection.confirmTransaction(strategy, 'confirmed'),
+        },
+      );
+    } catch (error: unknown) {
+      return { status: 'submission_failed', error };
+    }
+  }
+
   private async sendWithPayer(
     instructions: TransactionInstruction[],
     payer: Keypair,
@@ -216,24 +261,24 @@ export class VaultTransactionService {
     cuLimit: number,
     extraSigners: Keypair[] = [],
   ): Promise<string> {
-    const tx = new Transaction();
-    for (const ix of instructions) tx.add(ix);
-    const priorityTx = await this.addPriorityFee(tx, accountKeys, cuLimit);
-    return signSendAndConfirmTransaction(
-      priorityTx,
+    const result = await this.sendWithPayerResult(
+      instructions,
       payer,
+      accountKeys,
+      cuLimit,
       extraSigners,
-      {
-        getLatestBlockhash: () =>
-          this.connection.getLatestBlockhash('confirmed'),
-        sendRawTransaction: (serializedTransaction) =>
-          this.connection.sendRawTransaction(serializedTransaction, {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-          }),
-        confirmTransaction: (strategy) =>
-          this.connection.confirmTransaction(strategy, 'confirmed'),
-      },
+    );
+    if (result.status === 'confirmed') {
+      return result.signature;
+    }
+    if (result.status === 'submission_failed') {
+      throw result.error;
+    }
+    if (result.status === 'confirmation_unknown') {
+      throw result.error;
+    }
+    throw new Error(
+      `Transaction ${result.signature} was confirmed with an execution error`,
     );
   }
 
@@ -275,29 +320,40 @@ export class VaultTransactionService {
   async recordHeartbeatOnChain(
     agentKeypair: Keypair,
     ownerPubkey: PublicKey,
-    method: 'activeTap' | 'biometricConfirm' | 'onChainActivity' | 'pinChallenge' | 'hardwareSwitch',
-  ): Promise<string> {
+    method: HeartbeatMethod,
+  ): Promise<SendAndConfirmResult> {
     // NOTE: deliberately NOT network-gated. The heartbeat is a liveness signal that moves
     // no funds — it must fail OPEN. Blocking it on an unverified-but-possibly-fine network
     // (the UNKNOWN "continue anyway" path) looks exactly like death and could drive the
     // dead-man's switch to a premature, irreversible execution. Fund-moving writes fail
     // closed (see assertNetworkVerified call sites); the heartbeat must not.
-    const program = this.getProgram(agentKeypair);
-    const [vaultPda] = this.getVaultPDA(ownerPubkey);
-    const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
+    try {
+      const program = this.getProgram(agentKeypair);
+      const [vaultPda] = this.getVaultPDA(ownerPubkey);
+      const [heartbeatPda] = this.getHeartbeatPDA(vaultPda);
 
-    const methodEnum = { [method]: {} };
+      const methodEnum = {
+        [HEARTBEAT_INSTRUCTION_METHOD[method]]: {},
+      };
 
-    const ix = await program.methods
-      .recordHeartbeat(methodEnum as any)
-      .accountsPartial({
-        agent: agentKeypair.publicKey,
-        vaultConfig: vaultPda,
-        heartbeatRecord: heartbeatPda,
-      })
-      .instruction();
+      const instruction = await program.methods
+        .recordHeartbeat(methodEnum as any)
+        .accountsPartial({
+          agent: agentKeypair.publicKey,
+          vaultConfig: vaultPda,
+          heartbeatRecord: heartbeatPda,
+        })
+        .instruction();
 
-    return this.sendWithPayer([ix], agentKeypair, [vaultPda, heartbeatPda, agentKeypair.publicKey], 80_000);
+      return this.sendWithPayerResult(
+        [instruction],
+        agentKeypair,
+        [vaultPda, heartbeatPda, agentKeypair.publicKey],
+        80_000,
+      );
+    } catch (error: unknown) {
+      return { status: 'submission_failed', error };
+    }
   }
 
   async buildUpdateVaultTx(
