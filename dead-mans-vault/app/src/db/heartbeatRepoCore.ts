@@ -15,6 +15,10 @@ export type RunHeartbeatInsert = (
 
 const INSERT_HEARTBEAT =
   'INSERT INTO heartbeat_history (timestamp, method, on_chain_tx) VALUES (?, ?, ?)';
+const INSERT_CONFIRMED_HEARTBEAT_IDEMPOTENT =
+  'INSERT INTO heartbeat_history (timestamp, method, on_chain_tx) ' +
+  'SELECT ?, ?, ? WHERE NOT EXISTS ' +
+  '(SELECT 1 FROM heartbeat_history WHERE on_chain_tx = ?)';
 
 export async function insertConfirmedHeartbeat(
   input: ConfirmedHeartbeatInsert,
@@ -29,9 +33,10 @@ export async function insertConfirmedHeartbeat(
   if (!input.transactionSignature) {
     throw new Error('Confirmed heartbeat signature is required');
   }
-  await runInsert(INSERT_HEARTBEAT, [
+  await runInsert(INSERT_CONFIRMED_HEARTBEAT_IDEMPOTENT, [
     input.onChainTimestamp,
     input.method,
+    input.transactionSignature,
     input.transactionSignature,
   ]);
 }

@@ -156,3 +156,47 @@ non-fatal cache warning.
 Status: Implemented and covered by offline tests. No live RPC, resend, durable
 pending-attempt persistence, program, IDL, rotation, migration, Android signing or
 notification-registration change was performed.
+
+## WP 4.4 durable heartbeat operation boundary
+
+WP 4.4 persists a signed heartbeat operation before RPC submission using the
+locally derived transaction signature.
+
+Once sendRawTransaction has been invoked, any inconclusive result is treated as
+potentially submitted and is reconciled read-only. It is never automatically
+resubmitted.
+
+A new heartbeat is blocked while an unresolved operation exists for the same
+cluster/program/owner/vault identity.
+
+Restart reconciliation uses transaction status, blockhash expiry and canonical
+HeartbeatRecord state to converge to confirmed, failed, expired-not-landed or
+chain-advanced-unattributed without inventing transaction success.
+
+The app's installed legacy web3 `Transaction` exposes the first payer signature
+after signing. Production extraction locates the exact agent payer entry, requires
+it to equal `Transaction.signature`, and encodes those 64 public signature bytes
+with the repository's existing `bs58` dependency. Serialization is completed
+before the durable callback, then PREPARED is committed before the sole
+`sendRawTransaction` call. Neither serialized bytes nor key material is persisted.
+
+`confirmed_local_sync_pending` remains durable and is retried on focus, but it is
+not a submission-blocking state because the chain outcome is already known. Local
+confirmed-history repair is idempotent by signature.
+
+When an expired signature is absent from transaction history but canonical chain
+state advanced, the app updates a separate authoritative cache without attributing
+that advancement to the unresolved signature. It never stores or displays the
+signature as a confirmed heartbeat.
+
+Restart reconciliation sends no heartbeat-confirmed OS notification. This avoids
+stale or duplicate notifications; immediate same-session verified success retains
+the WP 4.3 notification.
+
+Terminal journal retention is bounded to the ten newest records per identity.
+Only terminal records are pruned; unresolved evidence is never pruned because RPC
+is unavailable or merely because it is old.
+
+Status: Implemented and covered by offline tests. No live RPC, automatic resend,
+wallet prompt, agent signing during reconciliation, program/IDL, rotation,
+migration, Android signing or notification-registration change was performed.

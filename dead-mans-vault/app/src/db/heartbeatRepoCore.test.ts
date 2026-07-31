@@ -26,13 +26,27 @@ test('confirmed heartbeat inserts the explicit onchain timestamp and transaction
 
   assert.deepEqual(calls, [{
     statement:
-      'INSERT INTO heartbeat_history (timestamp, method, on_chain_tx) VALUES (?, ?, ?)',
+      'INSERT INTO heartbeat_history (timestamp, method, on_chain_tx) ' +
+      'SELECT ?, ?, ? WHERE NOT EXISTS ' +
+      '(SELECT 1 FROM heartbeat_history WHERE on_chain_tx = ?)',
     values: [
       1_700_000_001,
       'active_tap',
       'confirmed-signature',
+      'confirmed-signature',
     ],
   }]);
+});
+
+test('confirmed heartbeat insert is idempotent by transaction signature', () => {
+  const source = readFileSync(
+    new URL('./heartbeatRepoCore.ts', import.meta.url),
+    'utf8',
+  );
+  assert.match(
+    source,
+    /WHERE NOT EXISTS.*on_chain_tx = \?/s,
+  );
 });
 
 test('confirmed heartbeat persistence never derives a device-clock timestamp', () => {

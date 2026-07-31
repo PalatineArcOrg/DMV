@@ -29,6 +29,63 @@ export function getHeartbeatAttemptMessage(
         tone: 'pending',
         text: 'Heartbeat verification is already in progress.',
       };
+    case 'heartbeat_still_pending':
+      return {
+        tone: 'pending',
+        text:
+          'A heartbeat transaction is already pending reconciliation. ' +
+          'No new transaction will be submitted.',
+      };
+    case 'heartbeat_reconciliation_unavailable':
+      return {
+        tone: 'warning',
+        text:
+          'The existing heartbeat transaction could not be checked. ' +
+          'No new transaction was submitted.',
+      };
+    case 'heartbeat_reconciled_confirmed':
+      return {
+        tone: 'pending',
+        text:
+          'The previously submitted heartbeat was confirmed on Solana ' +
+          'and your liveness deadline has been updated.',
+      };
+    case 'heartbeat_reconciled_local_sync_pending':
+      return {
+        tone: 'warning',
+        text:
+          'The previous heartbeat is confirmed on Solana, but this device ' +
+          'still needs to repair its local history. Do not submit it again.',
+      };
+    case 'heartbeat_reconciled_failed':
+      return {
+        tone: 'warning',
+        text:
+          'The previous heartbeat transaction failed on-chain. ' +
+          'No heartbeat was recorded. You may try again.',
+      };
+    case 'heartbeat_reconciled_expired':
+      return {
+        tone: 'warning',
+        text:
+          'The previous heartbeat transaction expired without landing. ' +
+          'No heartbeat was recorded. You may try again.',
+      };
+    case 'heartbeat_reconciled_chain_advanced':
+      return {
+        tone: 'pending',
+        text:
+          'The on-chain heartbeat state advanced, but this device could not ' +
+          'verify which transaction caused it. Liveness is current; the ' +
+          'pending transaction was not marked as confirmed.',
+      };
+    case 'invalid_local_record':
+      return {
+        tone: 'critical',
+        text:
+          'The saved heartbeat recovery record is invalid. No transaction ' +
+          'was submitted. Contact support before trying another heartbeat.',
+      };
     case 'owner_missing':
       return {
         tone: 'warning',
@@ -88,12 +145,26 @@ export function getHeartbeatAttemptMessage(
           'The on-chain vault state could not be validated safely. ' +
           'No local or on-chain heartbeat was recorded.',
       };
-    case 'submission_failed':
+    case 'preparation_failed':
       return {
         tone: 'warning',
         text:
           'The heartbeat transaction was not submitted. ' +
           'No local or on-chain heartbeat was recorded.',
+      };
+    case 'journal_failed':
+      return {
+        tone: 'critical',
+        text:
+          'The heartbeat transaction could not be saved safely before submission. ' +
+          'No transaction was submitted.',
+      };
+    case 'submission_unknown':
+      return {
+        tone: 'critical',
+        text:
+          'The heartbeat transaction may have been submitted, but the RPC response ' +
+          'was inconclusive. Do not tap again while it is being reconciled.',
       };
     case 'transaction_failed':
       return {

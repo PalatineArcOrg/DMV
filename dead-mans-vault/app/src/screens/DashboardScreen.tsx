@@ -38,6 +38,7 @@ import {
 } from '../services/HeartbeatCoordinator';
 import { createDefaultAgentReadinessService } from '../services/DefaultAgentReadinessService';
 import { createDefaultHeartbeatConfirmationVerifier } from '../services/DefaultHeartbeatConfirmationVerifier';
+import { DefaultHeartbeatOperationService } from '../services/DefaultHeartbeatOperationService';
 import {
   getHeartbeatAttemptMessage,
   type HeartbeatAttemptMessage,
@@ -132,6 +133,7 @@ export function DashboardScreen() {
 
   const {
     recordConfirmedHeartbeat,
+    recordAuthoritativeUnattributedHeartbeat,
     resetAfterConfirmedHeartbeat,
     sendConfirmedHeartbeatNotification,
     status: heartbeatStatus,
@@ -374,6 +376,8 @@ export function DashboardScreen() {
   const [heartbeatConfirmationSucceeded, setHeartbeatConfirmationSucceeded] =
     useState(false);
   const heartbeatCoordinator = useRef(createHeartbeatCoordinator()).current;
+  const heartbeatOperationService =
+    useRef(new DefaultHeartbeatOperationService()).current;
 
   const handleHeartbeat = useCallback(async () => {
     setHeartbeatConfirmationSucceeded(false);
@@ -382,9 +386,32 @@ export function DashboardScreen() {
 
     const result = await heartbeatCoordinator.attempt({
       method: 'active_tap',
+      getUnresolvedOperation: async () =>
+        publicKey
+          ? heartbeatOperationService.getUnresolved(publicKey)
+          : null,
+      reconcileOperation: (operation) =>
+        heartbeatOperationService.reconcile(operation, {
+          recordConfirmedHeartbeat,
+          recordAuthoritativeUnattributedHeartbeat,
+          resetLocalEscalation: resetAfterConfirmedHeartbeat,
+          reloadVaultState: loadVaultState,
+        }),
       checkAgentReadiness: () =>
         createDefaultAgentReadinessService().check(publicKey ?? null),
-      recordHeartbeatOnChain: (agentKeypair) => {
+      prepareOperation: (readiness, prepared) =>
+        heartbeatOperationService.prepare(
+          readiness,
+          'active_tap',
+          prepared,
+        ),
+      transitionOperation: (signature, state, patch) =>
+        heartbeatOperationService.transition(
+          signature,
+          state,
+          patch,
+        ),
+      recordHeartbeatOnChain: (agentKeypair, lifecycle) => {
         if (!publicKey) {
           throw new Error('Connected owner became unavailable');
         }
@@ -393,6 +420,7 @@ export function DashboardScreen() {
           agentKeypair,
           publicKey,
           'active_tap',
+          lifecycle,
         );
       },
       verifyHeartbeatConfirmation: (input) =>
@@ -422,17 +450,144 @@ export function DashboardScreen() {
     });
 
     setHeartbeatConfirmationSucceeded(
-      result.status === 'confirmed_on_chain',
+      result.status === 'confirmed_on_chain' ||
+      result.status === 'heartbeat_reconciled_confirmed',
     );
     setHeartbeatAttemptMessage(getHeartbeatAttemptMessage(result));
   }, [
     heartbeatCoordinator,
+    heartbeatOperationService,
     loadVaultState,
     publicKey,
+    recordAuthoritativeUnattributedHeartbeat,
     recordConfirmedHeartbeat,
     resetAfterConfirmedHeartbeat,
     sendConfirmedHeartbeatNotification,
   ]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!connected || !publicKey) return;
+      let active = true;
+      const reconcileOnFocus = async () => {
+        try {
+          const operation =
+            await heartbeatOperationService.getReconciliable(publicKey);
+          if (!operation || !active) return;
+          setIsHeartbeatAttemptInFlight(true);
+          setHeartbeatAttemptMessage({
+            tone: 'pending',
+            text:
+              'A heartbeat transaction is pending reconciliation. ' +
+              'No new transaction will be submitted.',
+          });
+          const result = await heartbeatOperationService.reconcile(
+            operation,
+            {
+              recordConfirmedHeartbeat,
+              recordAuthoritativeUnattributedHeartbeat,
+              resetLocalEscalation: resetAfterConfirmedHeartbeat,
+              reloadVaultState: loadVaultState,
+            },
+          );
+          if (!active) return;
+          const mapped =
+            result.status === 'reconciled_confirmed'
+              ? {
+                  status: 'heartbeat_reconciled_confirmed' as const,
+                  signature: result.signature,
+                  lastHeartbeat: result.lastHeartbeat,
+                  totalHeartbeats: result.totalHeartbeats,
+                  localSync: 'complete' as const,
+                }
+              : result.status === 'local_sync_pending'
+                ? {
+                    status:
+                      'heartbeat_reconciled_local_sync_pending' as const,
+                    signature: result.signature,
+                    lastHeartbeat: result.lastHeartbeat,
+                    totalHeartbeats: result.totalHeartbeats,
+                  }
+                : result.status === 'reconciled_failed'
+                  ? {
+                      status: 'heartbeat_reconciled_failed' as const,
+                      signature: result.signature,
+                    }
+                  : result.status === 'reconciled_expired'
+                    ? {
+                        status: 'heartbeat_reconciled_expired' as const,
+                        signature: result.signature,
+                      }
+                    : result.status === 'reconciled_chain_advanced'
+                      ? {
+                          status:
+                            'heartbeat_reconciled_chain_advanced' as const,
+                          lastHeartbeat: result.lastHeartbeat,
+                          totalHeartbeats: result.totalHeartbeats,
+                        }
+                      : result.status === 'invalid_local_record'
+                        ? {
+                            status: 'invalid_local_record' as const,
+                          }
+                        : result.status === 'still_pending'
+                          ? {
+                              status: 'heartbeat_still_pending' as const,
+                              signature: result.signature,
+                            }
+                          : {
+                              status:
+                                'heartbeat_reconciliation_unavailable' as const,
+                              signature: result.signature,
+                            };
+          setHeartbeatAttemptMessage(getHeartbeatAttemptMessage(mapped));
+          if (
+            result.status === 'reconciled_confirmed' ||
+            result.status === 'local_sync_pending'
+          ) {
+            setLastConfirmedHeartbeatTx(result.signature);
+            setCurrentHeartbeatTx(null);
+            setHeartbeatConfirmationSucceeded(true);
+          } else if (
+            'signature' in result &&
+            result.status !== 'reconciled_expired'
+          ) {
+            setCurrentHeartbeatTx({
+              signature: result.signature,
+              status:
+                result.status === 'reconciled_failed'
+                  ? 'confirmed_failed'
+                  : result.status === 'post_state_unverified'
+                    ? 'post_state_unverified'
+                    : 'pending_reconciliation',
+            });
+          }
+        } catch {
+          if (active) {
+            setHeartbeatAttemptMessage({
+              tone: 'warning',
+              text:
+                'The existing heartbeat transaction could not be checked. ' +
+                'No new transaction was submitted.',
+            });
+          }
+        } finally {
+          if (active) setIsHeartbeatAttemptInFlight(false);
+        }
+      };
+      void reconcileOnFocus();
+      return () => {
+        active = false;
+      };
+    }, [
+      connected,
+      heartbeatOperationService,
+      loadVaultState,
+      publicKey,
+      recordAuthoritativeUnattributedHeartbeat,
+      recordConfirmedHeartbeat,
+      resetAfterConfirmedHeartbeat,
+    ]),
+  );
 
   const displayedHeartbeatTx = currentHeartbeatTx ?? (
     lastConfirmedHeartbeatTx
@@ -450,7 +605,11 @@ export function DashboardScreen() {
         ? 'Confirmed failed tx'
         : displayedHeartbeatTx?.status === 'confirmation_unknown'
           ? 'Submitted tx — confirmation unknown'
-          : 'Tx — heartbeat state unverified';
+          : displayedHeartbeatTx?.status === 'submission_unknown'
+            ? 'Expected tx — submission unknown'
+            : displayedHeartbeatTx?.status === 'pending_reconciliation'
+              ? 'Pending reconciliation'
+              : 'Tx — heartbeat state unverified';
 
   // Heartbeat stats
   const lastBeatLabel = heartbeatData

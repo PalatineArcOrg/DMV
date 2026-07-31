@@ -2,82 +2,89 @@
 
 ## Repository
 - Branch: `phase4-transactional-heartbeat`
-- HEAD: WP 4.3 implementation commit `phase4: make heartbeat success follow verified chain confirmation` (exact SHA recorded in the handoff)
+- HEAD: WP 4.4 implementation commit `phase4: add durable heartbeat reconciliation` (exact final SHA recorded in the handoff)
 - Base: `origin/devnet` at `cd0264bb209c0bdc2cf4a576b48ce7d6372c69aa`
-- Starting HEAD: `28d1ef6b8810da845524636ab52eaaff24539598`
-- Worktree: Clean after the WP 4.3 implementation commit and branch push.
+- Starting HEAD: `f9ff1d2983a2fe0d161b1db8b9eff1746f0cde9e`
+- Worktree: Clean after the WP 4.4 implementation commit and authorized branch push.
 
 ## Current Work Package
-- Name: WP 4.3 — Confirmation integrity and authoritative heartbeat success ordering
+- Name: WP 4.4 — Durable heartbeat-operation journal and restart reconciliation
 - State: PASS
 
 ## Completed
-- Extended the `ready` result with the already-validated vault timing values and pre-heartbeat account snapshot. Unsafe JavaScript numeric conversions fail closed.
-- Replaced string-only transaction results with `confirmed`, `confirmed_failed`, `confirmation_unknown` and `submission_failed`.
-- A resolved confirmation is successful only when the response structurally contains `value.err === null`. A non-null error is a confirmed transaction failure; a thrown or malformed response preserves the signature as confirmation unknown.
-- Added a dependency-injected post-state verifier and production adapter using the existing canonical PDA helper and hardened heartbeat parser.
-- Removed local-first mutation from the deliberate dashboard heartbeat path.
-- Confirmed local history now stores the verified Solana timestamp, submitted method and confirmed transaction signature in the existing `on_chain_tx` column.
-- Reset, countdown update, notification, success animation and confirmed Explorer publication now follow verified chain advancement.
-- Kept failed, confirmation-unknown and post-state-unverified Explorer signatures distinct from the last confirmed successful heartbeat transaction.
-- Made verified chain success authoritative over SQLite/Zustand cache failure. The app reports a local-sync warning without encouraging another heartbeat.
-- Renamed and isolated the two remaining device-clock local insert paths used by vault initialization and dormant activity monitoring as non-authoritative.
+- Added a structured SQLite `heartbeat_operations` journal with explicit schema version, identity, method, expected signature, blockhash lifetime, verified pre-state, lifecycle state, resolution state and bounded safe error code columns.
+- The legacy web3 transaction payer signature is selected from the agent signer entry after `Transaction.sign`, checked against `Transaction.signature`, encoded using the repository's existing `bs58` dependency and durably stored before the single `sendRawTransaction` call.
+- Serialization occurs before PREPARED persistence, so construction/signing/signature-extraction/serialization failures remain definite `preparation_failed` results.
+- PREPARED persistence is fail-closed. A journal failure prevents RPC submission.
+- A send exception, empty RPC signature or RPC signature mismatch is `submission_unknown`; the locally derived expected signature remains durable and is never automatically resubmitted.
+- Added read-only reconciliation using history-aware signature status, confirmed commitment, blockhash expiry and the hardened canonical heartbeat parser/verifier.
+- Added idempotent confirmed-history insertion by transaction signature.
+- Added a separate `authoritative_heartbeat_cache` for expired operations where chain liveness advanced but transaction attribution is unavailable.
+- Added bounded Dashboard focus reconciliation. It signs nothing, sends nothing, requests no wallet action, mutates no notification registration and has one in-flight reconciliation per identity.
+- Separated outcome-blocking operations from `confirmed_local_sync_pending`. Cache repair remains durable but cannot lock out a later deliberate heartbeat after chain success is already known.
+- Retains the ten most recent terminal operation records per identity and never prunes unresolved records.
 
 ## Files Changed
+- `dead-mans-vault/app/src/db/database.ts`
+- `dead-mans-vault/app/src/db/heartbeatOperationRepo.ts`
+- `dead-mans-vault/app/src/db/heartbeatOperationRepoCore.ts`
+- `dead-mans-vault/app/src/db/heartbeatOperationRepoCore.test.ts`
 - `dead-mans-vault/app/src/db/heartbeatRepo.ts`
 - `dead-mans-vault/app/src/db/heartbeatRepoCore.ts`
 - `dead-mans-vault/app/src/db/heartbeatRepoCore.test.ts`
 - `dead-mans-vault/app/src/hooks/useHeartbeat.ts`
 - `dead-mans-vault/app/src/screens/DashboardScreen.tsx`
-- `dead-mans-vault/app/src/screens/EstateReviewScreen.tsx`
-- `dead-mans-vault/app/src/services/AgentReadinessService.ts`
-- `dead-mans-vault/app/src/services/AgentReadinessService.test.ts`
-- `dead-mans-vault/app/src/services/DefaultHeartbeatConfirmationVerifier.ts`
+- `dead-mans-vault/app/src/services/DefaultHeartbeatOperationService.ts`
 - `dead-mans-vault/app/src/services/HeartbeatConfirmationVerifier.ts`
 - `dead-mans-vault/app/src/services/HeartbeatConfirmationVerifier.test.ts`
 - `dead-mans-vault/app/src/services/HeartbeatCoordinator.ts`
 - `dead-mans-vault/app/src/services/HeartbeatCoordinator.test.ts`
+- `dead-mans-vault/app/src/services/HeartbeatOperationLifecycle.test.ts`
+- `dead-mans-vault/app/src/services/HeartbeatOperationReconciler.ts`
+- `dead-mans-vault/app/src/services/HeartbeatOperationReconciler.test.ts`
 - `dead-mans-vault/app/src/services/HeartbeatService.ts`
 - `dead-mans-vault/app/src/services/VaultTransactionService.ts`
 - `dead-mans-vault/app/src/services/heartbeatAttemptUi.ts`
 - `dead-mans-vault/app/src/services/heartbeatAttemptUi.test.ts`
 - `dead-mans-vault/app/src/services/sendAndConfirmTransaction.ts`
 - `dead-mans-vault/app/src/services/sendAndConfirmTransaction.test.ts`
-- `dead-mans-vault/app/src/types/heartbeat.ts`
 - `docs/coordination/STATUS.md`
 - `docs/coordination/DECISIONS.md`
 - `docs/coordination/PHASE4.md`
 
 ## Tests
-- `cd dead-mans-vault/app && npm test`: PASS (16/16 test files, 0 failures).
-- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (282/282 cases).
-- Focused transaction, readiness, post-state verifier, coordinator, repository and UI boundary: PASS (77/77 cases).
-- WP 4.3 added 34 net app cases over the accepted 248-case baseline while replacing the obsolete local-first assertions with authoritative-ordering coverage.
+- `cd dead-mans-vault/app && npm test`: PASS (19/19 test files, 0 failures).
+- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (324/324 cases).
+- Added real temporary SQLite close/reopen coverage. Each test uses a unique system temporary directory and removes it in `finally`.
+- Added signature extraction, pre-send persistence, journal failure, signature mismatch, repository validation/uniqueness/retention, crash-boundary, reconciliation, idempotency, coordinator blocking, focus lifecycle and static security coverage.
 - `cd dead-mans-vault/app && ./node_modules/.bin/tsc --noEmit`: PASS.
-- `git diff --cached --check`: PASS.
-- Staged changed-file secret scan: PASS; no private key, seed phrase, credential, notification token, RPC secret or environment value was found.
-- Forbidden-artifact scan: PASS; no APK, keystore, `.env`, credential or wallet-secret artifact entered Git.
-- Tests use injected account fetches, transaction transports, local repository runners and generated in-memory keypairs. They do not instantiate production RPC adapters or make an RPC request.
-- No existing security test was weakened or deleted.
+- `git diff --check`: PASS.
+- Changed-file secret scan: PASS.
+- Forbidden-artifact scan: PASS.
+- Tests use injected RPC/status/account dependencies, generated fixture keypairs and isolated SQLite databases. No production RPC adapter is invoked by a test.
+- No existing security test was weakened or deleted merely to pass.
 
 ## Findings
-- Authoritative order: single-flight acquisition → readiness and verified pre-state → agent build/sign/send → structural confirmation classification → canonical post-state fetch and validation → advancement verification → confirmed local cache write → escalation/countdown reset → best-effort notification → confirmed Explorer publication → onchain UI reload → lock release.
-- Post-state acceptance requires the canonical heartbeat address and bump, DMV program owner, discriminator and valid layout, matching vault reference and method, a non-regressed safe timestamp, and `post.totalHeartbeats > before.totalHeartbeats`.
-- Equal pre/post timestamps are accepted when the count advances because multiple heartbeats can execute within one Solana clock second.
-- `submission_failed` means no signature was returned. `transaction_failed` retains a signature with a conclusive non-null execution error. `confirmation_unknown` retains a submitted signature after confirmation exception or malformed response.
-- A confirmed transaction followed by an unavailable, invalid or non-advanced post-state becomes `post_state_unavailable`, `post_state_invalid` or `post_state_not_advanced`; none produces local success.
-- The local confirmed row timestamp is the verified `HeartbeatRecord.lastHeartbeat`, never button time. The `on_chain_tx` value is the confirmed signature.
-- Notification `nextDue` is `verified lastHeartbeat + verified heartbeatInterval`. Grace-period and escalation-stage definitions are unchanged.
-- A verified chain heartbeat remains `confirmed_on_chain` when local persistence, notification or UI reload fails. SQLite/Zustand failure is reported as `localSync: failed`; reset and chain-success UI still proceed.
-- Submitted ambiguous signatures are currently held only in coordinator results and React state. There is no durable restart reconciliation, pending-attempt table or automatic resend.
-- Agent balance and fee estimation remain deferred. Insufficient agent funds surface through the structured submission or transaction-failure taxonomy.
-- The current MigrationService and startup migration flow were not changed.
+- Final deliberate send order: durable single-flight acquisition → blocking-journal lookup/read-only reconciliation → readiness and verified pre-state → transaction construction/blockhash/signing → payer-signature derivation → serialization → durable PREPARED insert → one RPC send → durable submitted/submission-unknown transition → one confirmation attempt → canonical post-state verification → idempotent local sync → terminal journal transition → escalation/countdown reset → best-effort notification → Explorer publication → reload → lock release.
+- The payer/agent signature is the first legacy transaction signature and therefore the Solana transaction ID. Production extraction also locates the signature entry by the exact payer public key and requires it to equal `Transaction.signature`.
+- Outcome-blocking states are `prepared`, `submitted`, `submission_unknown`, `confirmation_unknown` and `post_state_unverified`.
+- `confirmed_local_sync_pending` is reconciliable but non-blocking because on-chain success is already established.
+- Terminal states are `resolved_confirmed`, `resolved_failed`, `resolved_expired_not_landed`, `resolved_chain_advanced_unattributed` and `invalid_local_record`.
+- A history status with a non-null error resolves failed. A confirmed/finalized successful status must still pass the WP 4.3 canonical post-state verifier.
+- An absent status at or before `last_valid_block_height` remains pending. It is never resent.
+- An absent status after expiry resolves `resolved_expired_not_landed` only when canonical heartbeat state did not advance.
+- If canonical heartbeat state advanced after expiry but transaction history cannot attribute it, liveness is cached from chain truth under source `chain_advanced_unattributed`; the unresolved signature is not inserted in heartbeat history or shown as successful.
+- Confirmed history insertion uses one atomic `INSERT ... SELECT ... WHERE NOT EXISTS` statement keyed by `on_chain_tx`, so a crash after insertion but before journal resolution self-heals without duplicate history.
+- Restart reconciliation sends no OS heartbeat-success notification. Immediate same-session success retains WP 4.3 notification behavior.
+- Corrupt current-identity records are marked `invalid_local_record` before RPC use and fail closed. Records for other identities are excluded by the scoped query.
+- No raw or signed transaction bytes, private key material, error object, stack trace, RPC URL, notification token or environment value is stored in the journal.
+- Remaining Phase 4 risks: agent balance/fee readiness is not implemented; deadline/escalation boundary coverage remains WP 4.5; rotation and Android signing migration remain unchanged; no live canary has run.
 - The current MigrationService must not be used for Fox or signing-identity migration.
   It destroys the active agent key before replacement authority is proven.
 
 ## Decisions Needed
-- None for the completed WP 4.3 boundary.
-- A separate user gate is required before WP 4.4.
+- None for the completed WP 4.4 boundary.
+- A separate user gate is required before WP 4.5.
 
 ## Live Actions
 - None.
@@ -86,4 +93,4 @@
 - Untouched.
 
 ## Exact Next Action
-- Stop for user review. The next recommended work package is WP 4.4 — durable pending-transaction persistence and restart reconciliation. Do not begin it automatically.
+- Stop for user review. The next recommended work package is WP 4.5 — deadline and escalation correctness. Do not begin it automatically.

@@ -14,6 +14,7 @@ import { successKey } from '../services/NotificationRegistrationService';
 import { isDevnet } from '../utils/rpcConfig';
 import { ESCALATION_DEFAULTS, HEARTBEAT_INTERVALS, PROGRAM_ID } from '../utils/constants';
 import type { ConfirmedHeartbeatInsert } from '../db/heartbeatRepoCore';
+import type { AuthoritativeHeartbeatCacheInput } from '../db/heartbeatRepo';
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
   methods: ['active_tap'],
@@ -32,6 +33,9 @@ export const DEV_ESCALATION = {
 interface UseHeartbeatResult {
   recordConfirmedHeartbeat: (
     input: ConfirmedHeartbeatInsert,
+  ) => Promise<void>;
+  recordAuthoritativeUnattributedHeartbeat: (
+    input: AuthoritativeHeartbeatCacheInput,
   ) => Promise<void>;
   resetAfterConfirmedHeartbeat: () => void;
   sendConfirmedHeartbeatNotification: (
@@ -184,6 +188,17 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
     [],
   );
 
+  const recordAuthoritativeUnattributedHeartbeat = useCallback(
+    async (input: AuthoritativeHeartbeatCacheInput) => {
+      if (!heartbeatServiceRef.current) {
+        throw new Error('Heartbeat service is unavailable');
+      }
+      await heartbeatServiceRef.current
+        .recordAuthoritativeUnattributedHeartbeat(input);
+    },
+    [],
+  );
+
   const resetAfterConfirmedHeartbeat = useCallback(() => {
     if (escalationServiceRef.current) {
       escalationServiceRef.current.resetEscalation();
@@ -199,6 +214,7 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
 
   return {
     recordConfirmedHeartbeat,
+    recordAuthoritativeUnattributedHeartbeat,
     resetAfterConfirmedHeartbeat,
     sendConfirmedHeartbeatNotification,
     status: heartbeatStatus,

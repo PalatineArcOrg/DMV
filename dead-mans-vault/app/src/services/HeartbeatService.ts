@@ -2,6 +2,7 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { HeartbeatMethod, HeartbeatConfig, HeartbeatStatus } from '../types';
 import {
   recordConfirmedHeartbeat as persistConfirmedHeartbeat,
+  recordAuthoritativeHeartbeatCache,
   recordNonAuthoritativeLocalHeartbeat,
   getLastHeartbeat,
   getHeartbeatCount,
@@ -25,6 +26,14 @@ export class HeartbeatService {
     input: ConfirmedHeartbeatInsert,
   ): Promise<void> {
     await persistConfirmedHeartbeat(input);
+    const status = await this.getStatus();
+    useHeartbeatStore.getState().setStatus(status);
+  }
+
+  async recordAuthoritativeUnattributedHeartbeat(
+    input: Parameters<typeof recordAuthoritativeHeartbeatCache>[0],
+  ): Promise<void> {
+    await recordAuthoritativeHeartbeatCache(input);
     const status = await this.getStatus();
     useHeartbeatStore.getState().setStatus(status);
   }

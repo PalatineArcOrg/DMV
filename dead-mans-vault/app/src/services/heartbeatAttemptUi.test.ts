@@ -57,7 +57,7 @@ test('Dashboard confirmation and pending UI are driven by explicit coordinator s
 
   assert.match(
     dashboard,
-    /result\.status === 'confirmed_on_chain'/,
+    /result\.status === 'confirmed_on_chain'[\s\S]*heartbeat_reconciled_confirmed/,
   );
   assert.match(
     dashboard,
@@ -108,7 +108,7 @@ test('verified chain success and local-cache failure are distinguished', () => {
 
 test('ambiguous and failed transaction messages never claim success', () => {
   const submission = getHeartbeatAttemptMessage({
-    status: 'submission_failed',
+    status: 'preparation_failed',
     error: new Error('not shown'),
   });
   const failed = getHeartbeatAttemptMessage({
@@ -144,4 +144,26 @@ test('ambiguous and failed transaction messages never claim success', () => {
   ]) {
     assert.doesNotMatch(message?.text ?? '', /Vault Secured/);
   }
+});
+
+test('durable pending and reconciliation messages never imply a new submission', () => {
+  const pending = getHeartbeatAttemptMessage({
+    status: 'heartbeat_still_pending',
+    signature: 'pending-signature',
+  });
+  const unknown = getHeartbeatAttemptMessage({
+    status: 'submission_unknown',
+    signature: 'expected-signature',
+    error: new Error('not shown'),
+  });
+  const advanced = getHeartbeatAttemptMessage({
+    status: 'heartbeat_reconciled_chain_advanced',
+    lastHeartbeat: 1_005,
+    totalHeartbeats: 6n,
+  });
+
+  assert.match(pending?.text ?? '', /No new transaction will be submitted/);
+  assert.match(unknown?.text ?? '', /may have been submitted/);
+  assert.match(advanced?.text ?? '', /attribution|could not verify which transaction/i);
+  assert.doesNotMatch(advanced?.text ?? '', /transaction succeeded/i);
 });

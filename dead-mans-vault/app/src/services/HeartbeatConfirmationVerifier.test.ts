@@ -105,6 +105,28 @@ test('valid advanced heartbeat is verified', async () => {
   });
 });
 
+test('readCurrent returns a hardened canonical snapshot without attributing a transaction', async () => {
+  const result = await createHeartbeatConfirmationVerifier(
+    dependencies({
+      account: heartbeatAccount({
+        lastHeartbeat: 1_005n,
+        lastMethod: 2,
+        totalHeartbeats: 9n,
+      }),
+    }),
+  ).readCurrent({
+    vault: VAULT,
+    heartbeat: HEARTBEAT,
+  });
+
+  assert.deepEqual(result, {
+    status: 'verified_state',
+    lastHeartbeat: 1_005,
+    lastMethod: 2,
+    totalHeartbeats: 9n,
+  });
+});
+
 test('same timestamp with incremented count is verified', async () => {
   const result = await createHeartbeatConfirmationVerifier(
     dependencies({

@@ -28,6 +28,7 @@ import {
   getAccount,
 } from '@solana/spl-token';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
+import bs58 from 'bs58';
 import { idl, DeadMansVault } from '../utils/idl';
 import { PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS, MAX_KEEPER_BOUNTY_LAMPORTS, FEE_WALLET } from '../utils/constants';
 import { getRpcUrl, getHeliusApiKey } from '../utils/rpcConfig';
@@ -35,6 +36,7 @@ import { rpcWithRetry } from '../utils/fetchWithRetry';
 import { range, chunk, unpaidIndices, fullU32Mask } from '../utils/crankMath';
 import {
   signSendAndConfirmTransaction,
+  type SendAndConfirmLifecycle,
   type SendAndConfirmResult,
 } from './sendAndConfirmTransaction';
 import type { PriorityFeeEstimateResult } from '../types/api';
@@ -222,6 +224,9 @@ export class VaultTransactionService {
     accountKeys: PublicKey[],
     cuLimit: number,
     extraSigners: Keypair[] = [],
+    lifecycle: SendAndConfirmLifecycle = {
+      onPrepared: async () => {},
+    },
   ): Promise<SendAndConfirmResult> {
     try {
       const transaction = new Transaction();
@@ -240,6 +245,25 @@ export class VaultTransactionService {
         {
           getLatestBlockhash: () =>
             this.connection.getLatestBlockhash('confirmed'),
+          deriveExpectedSignature: (signedTransaction, expectedPayer) => {
+            const payerEntry = signedTransaction.signatures.find(
+              (entry) =>
+                entry.publicKey.equals(expectedPayer.publicKey),
+            );
+            if (!payerEntry?.signature) {
+              throw new Error('Agent payer signature is unavailable');
+            }
+            const firstSignature = signedTransaction.signature;
+            if (
+              !firstSignature ||
+              !Buffer.from(firstSignature).equals(payerEntry.signature)
+            ) {
+              throw new Error(
+                'Agent payer signature is not the transaction ID signature',
+              );
+            }
+            return bs58.encode(payerEntry.signature);
+          },
           sendRawTransaction: (serializedTransaction) =>
             this.connection.sendRawTransaction(serializedTransaction, {
               skipPreflight: false,
@@ -248,9 +272,10 @@ export class VaultTransactionService {
           confirmTransaction: (strategy) =>
             this.connection.confirmTransaction(strategy, 'confirmed'),
         },
+        lifecycle,
       );
     } catch (error: unknown) {
-      return { status: 'submission_failed', error };
+      return { status: 'preparation_failed', error };
     }
   }
 
@@ -271,10 +296,16 @@ export class VaultTransactionService {
     if (result.status === 'confirmed') {
       return result.signature;
     }
-    if (result.status === 'submission_failed') {
+    if (
+      result.status === 'preparation_failed' ||
+      result.status === 'journal_failed'
+    ) {
       throw result.error;
     }
-    if (result.status === 'confirmation_unknown') {
+    if (
+      result.status === 'confirmation_unknown' ||
+      result.status === 'submission_unknown'
+    ) {
       throw result.error;
     }
     throw new Error(
@@ -321,6 +352,7 @@ export class VaultTransactionService {
     agentKeypair: Keypair,
     ownerPubkey: PublicKey,
     method: HeartbeatMethod,
+    lifecycle: SendAndConfirmLifecycle,
   ): Promise<SendAndConfirmResult> {
     // NOTE: deliberately NOT network-gated. The heartbeat is a liveness signal that moves
     // no funds — it must fail OPEN. Blocking it on an unverified-but-possibly-fine network
@@ -350,9 +382,11 @@ export class VaultTransactionService {
         agentKeypair,
         [vaultPda, heartbeatPda, agentKeypair.publicKey],
         80_000,
+        [],
+        lifecycle,
       );
     } catch (error: unknown) {
-      return { status: 'submission_failed', error };
+      return { status: 'preparation_failed', error };
     }
   }
 

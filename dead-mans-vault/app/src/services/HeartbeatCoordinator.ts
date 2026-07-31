@@ -1,16 +1,30 @@
 import type { Keypair } from '@solana/web3.js';
+import type {
+  HeartbeatOperationErrorCode,
+  HeartbeatOperationRecord,
+  HeartbeatOperationState,
+  HeartbeatOperationTransitionPatch,
+} from '../db/heartbeatOperationRepoCore';
 import type { HeartbeatMethod } from '../types/heartbeat';
 import type { AgentReadinessResult } from './AgentReadinessService';
 import type {
   HeartbeatVerificationInput,
   HeartbeatVerificationResult,
 } from './HeartbeatConfirmationVerifier';
-import type { SendAndConfirmResult } from './sendAndConfirmTransaction';
+import type { HeartbeatReconciliationResult } from './HeartbeatOperationReconciler';
+import type {
+  PreparedTransaction,
+  SendAndConfirmLifecycle,
+  SendAndConfirmResult,
+  SubmissionUnknownCode,
+} from './sendAndConfirmTransaction';
 
 export type HeartbeatExplorerTransactionStatus =
   | 'confirmed_success'
   | 'confirmed_failed'
   | 'confirmation_unknown'
+  | 'submission_unknown'
+  | 'pending_reconciliation'
   | 'post_state_unverified';
 
 export type HeartbeatAttemptResult =
@@ -23,6 +37,43 @@ export type HeartbeatAttemptResult =
     }
   | {
       status: 'heartbeat_in_flight';
+    }
+  | {
+      status: 'heartbeat_still_pending';
+      signature: string;
+    }
+  | {
+      status: 'heartbeat_reconciliation_unavailable';
+      signature: string;
+    }
+  | {
+      status: 'heartbeat_reconciled_confirmed';
+      signature: string;
+      lastHeartbeat: number;
+      totalHeartbeats: bigint;
+      localSync: 'complete';
+    }
+  | {
+      status: 'heartbeat_reconciled_local_sync_pending';
+      signature: string;
+      lastHeartbeat: number;
+      totalHeartbeats: bigint;
+    }
+  | {
+      status: 'heartbeat_reconciled_failed';
+      signature: string;
+    }
+  | {
+      status: 'heartbeat_reconciled_expired';
+      signature: string;
+    }
+  | {
+      status: 'heartbeat_reconciled_chain_advanced';
+      lastHeartbeat: number;
+      totalHeartbeats: bigint;
+    }
+  | {
+      status: 'invalid_local_record';
     }
   | {
       status: 'owner_missing';
@@ -54,7 +105,16 @@ export type HeartbeatAttemptResult =
       status: 'invalid_on_chain_state';
     }
   | {
-      status: 'submission_failed';
+      status: 'preparation_failed';
+      error: unknown;
+    }
+  | {
+      status: 'journal_failed';
+      error: unknown;
+    }
+  | {
+      status: 'submission_unknown';
+      signature: string;
       error: unknown;
     }
   | {
@@ -86,11 +146,27 @@ export interface ConfirmedHeartbeatLocalInput {
   transactionSignature: string;
 }
 
+type ReadyAgent = Extract<AgentReadinessResult, { status: 'ready' }>;
+
 export interface HeartbeatCoordinatorDependencies {
   method: HeartbeatMethod;
+  getUnresolvedOperation: () => Promise<HeartbeatOperationRecord | null>;
+  reconcileOperation: (
+    operation: HeartbeatOperationRecord,
+  ) => Promise<HeartbeatReconciliationResult>;
   checkAgentReadiness: () => Promise<AgentReadinessResult>;
+  prepareOperation: (
+    readiness: ReadyAgent,
+    prepared: PreparedTransaction,
+  ) => Promise<void>;
+  transitionOperation: (
+    signature: string,
+    state: HeartbeatOperationState,
+    patch?: HeartbeatOperationTransitionPatch,
+  ) => Promise<HeartbeatOperationRecord>;
   recordHeartbeatOnChain: (
     agentKeypair: Keypair,
+    lifecycle: SendAndConfirmLifecycle,
   ) => Promise<SendAndConfirmResult>;
   verifyHeartbeatConfirmation: (
     input: HeartbeatVerificationInput,
@@ -185,6 +261,151 @@ function postStateFailureResult(
   return { status: 'post_state_invalid', signature };
 }
 
+function safeErrorForPostState(
+  verification: Exclude<
+    HeartbeatVerificationResult,
+    { status: 'verified' }
+  >,
+): HeartbeatOperationErrorCode {
+  if (verification.status === 'rpc_unavailable') {
+    return 'post_state_rpc_unavailable';
+  }
+  if (verification.status === 'not_advanced') {
+    return 'post_state_not_advanced';
+  }
+  return 'post_state_invalid';
+}
+
+async function transitionIgnoringFailure(
+  dependencies: HeartbeatCoordinatorDependencies,
+  signature: string,
+  state: HeartbeatOperationState,
+  patch: HeartbeatOperationTransitionPatch = {},
+): Promise<void> {
+  try {
+    await dependencies.transitionOperation(signature, state, patch);
+  } catch {
+    // PREPARED remains durable and restart reconciliation can recover it.
+  }
+}
+
+function mapReconciliationResult(
+  dependencies: HeartbeatCoordinatorDependencies,
+  result: HeartbeatReconciliationResult,
+): HeartbeatAttemptResult {
+  switch (result.status) {
+    case 'still_pending':
+      publishExplorerTransactionIgnoringFailure(
+        dependencies,
+        result.signature,
+        'pending_reconciliation',
+      );
+      return {
+        status: 'heartbeat_still_pending',
+        signature: result.signature,
+      };
+    case 'reconciliation_unavailable':
+    case 'post_state_unverified':
+      publishExplorerTransactionIgnoringFailure(
+        dependencies,
+        result.signature,
+        result.status === 'reconciliation_unavailable'
+          ? 'pending_reconciliation'
+          : 'post_state_unverified',
+      );
+      return {
+        status: 'heartbeat_reconciliation_unavailable',
+        signature: result.signature,
+      };
+    case 'reconciled_confirmed':
+      publishExplorerTransactionIgnoringFailure(
+        dependencies,
+        result.signature,
+        'confirmed_success',
+      );
+      return {
+        status: 'heartbeat_reconciled_confirmed',
+        signature: result.signature,
+        lastHeartbeat: result.lastHeartbeat,
+        totalHeartbeats: result.totalHeartbeats,
+        localSync: 'complete',
+      };
+    case 'local_sync_pending':
+      publishExplorerTransactionIgnoringFailure(
+        dependencies,
+        result.signature,
+        'confirmed_success',
+      );
+      return {
+        status: 'heartbeat_reconciled_local_sync_pending',
+        signature: result.signature,
+        lastHeartbeat: result.lastHeartbeat,
+        totalHeartbeats: result.totalHeartbeats,
+      };
+    case 'reconciled_failed':
+      publishExplorerTransactionIgnoringFailure(
+        dependencies,
+        result.signature,
+        'confirmed_failed',
+      );
+      return {
+        status: 'heartbeat_reconciled_failed',
+        signature: result.signature,
+      };
+    case 'reconciled_expired':
+      return {
+        status: 'heartbeat_reconciled_expired',
+        signature: result.signature,
+      };
+    case 'reconciled_chain_advanced':
+      return {
+        status: 'heartbeat_reconciled_chain_advanced',
+        lastHeartbeat: result.lastHeartbeat,
+        totalHeartbeats: result.totalHeartbeats,
+      };
+    case 'invalid_local_record':
+      return { status: 'invalid_local_record' };
+  }
+}
+
+function createJournalLifecycle(
+  dependencies: HeartbeatCoordinatorDependencies,
+  readiness: ReadyAgent,
+): SendAndConfirmLifecycle {
+  return {
+    onPrepared: (prepared) =>
+      dependencies.prepareOperation(readiness, prepared),
+    onSubmitted: (prepared) =>
+      dependencies.transitionOperation(prepared.signature, 'submitted', {
+        safeErrorCode: null,
+      }).then(() => undefined),
+    onSubmissionUnknown: (
+      prepared,
+      code: SubmissionUnknownCode,
+    ) =>
+      dependencies.transitionOperation(
+        prepared.signature,
+        'submission_unknown',
+        { safeErrorCode: code },
+      ).then(() => undefined),
+    onConfirmationUnknown: (prepared, code) =>
+      dependencies.transitionOperation(
+        prepared.signature,
+        'confirmation_unknown',
+        { safeErrorCode: code },
+      ).then(() => undefined),
+    onConfirmedFailed: (prepared) =>
+      dependencies.transitionOperation(
+        prepared.signature,
+        'resolved_failed',
+        {
+          localSyncState: 'not_applicable',
+          safeErrorCode: 'transaction_failed',
+        },
+      ).then(() => undefined),
+  };
+}
+
 export function createHeartbeatCoordinator(): HeartbeatCoordinator {
   let inFlight = false;
 
@@ -201,6 +422,26 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
       try {
         dependencies.publishInFlightState?.(true);
 
+        let unresolved: HeartbeatOperationRecord | null;
+        try {
+          unresolved = await dependencies.getUnresolvedOperation();
+        } catch {
+          return { status: 'invalid_local_record' };
+        }
+        if (unresolved) {
+          let reconciliation: HeartbeatReconciliationResult;
+          try {
+            reconciliation =
+              await dependencies.reconcileOperation(unresolved);
+          } catch {
+            return {
+              status: 'heartbeat_reconciliation_unavailable',
+              signature: unresolved.signature,
+            };
+          }
+          return mapReconciliationResult(dependencies, reconciliation);
+        }
+
         let readiness: AgentReadinessResult;
         try {
           readiness = await dependencies.checkAgentReadiness();
@@ -214,13 +455,31 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
         let transactionResult: SendAndConfirmResult;
         try {
           transactionResult =
-            await dependencies.recordHeartbeatOnChain(readiness.keypair);
+            await dependencies.recordHeartbeatOnChain(
+              readiness.keypair,
+              createJournalLifecycle(dependencies, readiness),
+            );
         } catch (error: unknown) {
-          return { status: 'submission_failed', error };
+          return { status: 'preparation_failed', error };
         }
 
-        if (transactionResult.status === 'submission_failed') {
+        if (
+          transactionResult.status === 'preparation_failed' ||
+          transactionResult.status === 'journal_failed'
+        ) {
           return transactionResult;
+        }
+        if (transactionResult.status === 'submission_unknown') {
+          publishExplorerTransactionIgnoringFailure(
+            dependencies,
+            transactionResult.signature,
+            'submission_unknown',
+          );
+          return {
+            status: 'submission_unknown',
+            signature: transactionResult.signature,
+            error: transactionResult.error,
+          };
         }
         if (transactionResult.status === 'confirmed_failed') {
           publishExplorerTransactionIgnoringFailure(
@@ -259,6 +518,14 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
           };
         }
         if (verification.status !== 'verified') {
+          await transitionIgnoringFailure(
+            dependencies,
+            transactionResult.signature,
+            'post_state_unverified',
+            {
+              safeErrorCode: safeErrorForPostState(verification),
+            },
+          );
           publishExplorerTransactionIgnoringFailure(
             dependencies,
             transactionResult.signature,
@@ -270,6 +537,11 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
           );
         }
 
+        const resolvedPatch = {
+          resolvedLastHeartbeat: verification.lastHeartbeat,
+          resolvedTotalHeartbeats:
+            verification.totalHeartbeats.toString(10),
+        };
         let localSync: 'complete' | 'failed' = 'complete';
         try {
           await dependencies.recordConfirmedHeartbeat({
@@ -277,8 +549,28 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
             onChainTimestamp: verification.lastHeartbeat,
             transactionSignature: transactionResult.signature,
           });
+          await transitionIgnoringFailure(
+            dependencies,
+            transactionResult.signature,
+            'resolved_confirmed',
+            {
+              ...resolvedPatch,
+              localSyncState: 'complete',
+              safeErrorCode: null,
+            },
+          );
         } catch {
           localSync = 'failed';
+          await transitionIgnoringFailure(
+            dependencies,
+            transactionResult.signature,
+            'confirmed_local_sync_pending',
+            {
+              ...resolvedPatch,
+              localSyncState: 'pending',
+              safeErrorCode: 'local_sync_failed',
+            },
+          );
         }
 
         try {

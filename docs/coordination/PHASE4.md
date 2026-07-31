@@ -281,19 +281,29 @@ confirmation and verified post-state advancement. No live action occurred.
 
 ### Work Package 4: Durable pending-transaction reconciliation
 
-- Persist confirmation-unknown and post-state-unverified signatures before process
-  control can be lost.
-- Add an explicit SQLite migration and repository for heartbeat attempts.
-- Persist owner/vault/agent/method, signature, blockhash expiry information,
-  timestamps and a state such as `SUBMITTED`, `CONFIRMED`, `FAILED`, `EXPIRED` or
-  `UNKNOWN`.
-- Capture the transaction signature before or atomically with submission so a
-  post-submit timeout cannot erase it.
-- Reconcile pending attempts at startup and before a new tap using signature status
-  and the heartbeat account.
-- Distinguish definitive program failure, expiry and still-ambiguous RPC state.
+- Implemented a structured SQLite operation journal with explicit identity,
+  method, pre-state, blockhash lifetime, lifecycle, resolution and safe-error
+  columns. Full `u64` counts are decimal strings.
+- Derives the agent payer's transaction ID after signing and durably commits
+  PREPARED before the one `sendRawTransaction` call.
+- Treats every inconclusive post-invocation send result as
+  `submission_unknown`; no journaled transaction is automatically resent.
+- Reconciles using history-aware signature status, confirmed commitment,
+  blockhash expiry and the WP 4.3 canonical heartbeat verifier.
+- Resolves absent expired signatures as not-landed only when chain state did not
+  advance. Advanced state without signature attribution updates a separate
+  authoritative cache and never labels the unresolved transaction successful.
+- Makes confirmed-history repair idempotent by signature and keeps
+  `confirmed_local_sync_pending` durable without blocking later heartbeats.
+- Runs one bounded read-only reconciliation per identity on Dashboard focus and
+  before a deliberate tap. Reconciliation has no signing, transaction send,
+  wallet prompt, notification registration mutation or polling loop.
+- Retains ten terminal operations per identity while preserving every unresolved
+  operation.
 
-Exit: restart, timeout, expiry, confirmed-error and eventual-success tests pass.
+Exit: PASS. Temporary SQLite reopen, crash-boundary, timeout, mismatch, expiry,
+confirmed-error, eventual-success, idempotency and lifecycle tests pass. No live
+action occurred. WP 4.5 remains separately gated.
 
 ### Work Package 5: Deadline and escalation correctness
 
