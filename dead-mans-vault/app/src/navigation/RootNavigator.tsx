@@ -142,7 +142,7 @@ const DMVDarkTheme = {
 };
 
 export function RootNavigator() {
-  const { publicKey, connected, signAndSendTransaction } = useWallet();
+  const { publicKey, connected } = useWallet();
   const prevPkRef = useRef(publicKey?.toBase58() ?? '');
   const migrationCheckedRef = useRef(false);
 
@@ -173,9 +173,16 @@ export function RootNavigator() {
     // Fetch vault config for the connected wallet
     if (prevPkRef.current !== currentKey || !useVaultStore.getState().vaultConfig) {
       (async () => {
+        const { VaultTransactionService } = require('../services/VaultTransactionService');
+        const txService = new VaultTransactionService();
         try {
-          const { VaultTransactionService } = require('../services/VaultTransactionService');
-          const txService = new VaultTransactionService();
+          const { MigrationService } = require('../services/MigrationService');
+          await MigrationService.reconcileRotation(publicKey!);
+        } catch {
+          // Rotation reconciliation is fail-soft and read-only. A saved
+          // operation remains durable for the next Settings/focus check.
+        }
+        try {
           const vault = await txService.fetchVaultConfig(publicKey!);
           if (vault) {
             useVaultStore.getState().setVaultConfig(vault);
@@ -209,22 +216,13 @@ export function RootNavigator() {
               );
 
               if (needsRotation) {
-                const { MigrationService } = require('../services/MigrationService');
                 Alert.alert(
-                  'Device Migration Required',
-                  'Your vault\'s agent key does not match this device. Heartbeats will fail until you rotate the agent key.\n\nWould you like to rotate it now? Your wallet signature is required.',
+                  'Agent Recovery Required',
+                  'The on-chain heartbeat agent does not match a usable active key on this installation. No key was replaced and no rotation was submitted.\n\nDo not uninstall the app or clear its data. Open Settings to inspect the deliberate recovery flow.',
                   [
-                    { text: 'Later', style: 'cancel' },
                     {
-                      text: 'Rotate Now',
-                      onPress: async () => {
-                        try {
-                          await MigrationService.executeRotation(publicKey!, signAndSendTransaction);
-                          Alert.alert('Migration Complete', 'Agent key rotated successfully. Heartbeats will resume.');
-                        } catch {
-                          Alert.alert('Rotation Failed', 'Could not rotate agent key. Please try again from Settings.');
-                        }
-                      },
+                      text: 'OK',
+                      style: 'cancel',
                     },
                   ],
                 );

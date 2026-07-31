@@ -59,7 +59,9 @@ is not an acceptable continuity mechanism.
 No APK build, install, uninstall, app-data clear or signing-identity change is
 authorized by this decision.
 
-Status: Design constraint accepted for Phase 4 planning; implementation not started.
+Status: The crash-safe rotation primitive is implemented in WP 4.7. The
+side-by-side Android package/signing migration remains unimplemented and separately
+gated as WP 4.8.
 
 ## WP 4.1 characterization boundary
 
@@ -278,3 +280,76 @@ registration or the heartbeat-operation journal.
 Status: Implemented and covered by offline tests. No live RPC, heartbeat,
 automatic funding/retry, program/IDL, rotation, migration, Android signing or
 deployment action was performed.
+
+## WP 4.7 crash-safe rotation boundary
+
+WP 4.7 never replaces or destroys the current authorised key before a candidate
+is securely stored and the rotation is verified on-chain.
+
+The official DMV rotation transaction requires both owner authorisation and
+candidate-key possession. Where supported by the existing wallet stack, the
+candidate is the transaction fee payer and therefore supplies the transaction-ID
+signature while the owner signs the `rotate_agent` instruction.
+
+This is an application/transaction-level guarantee. The currently deployed
+program does not itself require the new agent signer and another client could
+construct an owner-only rotation.
+
+Rotation operations are journalled before submission, reconciled without
+automatic resend, and promoted by canonical on-chain agent state. The previous
+key is retained until a later explicit cleanup gate.
+
+The selected design is candidate-as-fee-payer (Design B). The installed Mobile
+Wallet Adapter legacy transaction adapter serializes an existing partial
+signature without requiring every signature, returns a decoded legacy
+`Transaction`, and preserves the candidate signature while adding the required
+owner signature. The app then validates the exact message, fee payer, blockhash,
+instructions, account metas, instruction data, candidate signature and owner
+signature before it can journal or send.
+
+Owner-only rotation (Design A) remains supported by the program but is prohibited
+in the official app because it proves no candidate possession. An extra remaining
+signer account (Design C) can create a transaction-level signature requirement but
+is not inspected by the program and provides no advantage over the selected fee
+payer proof. A `new_agent: Signer` account (Design D) would make proof
+protocol-enforced, but requires a separate program and IDL upgrade gate.
+
+The remaining protocol property is accepted as owner authority for this app
+release: an owner controlling another client can still deliberately rotate to an
+unproven key. The app does not claim to prevent a malicious or modified owner
+client. A future product decision may choose the stronger program-level rule.
+
+Candidate funding is also persisted before send in a separate structured journal.
+An inconclusive funding transaction blocks rotation until history-aware,
+blockhash-aware read-only reconciliation resolves it. Funding is never retried and
+never counts as liveness.
+
+SecureStore custody uses independent `active`, `candidate` and `previous` slots
+with per-slot authentication metadata and completeness markers. Promotion copies
+old active to previous, copies candidate to active, validates both, then removes
+only the duplicate candidate slot. Restart resolution always follows the exact
+canonical on-chain agent. A later rotation cannot overwrite a different retained
+previous key; it is blocked until a separately authorised cleanup gate.
+
+After confirmation, canonical program-owned accounts must prove the candidate is
+authorised, the old agent is no longer authorised, owner/configuration fields did
+not change unexpectedly, vault timestamps did not regress, the heartbeat timestamp
+was reset consistently and `total_heartbeats` did not increment. Only then may
+candidate promotion occur.
+
+WP 4.8 must use this primitive as:
+
+```text
+old application remains installed
+→ new separately signed/package-distinct application generates candidate
+→ candidate is funded
+→ owner authorises rotation
+→ candidate signs as rotation payer
+→ chain confirms candidate
+→ new app proves heartbeat capability
+→ only then old app is removed
+```
+
+Status: Implemented and covered by app tests plus a disposable local-validator
+integration. No live vault, Fox, program/IDL, Android signing, APK or deployment
+action was performed.

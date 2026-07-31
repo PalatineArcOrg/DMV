@@ -35,6 +35,7 @@ import { PushRegistrationService } from '../services/PushRegistrationService';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
 import { AgentFeeCard } from '../components/AgentFeeCard';
+import { AgentRotationCard } from '../components/AgentRotationCard';
 
 function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -642,7 +643,12 @@ export function SettingsScreen() {
       )}
 
       {vaultConfig && isOwner && vaultConfig.active && !vaultConfig.executed ? (
-        <AgentFeeCard owner={publicKey} />
+        <>
+          <AgentFeeCard owner={publicKey} />
+          {publicKey ? (
+            <AgentRotationCard owner={publicKey} />
+          ) : null}
+        </>
       ) : null}
 
       {/* Inheritances */}

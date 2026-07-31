@@ -1,10 +1,10 @@
 import { PublicKey } from '@solana/web3.js';
-import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from './VaultTransactionService';
 import {
-  executeCurrentAgentRotation,
   needsAgentRotationForState,
 } from './AgentMigrationFlow';
+import { KeyManager } from '../tee/KeyManager';
+import { DefaultAgentRotationService } from './DefaultAgentRotationService';
 
 export class MigrationService {
   static async needsAgentRotation(ownerPubkey: PublicKey): Promise<boolean> {
@@ -30,33 +30,11 @@ export class MigrationService {
     );
   }
 
-  static async executeRotation(
-    ownerPubkey: PublicKey,
-    signAndSendTransaction: (tx: any) => Promise<string>,
-  ): Promise<{ newPubkey: string; txSig: string }> {
-    const keyManager = KeyManager.getInstance();
-    const txService = new VaultTransactionService();
-    const connection = txService.getConnection();
-
-    return executeCurrentAgentRotation({
-      destroyActiveAgentKey: () => keyManager.destroyKey(),
-      generateReplacementAgentKey: () => keyManager.generateAgentKey(),
-      buildRotationTransaction: (newPubkey) =>
-        txService.buildRotateAgentTx(
-          ownerPubkey,
-          new PublicKey(newPubkey),
-        ),
-      prepareRotationTransaction: async (transaction) => {
-        transaction.feePayer = ownerPubkey;
-        const { blockhash, lastValidBlockHeight } =
-          await connection.getLatestBlockhash();
-        transaction.recentBlockhash = blockhash;
-        return { transaction, blockhash, lastValidBlockHeight };
-      },
-      signAndSendTransaction,
-      confirmRotation: async (strategy) => {
-        await connection.confirmTransaction(strategy, 'confirmed');
-      },
-    });
+  static async reconcileRotation(ownerPubkey: PublicKey) {
+    // Startup/focus repair is strictly read-only: the reconciler has no
+    // transaction builder, signer, wallet callback or send dependency.
+    return new DefaultAgentRotationService().reconcileForOwner(
+      ownerPubkey,
+    );
   }
 }

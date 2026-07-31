@@ -364,16 +364,38 @@ tests pass and no live action occurred. WP 4.7 remains separately gated.
 
 ### Work Package 7: Existing `rotate_agent` security analysis
 
-- Threat-model owner-only rotation, arbitrary new pubkeys, heartbeat reset,
-  pre-deadline freeze and the absence of old/new-agent signatures.
-- Extend local-validator tests to prove old-agent rejection and new-agent acceptance
-  after rotation, atomic funding behavior and failure rollback.
-- Decide whether owner authorization plus app-side staged-key proof is sufficient
-  for Phase 4.
-- If new-agent proof, overlap, delay or acceptance must be enforced by the program,
-  stop and open a separate program-upgrade decision; do not mix it into app work.
+- Selected candidate-as-fee-payer rotation against the existing instruction. The
+  candidate provides the transaction-ID signature and the owner remains the
+  instruction-required signer.
+- Verified through installed-adapter source, wire round-trip tests and
+  local-validator execution that MWA-compatible legacy serialization preserves
+  the candidate partial signature while the owner signature is added.
+- Added exact wallet-result validation and rejects changes to payer, blockhash,
+  instructions, account metas, candidate argument, compute budget or signatures.
+- Replaced single-slot custody with independent active/candidate/previous
+  SecureStore roles, exact on-chain pubkey resolution and copy-before-remove,
+  restart-idempotent promotion.
+- Added a separate deliberate candidate-funding transaction and durable funding
+  journal. Funding reaches the existing reserve, never counts as liveness and
+  never starts rotation.
+- Added a structured rotation journal persisted after both signatures and before
+  the one send. Ambiguous sends/confirmations reconcile read-only and are never
+  automatically resubmitted.
+- Added canonical post-state verification and promotes only when chain authority,
+  timestamps, heartbeat count and stable vault configuration prove the intended
+  rotation.
+- Retains the previous key after promotion and proves the promoted key can sign an
+  offline deterministic transaction. A later rotation cannot overwrite it and is
+  blocked until cleanup is separately authorised.
+- Removed the destroy-first migration implementation and startup wallet prompt.
+- Added disposable local-validator coverage for candidate funding, dual signing,
+  candidate transaction ID, rotation state, old/new agent authorization, restart
+  slot resolution, failure retention and exact-deadline rejection.
 
-Exit: explicit app-only versus program-change decision recorded.
+Exit: PASS. The official app now has application/transaction-level candidate
+possession proof and crash-safe key continuity. The program still permits an
+owner-only rotation from another client; protocol-enforced new-agent proof would
+require a separately gated program/IDL upgrade. No live action occurred.
 
 ### Work Package 8: Side-by-side Android signing-identity migration architecture
 
@@ -421,19 +443,21 @@ Exit: canary evidence reviewed and disposable cleanup separately authorized.
 
 ## Program-change assessment at this gate
 
-No program change currently appears necessary for authoritative app ordering,
-durable reconciliation, explicit key-state detection, fee-state handling or a
-staged owner-signed rotation using the existing instruction. The existing
-`rotate_agent` can accept a generated replacement pubkey, and a System Program
-funding transfer can be composed in the same owner-signed transaction.
+No program change is necessary for authoritative app ordering, durable
+reconciliation, explicit key-state detection, fee-state handling or the selected
+official-app rotation flow. The existing `rotate_agent` accepts a generated
+replacement pubkey; a separately funded candidate can be the rotation transaction
+fee payer and transaction-ID signer while the owner remains the instruction signer.
+Candidate funding and rotation are intentionally separate deliberate
+transactions.
 
-A program change may be desirable if the security decision requires the new agent
-to co-sign, an old/new-agent overlap, a delayed acceptance protocol or an onchain
-idempotency identifier. None is selected in this gate. Any such change requires a
-separate program-upgrade design, deployed-program compatibility review, tests and
-explicit deployment authorization.
+A program change remains desirable only if candidate possession must be enforced
+against every possible client rather than by the official app transaction. Adding
+`new_agent: Signer`, an old/new overlap, delayed acceptance or an on-chain
+idempotency identifier requires a separate program-upgrade design, IDL update,
+compatibility review, tests and explicit deployment authorization.
 
-The deployed devnet program was not queried during this no-live-action gate.
-Compatibility conclusions here are based on the repository program, checked-in
-IDL/client and existing tests; Work Package 10 must verify the deployed interface
-only after explicit authorization.
+WP 4.7 compatibility was proven against the repository program binary on a
+disposable localhost validator. The deployed devnet program was not queried or
+mutated. Work Package 10 remains the separately authorized disposable-devnet
+canary gate.

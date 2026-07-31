@@ -2,85 +2,96 @@
 
 ## Repository
 - Branch: `phase4-transactional-heartbeat`
-- HEAD: WP 4.6 implementation commit `phase4: add agent fee readiness and deliberate top-up` (exact final SHA recorded in the handoff)
+- HEAD: WP 4.7 implementation commit `phase4: add crash-safe agent rotation` (exact final SHA recorded in the handoff)
 - Base: `origin/devnet` at `cd0264bb209c0bdc2cf4a576b48ce7d6372c69aa`
-- Starting HEAD: `1d5b8fd7fea2a856e2e7e3fdf609f3da8c85b2b6`
-- Worktree: Clean after the WP 4.6 implementation commit and authorized branch push.
+- Starting HEAD: `776a6f2052e218fccbf55d61e5291369df163685`
+- Worktree: Clean after the WP 4.7 implementation commit and authorized branch push.
 
 ## Current Work Package
-- Name: WP 4.6 — Agent fee readiness, reserve visibility and deliberate top-up
+- Name: WP 4.7 — Crash-safe owner-authorised agent rotation
 - State: PASS
 
 ## Completed
-- Centralized the existing vault-activation agent target at `AGENT_RECOMMENDED_RESERVE_LAMPORTS = 5_000_000`. The economic amount remains `0.005 SOL`.
-- Added a dependency-injected `AgentFeeReadinessService` with `ready`, `low_reserve`, `insufficient`, `check_unavailable` and `invalid_response` states using safe integer lamports only.
-- Split the heartbeat transaction boundary into exact unsigned preparation and submission. Preparation builds `record_heartbeat` once, selects one priority price, adds the actual 80,000-CU limit, assigns the agent payer, obtains one confirmed blockhash and compiles one exact message.
-- The exact message is passed to `getFeeForMessage(message, 'confirmed')`. The agent balance is read with `getBalanceAndContext(agent, { commitment: 'confirmed', minContextSlot: feeContext.slot })`.
-- Verified `balance < exact fee` stops before agent signing, PREPARED journal persistence, RPC submission or local liveness effects. Low reserve remains non-blocking.
-- Unavailable or malformed auxiliary fee/balance reads are visibly degraded but fail open for a deliberate heartbeat; Solana and the WP 4.3/WP 4.4 result boundaries remain authoritative.
-- The same prepared transaction, priority fee and blockhash are passed into agent signing, durable PREPARED persistence and the one send. No instruction rebuild or second fee/blockhash request occurs.
-- Added Dashboard and Settings fee cards with the canonical locally matched agent, balance, exact estimate, reserve, approximate remaining heartbeats and explicit stale state.
-- Fee visibility refreshes read-only on focus, foreground, owner identity change, successful/reconciled heartbeat and successful top-up. It has one in-flight read per owner identity and no poll loop.
-- Added a separate explicit owner-signed top-up. It revalidates the canonical active/unexecuted vault, heartbeat account and local/onchain agent match, transfers only the integer-lamport difference to the existing reserve, shows transfer and owner fee before signing, sends once and inspects `value.err`.
-- A top-up can target only `vault.agentPubkey`, uses the owner as fee payer and contains one System Program transfer. It never enters the heartbeat coordinator, heartbeat history, escalation, journal or notification paths.
+- Selected Design B for the official app: the securely stored and deliberately funded candidate is transaction fee payer and transaction-ID signer; the owner remains the Anchor-required `rotate_agent` signer.
+- Verified the installed Mobile Wallet Adapter legacy-transaction path serializes partial signatures with `requireAllSignatures: false`, returns a decoded `Transaction`, and preserves the candidate signature while the owner signature is added.
+- Added independent authenticated SecureStore slots for `active`, `candidate` and `previous`. Candidate generation never overwrites active; promotion is copy-before-remove, read-back validated and restart-idempotent.
+- Added exact on-chain-agent slot resolution with `active_match`, `candidate_match`, `previous_match`, `no_match`, `corrupt_slot` and `multiple_matches`. No key is generated or selected by first-match fallback.
+- Added deliberate candidate creation and a separate owner-signed candidate-funding flow. Funding targets only the stored candidate, reaches `AGENT_RECOMMENDED_RESERVE_LAMPORTS`, is journalled before send, never counts as liveness and never starts rotation automatically.
+- Added exact rotation preparation: one instruction build, one priority-fee selection, candidate fee payer, one blockhash, exact fee/balance check, candidate partial signature, one owner-wallet signature, then byte-for-byte message and signature validation.
+- Added a structured SQLite rotation journal and a separate candidate-funding journal. Both persist the expected transaction signature before their one send and retain only safe identity, lifecycle and blockhash evidence.
+- Added read-only, history-aware restart reconciliation. It never signs, builds or sends and converges by transaction status, blockhash expiry and canonical vault/heartbeat state.
+- Added canonical post-state verification. Promotion requires the candidate on-chain, unchanged owner/configuration, active and unexecuted vault, non-regressing timestamps and an unchanged heartbeat count.
+- Candidate promotion moves the old active key to `previous`, activates the candidate, retains the previous key, resolves the on-chain key again and proves candidate signing offline. No real heartbeat is submitted.
+- Removed the destroy-first migration implementation and every production call site. Startup performs only bounded read-only reconciliation and Settings exposes the three deliberate actions.
+- Added a fresh chain-time deadline preflight. Rotation stops at `chainUnixTime >= finalDeadline`; a near-deadline warning does not invent an extension.
 
 ## Files Changed
-- `dead-mans-vault/app/src/components/AgentFeeCard.tsx`
-- `dead-mans-vault/app/src/screens/DashboardScreen.tsx`
-- `dead-mans-vault/app/src/screens/EstateReviewScreen.tsx`
+- `dead-mans-vault/app/src/components/AgentRotationCard.tsx`
+- `dead-mans-vault/app/src/db/agentCandidateFundingRepo.ts`
+- `dead-mans-vault/app/src/db/agentCandidateFundingRepoCore.ts`
+- `dead-mans-vault/app/src/db/agentCandidateFundingRepoCore.test.ts`
+- `dead-mans-vault/app/src/db/agentRotationRepo.ts`
+- `dead-mans-vault/app/src/db/agentRotationRepoCore.ts`
+- `dead-mans-vault/app/src/db/agentRotationRepoCore.test.ts`
+- `dead-mans-vault/app/src/db/database.ts`
+- `dead-mans-vault/app/src/navigation/RootNavigator.tsx`
 - `dead-mans-vault/app/src/screens/SettingsScreen.tsx`
-- `dead-mans-vault/app/src/services/AgentFeeReadinessService.ts`
-- `dead-mans-vault/app/src/services/AgentFeeReadinessService.test.ts`
-- `dead-mans-vault/app/src/services/AgentTopUpService.ts`
-- `dead-mans-vault/app/src/services/AgentTopUpService.test.ts`
-- `dead-mans-vault/app/src/services/HeartbeatCoordinator.ts`
-- `dead-mans-vault/app/src/services/HeartbeatCoordinator.test.ts`
-- `dead-mans-vault/app/src/services/VaultTransactionService.ts`
-- `dead-mans-vault/app/src/services/agentFeeSecurity-static.test.ts`
-- `dead-mans-vault/app/src/services/agentFundingPolicy.ts`
-- `dead-mans-vault/app/src/services/heartbeatAttemptUi.ts`
-- `dead-mans-vault/app/src/services/heartbeatAttemptUi.test.ts`
-- `dead-mans-vault/app/src/services/sendAndConfirmTransaction.ts`
-- `dead-mans-vault/app/src/services/sendAndConfirmTransaction.test.ts`
-- `dead-mans-vault/app/tsconfig.json`
+- `dead-mans-vault/app/src/services/AgentCandidateFundingService.ts`
+- `dead-mans-vault/app/src/services/AgentCandidateFundingService.test.ts`
+- `dead-mans-vault/app/src/services/AgentMigrationFlow.ts`
+- `dead-mans-vault/app/src/services/AgentMigrationFlow.test.ts`
+- `dead-mans-vault/app/src/services/AgentReadinessService.test.ts`
+- `dead-mans-vault/app/src/services/AgentRotationCoordinator.ts`
+- `dead-mans-vault/app/src/services/AgentRotationCoordinator.test.ts`
+- `dead-mans-vault/app/src/services/AgentRotationProtocol.test.ts`
+- `dead-mans-vault/app/src/services/AgentRotationReconciler.ts`
+- `dead-mans-vault/app/src/services/AgentRotationReconciler.test.ts`
+- `dead-mans-vault/app/src/services/AgentRotationTransaction.ts`
+- `dead-mans-vault/app/src/services/AgentRotationTransaction.test.ts`
+- `dead-mans-vault/app/src/services/AgentRotationVerifier.ts`
+- `dead-mans-vault/app/src/services/AgentRotationVerifier.test.ts`
+- `dead-mans-vault/app/src/services/DefaultAgentRotationService.ts`
+- `dead-mans-vault/app/src/services/MigrationService.ts`
+- `dead-mans-vault/app/src/services/agentRotationSecurityGuards.test.ts`
+- `dead-mans-vault/app/src/tee/AgentKeySlotManagerCore.ts`
+- `dead-mans-vault/app/src/tee/AgentKeySlotManagerCore.test.ts`
+- `dead-mans-vault/app/src/tee/KeyManager.ts`
+- `dead-mans-vault/tests/agent-rotation-local-validator.ts`
 - `docs/coordination/STATUS.md`
 - `docs/coordination/DECISIONS.md`
 - `docs/coordination/PHASE4.md`
 
 ## Tests
-- `cd dead-mans-vault/app && npm test`: PASS (25/25 test files, 0 failures).
-- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (433/433 cases).
-- Added exact-fee classification, reserve threshold, context freshness, unsafe response, exact transaction reuse, verified-insufficient, fail-open degraded check, owner top-up, cancellation, owner insufficiency, ambiguous result, lifecycle and static separation coverage.
+- `cd dead-mans-vault/app && npm test`: PASS (35/35 test files, 0 failures).
+- `node --test --test-isolation=none 'src/**/*.test.ts'`: PASS (525/525 cases).
 - `cd dead-mans-vault/app && npx tsc --noEmit`: PASS.
+- Disposable local-validator integration: PASS (2/2 scenarios). It proves candidate-funded dual signing, candidate transaction ID, one successful rotation, unchanged heartbeat count, timestamp reset, old-agent heartbeat rejection, candidate heartbeat acceptance, restart slot resolution/promotion, failure retention of the old agent and exact-deadline rejection.
 - `git diff --check`: PASS.
 - Changed-file secret scan: PASS.
 - Forbidden-artifact scan: PASS.
-- Tests use injected RPC/wallet dependencies and generated fixture keypairs only. No production RPC adapter, real wallet or device key is loaded.
-- No existing test was removed or weakened merely to pass.
+- No existing test was removed or weakened merely to pass. The disposable ledger and wallet were removed after the run.
 
 ## Findings
-- Agent generation occurs only during vault setup in `EstateReviewScreen`; its public key enters `initialize_vault.agentPubkey`.
-- Vault setup reads the current agent balance and adds one owner-funded transfer for exactly the shortfall to `5,000,000` lamports. Setup confirms the combined transaction but does not separately re-fetch the post-activation agent balance.
-- The README's `0.005 SOL` agent funding and approximate `0.028 SOL` activation-cost statements agree with product code. The former floating-point screen constant is now centralized without changing its value.
-- `record_heartbeat` remains agent-signed and agent-paid. Its exact transaction includes an 80,000 compute-unit limit and the one selected priority price; the optional priority estimator retains its existing 1,000 micro-lamport fallback.
-- Existing owner/agent balance reads also occur in activation, Dashboard portfolio display, revocation/refund and portfolio scanning. No owner, vault, keeper, beneficiary or server balance substitutes for fee readiness.
-- Existing System Program transfers to the agent are vault activation and revocation refund in the opposite direction. WP 4.6 adds only the explicit canonical-agent top-up.
-- `MigrationService` still destroys the active key before replacement generation/rotation and provides no replacement funding.
-- Auxiliary fee-check failure is intentionally not proof of insufficient funds. The deliberate transaction continues through agent signing, WP 4.4 journaling, one send, confirmation classification and post-state verification.
-- Ambiguous owner top-up results preserve their expected signature in the current UI but are not added to the heartbeat journal. They are never retried automatically.
-- Remaining Phase 4 risks: owner top-up ambiguity has no restart journal; existing rotation and Android signing migration remain continuity-unsafe; no live canary has run.
-- The current MigrationService must not be used for Fox or signing-identity migration.
-  It destroys the active agent key before replacement authority is proven.
+- Design A (owner-only) is protocol-compatible but does not prove candidate possession and is not used by the official flow.
+- Design B is compatible with the current instruction and installed MWA stack. Candidate fee-payer status makes it the first required signer and transaction-ID signature; the owner remains independently required by the instruction.
+- Design C can make an extra candidate account a transaction-required signer, but the program does not inspect it and the design is unnecessary once the candidate is fee payer.
+- Design D would add protocol-enforced candidate possession, but requires a program and IDL upgrade. It is stronger than the selected app/transaction guarantee and is not required for this official app flow.
+- The deployed-style program still permits an owner using another client to rotate to an unproven pubkey. This is an accepted owner-authority property for this app release, not a claim of protocol-enforced proof.
+- Candidate funding may be drained after its check and the deadline may advance during wallet approval. The exact transaction fee and on-chain deadline still fail safely, leave the old agent authorised, and create no local promotion.
+- Candidate-funding ambiguity is now journalled separately and reconciled before rotation. It is never retried automatically.
+- A retained `previous` key is never overwritten by a later rotation. A new rotation is blocked until a separately authorised cleanup gate removes the prior retained key.
+- Security review found two material gaps during implementation: candidate funding originally lacked pre-send durability, and a later rotation could have overwritten an older retained `previous` slot. They were resolved with the separate funding journal and an explicit previous-key cleanup gate. No unresolved CRITICAL, HIGH or MEDIUM findings remain in the WP 4.7 scope.
+- The current `MigrationService` must not be used for Fox or Android signing-identity migration. Its destroy-first rotation path has been removed; WP 4.8 must use the new side-by-side primitive.
 
 ## Decisions Needed
-- None for the completed WP 4.6 boundary.
-- A separate user gate is required before WP 4.7.
+- None for the completed WP 4.7 boundary.
+- A separate user gate is required before WP 4.8 or any program-upgrade decision.
 
 ## Live Actions
-- None.
+- None. Testing used only a disposable localhost validator, disposable generated keys and isolated local state.
 
 ## Fox
 - Untouched.
 
 ## Exact Next Action
-- Stop for user review. The next recommended work package is WP 4.7 — existing `rotate_agent` security analysis. Do not begin it automatically.
+- Stop for user review. The next gate is WP 4.8 — side-by-side Android signing-identity migration architecture. Do not begin it automatically.

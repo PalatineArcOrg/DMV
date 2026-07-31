@@ -434,13 +434,16 @@ test('current KeyManager readiness load preserves its device-authentication cont
     new URL('../tee/KeyManager.ts', import.meta.url),
     'utf8',
   );
+  const slots = readFileSync(
+    new URL('../tee/AgentKeySlotManagerCore.ts', import.meta.url),
+    'utf8',
+  );
 
   assert.match(source, /async getKeypair\(\): Promise<Keypair>/);
-  assert.match(source, /SecureStore\.getItemAsync\(AUTH_FLAG\)/);
+  assert.match(source, /this\.slots\.loadSlot\('active'\)/);
+  assert.match(slots, /metadata\.auth === '1'/);
+  assert.match(slots, /storage\.get\(\s*SLOT_NAMES\[slot\]\.secret/);
   assert.match(source, /requireAuthentication: true/);
   assert.match(source, /authenticationPrompt: AUTH_PROMPT/);
-  assert.match(
-    source,
-    /throw new Error\('No agent key found in secure store'\)/,
-  );
+  assert.match(slots, /throw new CorruptSlotError\(slot\)/);
 });
