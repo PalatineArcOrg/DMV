@@ -109,8 +109,9 @@ export function useHeartbeat(vaultActive: boolean, ownerPubkey: PublicKey | null
     // never a background call. Heartbeat only READS the local persisted signed-
     // registration record to reflect whether server-driven escalation is active —
     // it acquires NO device token, requests NO wallet signature, and makes NO
-    // /register request. FCM primary (server delivers alerts) vs local timeline
-    // fallback follows whether the owner has completed signed registration.
+    // /register request. Whether server-driven escalation is active follows from the
+    // owner having completed signed registration — there is NO local timeline fallback
+    // when it hasn't (see EscalationService.scheduleBackgroundTimeline, cancel-only).
     if (ownerPubkey) {
       try {
         const [vaultPda] = PublicKey.findProgramAddressSync(
