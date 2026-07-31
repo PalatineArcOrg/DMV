@@ -78,3 +78,43 @@ The current resolved-`value.err` confirmation defect and destroy-first migration
 sequence are likewise preserved only as explicitly named current-behavior tests.
 
 Status: Accepted for WP 4.1 implementation; not a security invariant.
+
+## WP 4.2 readiness boundary
+
+WP 4.2 makes agent capability explicit and blocks clearly invalid heartbeat
+attempts before local success mutation.
+
+It does not yet make local state authoritative-safe after a valid readiness
+check. A ready attempt can still update local liveness before the on-chain
+transaction is conclusively confirmed.
+
+WP 4.3 must correct confirmation integrity and authoritative success ordering.
+
+The readiness decision uses fresh canonical vault and heartbeat account reads,
+validated through the existing hardened parser boundary, followed by one
+authenticated device-key load and an exact comparison with the onchain agent.
+Neither cached Zustand vault data, local SQLite heartbeat state nor notification
+registration is accepted as readiness evidence.
+
+The exact checked in-memory keypair passes directly from readiness to the
+coordinator transaction call. It is not serialized, logged, persisted or placed in
+React, Zustand or SQLite state.
+
+An unexpected device-key authentication failure is reported as
+`agent_unavailable`, distinct from the exact missing-key state. RPC failures are
+reported as `rpc_unavailable` and never interpreted as key loss.
+
+The coordinator now has a per-instance single-flight guard. A concurrent tap
+returns `heartbeat_in_flight`, performs no second readiness check and is not queued.
+The guard is released in `finally`.
+
+WP 4.2 preserves the existing unsafe local-first ordering after a `ready` result
+only to keep authoritative-ordering and confirmation-integrity changes within the
+separately reviewed WP 4.3 boundary. This is not the desired Phase 4 behavior.
+
+Agent fee and balance readiness are explicitly deferred. Insufficient funds can
+still appear as `on_chain_failed` until the fee-state work package.
+
+Status: Implemented and covered by offline tests. No live RPC, program, IDL,
+rotation, migration, Android signing or notification-registration action was
+performed.

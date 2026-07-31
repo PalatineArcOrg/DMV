@@ -104,6 +104,14 @@ export interface RawVaultConfig {
   openTokenDists: number;
 }
 
+export interface RawHeartbeatRecord {
+  vault: PublicKey;
+  lastHeartbeat: BN;
+  lastMethod: number;
+  totalHeartbeats: bigint;
+  bump: number;
+}
+
 export function parseVaultConfig(info: AccountInfoLike | null, programId: PublicKey): RawVaultConfig | null {
   if (!isProgramAccount(info, 'VaultConfig', 92, programId)) return null;
   try {
@@ -131,6 +139,29 @@ export function parseVaultConfig(info: AccountInfoLike | null, programId: Public
     return {
       owner, agentPubkey, heartbeatInterval, gracePeriod, beneficiaries,
       executed, active, createdAt, updatedAt, bump, isMutable, hasAssetPlan, openTokenDists,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parseHeartbeatRecord(
+  info: AccountInfoLike | null,
+  programId: PublicKey,
+): RawHeartbeatRecord | null {
+  if (!isProgramAccount(info, 'HeartbeatRecord', 58, programId)) return null;
+  try {
+    const c = new Cursor(info!.data, 8);
+    const vault = c.pubkey();
+    const lastHeartbeat = c.i64();
+    const lastMethod = c.u8();
+    if (lastMethod > 4) return null;
+    return {
+      vault,
+      lastHeartbeat,
+      lastMethod,
+      totalHeartbeats: c.u64big(),
+      bump: c.u8(),
     };
   } catch {
     return null;

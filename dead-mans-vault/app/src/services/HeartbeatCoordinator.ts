@@ -1,10 +1,42 @@
+import type { Keypair } from '@solana/web3.js';
+import type { AgentReadinessResult } from './AgentReadinessService';
+
 export type HeartbeatAttemptResult =
   | {
       status: 'confirmed_on_chain';
       signature: string;
     }
   | {
+      status: 'heartbeat_in_flight';
+    }
+  | {
+      status: 'owner_missing';
+    }
+  | {
       status: 'agent_missing';
+    }
+  | {
+      status: 'agent_unavailable';
+    }
+  | {
+      status: 'agent_mismatch';
+      localAgent: string;
+      onChainAgent: string;
+    }
+  | {
+      status: 'vault_missing';
+    }
+  | {
+      status: 'vault_inactive';
+    }
+  | {
+      status: 'vault_executed';
+    }
+  | {
+      status: 'rpc_unavailable';
+    }
+  | {
+      status: 'invalid_on_chain_state';
     }
   | {
       status: 'on_chain_failed';
@@ -21,20 +53,21 @@ export interface LocalHeartbeatDependencies {
   sendLocalConfirmationNotification: () => void | Promise<void>;
 }
 
-export interface HeartbeatCoordinatorDependencies<AgentKeypair> {
+export interface HeartbeatCoordinatorDependencies {
+  checkAgentReadiness: () => Promise<AgentReadinessResult>;
   confirmLocalHeartbeat: () => Promise<void>;
-  loadAgentKeypair: () => Promise<AgentKeypair | null>;
-  recordHeartbeatOnChain: (agentKeypair: AgentKeypair) => Promise<string>;
+  recordHeartbeatOnChain: (agentKeypair: Keypair) => Promise<string>;
   reloadVaultState: () => Promise<void>;
   publishExplorerSignature: (signature: string) => void;
   publishOnChainError: (hasError: boolean) => void;
-  isMissingAgentError?: (error: unknown) => boolean;
+  publishInFlightState?: (isInFlight: boolean) => void;
 }
 
-const MISSING_AGENT_KEY_MESSAGE = 'No agent key found in secure store';
-
-export function isMissingAgentKeyError(error: unknown): boolean {
-  return error instanceof Error && error.message === MISSING_AGENT_KEY_MESSAGE;
+export interface HeartbeatCoordinator {
+  attempt: (
+    dependencies: HeartbeatCoordinatorDependencies,
+  ) => Promise<HeartbeatAttemptResult>;
+  isInFlight: () => boolean;
 }
 
 export async function confirmLocalHeartbeat(
@@ -62,37 +95,86 @@ async function reloadVaultStateIgnoringFailure(
   }
 }
 
-export async function coordinateHeartbeat<AgentKeypair>(
-  dependencies: HeartbeatCoordinatorDependencies<AgentKeypair>,
-): Promise<HeartbeatAttemptResult> {
-  try {
-    await dependencies.confirmLocalHeartbeat();
-  } catch (error: unknown) {
-    return { status: 'local_failed', error };
+function readinessFailureResult(
+  readiness: Exclude<AgentReadinessResult, { status: 'ready' }>,
+): HeartbeatAttemptResult {
+  switch (readiness.status) {
+    case 'agent_mismatch':
+      return {
+        status: 'agent_mismatch',
+        localAgent: readiness.localAgent.toBase58(),
+        onChainAgent: readiness.onChainAgent.toBase58(),
+      };
+    case 'owner_missing':
+    case 'agent_missing':
+    case 'agent_unavailable':
+    case 'vault_missing':
+    case 'vault_inactive':
+    case 'vault_executed':
+    case 'rpc_unavailable':
+    case 'invalid_on_chain_state':
+      return { status: readiness.status };
   }
+}
 
-  try {
-    const agentKeypair = await dependencies.loadAgentKeypair();
-    if (!agentKeypair) {
-      dependencies.publishOnChainError(true);
-      await reloadVaultStateIgnoringFailure(dependencies.reloadVaultState);
-      return { status: 'agent_missing' };
-    }
+export function createHeartbeatCoordinator(): HeartbeatCoordinator {
+  let inFlight = false;
 
-    const signature = await dependencies.recordHeartbeatOnChain(agentKeypair);
-    dependencies.publishExplorerSignature(signature);
-    dependencies.publishOnChainError(false);
-    await reloadVaultStateIgnoringFailure(dependencies.reloadVaultState);
-    return { status: 'confirmed_on_chain', signature };
-  } catch (error: unknown) {
-    dependencies.publishOnChainError(true);
-    await reloadVaultStateIgnoringFailure(dependencies.reloadVaultState);
+  return {
+    isInFlight: () => inFlight,
+    attempt: async (
+      dependencies: HeartbeatCoordinatorDependencies,
+    ): Promise<HeartbeatAttemptResult> => {
+      if (inFlight) {
+        return { status: 'heartbeat_in_flight' };
+      }
 
-    const isMissingAgentError =
-      dependencies.isMissingAgentError ?? isMissingAgentKeyError;
-    if (isMissingAgentError(error)) {
-      return { status: 'agent_missing' };
-    }
-    return { status: 'on_chain_failed', error };
-  }
+      inFlight = true;
+      try {
+        dependencies.publishInFlightState?.(true);
+
+        let readiness: AgentReadinessResult;
+        try {
+          readiness = await dependencies.checkAgentReadiness();
+        } catch {
+          return { status: 'invalid_on_chain_state' };
+        }
+
+        if (readiness.status !== 'ready') {
+          return readinessFailureResult(readiness);
+        }
+
+        try {
+          await dependencies.confirmLocalHeartbeat();
+        } catch (error: unknown) {
+          return { status: 'local_failed', error };
+        }
+
+        try {
+          const signature = await dependencies.recordHeartbeatOnChain(
+            readiness.keypair,
+          );
+          dependencies.publishExplorerSignature(signature);
+          dependencies.publishOnChainError(false);
+          await reloadVaultStateIgnoringFailure(
+            dependencies.reloadVaultState,
+          );
+          return { status: 'confirmed_on_chain', signature };
+        } catch (error: unknown) {
+          dependencies.publishOnChainError(true);
+          await reloadVaultStateIgnoringFailure(
+            dependencies.reloadVaultState,
+          );
+          return { status: 'on_chain_failed', error };
+        }
+      } finally {
+        inFlight = false;
+        try {
+          dependencies.publishInFlightState?.(false);
+        } catch {
+          // UI publication must never strand the coordinator lock.
+        }
+      }
+    },
+  };
 }

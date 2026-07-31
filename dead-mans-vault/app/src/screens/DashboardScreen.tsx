@@ -31,9 +31,13 @@ import { BrandMark } from '../components/BrandMark';
 import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/constants';
 import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
 import { EscalationStage } from '../types';
-import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
-import { coordinateHeartbeat } from '../services/HeartbeatCoordinator';
+import { createHeartbeatCoordinator } from '../services/HeartbeatCoordinator';
+import { createDefaultAgentReadinessService } from '../services/DefaultAgentReadinessService';
+import {
+  getHeartbeatAttemptMessage,
+  type HeartbeatAttemptMessage,
+} from '../services/heartbeatAttemptUi';
 import { PortfolioScanner } from '../services/PortfolioScanner';
 import { DepositModal } from '../components/DepositModal';
 import { PublicKey, LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
@@ -351,29 +355,26 @@ export function DashboardScreen() {
 
   const lastOnChainTxRef = useRef<string | null>(null);
   const [lastOnChainTx, setLastOnChainTx] = useState<string | null>(null);
-  const [onChainBeatError, setOnChainBeatError] = useState(false);
+  const [heartbeatAttemptMessage, setHeartbeatAttemptMessage] =
+    useState<HeartbeatAttemptMessage | null>(null);
+  const [isHeartbeatAttemptInFlight, setIsHeartbeatAttemptInFlight] =
+    useState(false);
+  const [heartbeatConfirmationSucceeded, setHeartbeatConfirmationSucceeded] =
+    useState(false);
+  const heartbeatCoordinator = useRef(createHeartbeatCoordinator()).current;
 
   const handleHeartbeat = useCallback(async () => {
-    if (!publicKey) {
-      try {
-        await confirmHeartbeat('active_tap');
-        try {
-          await KeyManager.getInstance().getKeypair();
-        } catch {
-          setOnChainBeatError(true);
-        }
-        await loadVaultState();
-      } catch {
-        // Preserve the existing fail-soft disconnected edge.
-      }
-      return;
-    }
+    setHeartbeatConfirmationSucceeded(false);
+    setHeartbeatAttemptMessage(null);
 
-    await coordinateHeartbeat({
+    const result = await heartbeatCoordinator.attempt({
+      checkAgentReadiness: () =>
+        createDefaultAgentReadinessService().check(publicKey ?? null),
       confirmLocalHeartbeat: () => confirmHeartbeat('active_tap'),
-      loadAgentKeypair: () =>
-        KeyManager.getInstance().getKeypair(),
       recordHeartbeatOnChain: (agentKeypair) => {
+        if (!publicKey) {
+          throw new Error('Connected owner became unavailable');
+        }
         const txService = new VaultTransactionService();
         return txService.recordHeartbeatOnChain(
           agentKeypair,
@@ -386,9 +387,39 @@ export function DashboardScreen() {
         lastOnChainTxRef.current = signature;
         setLastOnChainTx(signature);
       },
-      publishOnChainError: setOnChainBeatError,
+      publishOnChainError: (hasError) => {
+        if (hasError) {
+          setHeartbeatAttemptMessage(
+            getHeartbeatAttemptMessage({
+              status: 'on_chain_failed',
+              error: new Error('on-chain heartbeat failed'),
+            }),
+          );
+        } else {
+          setHeartbeatAttemptMessage(null);
+        }
+      },
+      publishInFlightState: (isInFlight) => {
+        setIsHeartbeatAttemptInFlight(isInFlight);
+        if (isInFlight) {
+          setHeartbeatAttemptMessage({
+            tone: 'pending',
+            text: 'Verifying the current on-chain heartbeat agent…',
+          });
+        }
+      },
     });
-  }, [confirmHeartbeat, loadVaultState, publicKey]);
+
+    setHeartbeatConfirmationSucceeded(
+      result.status === 'confirmed_on_chain',
+    );
+    setHeartbeatAttemptMessage(getHeartbeatAttemptMessage(result));
+  }, [
+    confirmHeartbeat,
+    heartbeatCoordinator,
+    loadVaultState,
+    publicKey,
+  ]);
 
   // Heartbeat stats
   const lastBeatLabel = heartbeatData
@@ -472,8 +503,14 @@ export function DashboardScreen() {
           <View style={styles.heartbeatContainer}>
             <HeartbeatButton
               onPress={handleHeartbeat}
-              disabled={!isVaultSetup}
-              loading={isConfirming}
+              disabled={!isVaultSetup || isHeartbeatAttemptInFlight}
+              loading={isHeartbeatAttemptInFlight || isConfirming}
+              confirmationSucceeded={heartbeatConfirmationSucceeded}
+              label={
+                isHeartbeatAttemptInFlight
+                  ? 'Verifying heartbeat…'
+                  : undefined
+              }
               stage={escalationStage}
               secondsRemaining={secondsRemaining}
             />
@@ -500,11 +537,33 @@ export function DashboardScreen() {
 
           {/* On-chain heartbeat failed — liveness NOT recorded on-chain. Surface it so the
               owner knows to retry (a silent failure lets the on-chain clock keep aging). */}
-          {onChainBeatError ? (
+          {heartbeatAttemptMessage ? (
             <View style={styles.onChainTxRow}>
-              <MaterialCommunityIcons name="alert" size={10} color={COLORS.warning} />
-              <Text style={[styles.onChainTxText, { color: COLORS.warning }]}>
-                On-chain heartbeat didn't record — liveness not updated. Check your network and tap again.
+              <MaterialCommunityIcons
+                name={
+                  heartbeatAttemptMessage.tone === 'pending'
+                    ? 'clock-outline'
+                    : 'alert'
+                }
+                size={10}
+                color={
+                  heartbeatAttemptMessage.tone === 'pending'
+                    ? COLORS.accent
+                    : COLORS.warning
+                }
+              />
+              <Text
+                style={[
+                  styles.onChainTxText,
+                  {
+                    color:
+                      heartbeatAttemptMessage.tone === 'pending'
+                        ? COLORS.accent
+                        : COLORS.warning,
+                  },
+                ]}
+              >
+                {heartbeatAttemptMessage.text}
               </Text>
             </View>
           ) : (

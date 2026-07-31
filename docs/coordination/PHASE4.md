@@ -10,7 +10,7 @@ signing-certificate migration.
 Phase 4 is not an implementation of onchain heartbeat from scratch. The app already
 submits `record_heartbeat` with the device agent as signer and fee payer.
 
-## Source-grounded current path
+## Source-grounded pre-WP 4.2 path
 
 The current dashboard path is:
 
@@ -37,6 +37,57 @@ The loading state belongs only to step 2 through step 5. Consequently,
 `HeartbeatButton` transitions to its green `Vault Secured` state after the local
 SQLite write and before agent loading, transaction construction, submission or
 confirmation.
+
+## WP 4.2 readiness boundary
+
+WP 4.2 inserts a fresh, typed readiness preflight ahead of the preserved
+local-first flow:
+
+1. acquire the per-dashboard single-flight lock;
+2. require the connected owner public key;
+3. derive the canonical vault and heartbeat PDAs and bumps using
+   `VaultTransactionService`;
+4. fetch the raw canonical vault account and validate program owner,
+   discriminator, bounds, embedded owner and PDA bump;
+5. require the vault to be active and not executed;
+6. fetch the raw canonical heartbeat account and validate program owner,
+   discriminator, bounds, embedded vault, method and PDA bump;
+7. load the device key once using the existing authenticated `KeyManager`
+   contract;
+8. compare its public key exactly with `vault.agentPubkey`;
+9. only a `ready` result may enter the existing local-first heartbeat path.
+
+The ready result carries the exact checked keypair only within the readiness and
+coordinator call stack. It is not persisted, logged, serialized or exposed to
+React state.
+
+The implemented readiness states are `ready`, `owner_missing`, `agent_missing`,
+`agent_unavailable`, `agent_mismatch`, `vault_missing`, `vault_inactive`,
+`vault_executed`, `rpc_unavailable` and `invalid_on_chain_state`. The coordinator
+adds `heartbeat_in_flight`.
+
+A concurrent tap returns `heartbeat_in_flight` without a second readiness fetch,
+local write, notification or transaction. The attempt lock always releases in
+`finally`; no retry or queue was added.
+
+After a valid readiness result, the temporary WP 4.2 order remains:
+
+```text
+local SQLite heartbeat
+→ local escalation reset
+→ local success notification
+→ onchain submission and existing confirmation call
+→ signature or warning publication
+→ vault reload
+```
+
+This remains unsafe and is not a Phase 4 invariant. WP 4.3 must inspect
+confirmation results correctly and move authoritative success effects behind
+conclusive onchain confirmation. Durable ambiguous-outcome reconciliation remains
+a later package.
+
+Agent balance and estimated-fee readiness are deferred. WP 4.2 does not introduce
+an `insufficient_agent_funds` state.
 
 ## Verified current mutations and failure boundaries
 
@@ -161,18 +212,23 @@ Exit: inventory and test seam reviewed; no live action.
 
 ### Work Package 2: Explicit agent readiness
 
-- Introduce a typed readiness result for missing key, unreadable/authentication
-  failure, local/onchain mismatch, inactive/executed/frozen vault and ready state.
-- Compare the loaded public key with `vault.agentPubkey` before constructing a
-  heartbeat.
-- Make the dashboard present a specific, actionable state without requesting an
-  owner signature automatically.
-- Remove nullable branches that can skip submission without a classified outcome.
+- Implemented a typed readiness result for missing key, unreadable/authentication
+  failure, local/onchain mismatch, missing/inactive/executed vault, RPC failure,
+  invalid account state and ready state.
+- Fetches and validates the canonical onchain vault and heartbeat accounts before
+  loading the device key once and comparing it with `vault.agentPubkey`.
+- Presents specific dashboard states without automatic key generation, rotation
+  or owner signing.
+- Adds a per-dashboard single-flight guard and explicit confirmation trigger.
 
-Exit: missing/mismatch tests pass; no rotation performed.
+Exit: PASS. Offline readiness, coordinator, UI and parser tests pass; no live RPC
+or rotation was performed. WP 4.3 remains separately gated.
 
 ### Work Package 3: Authoritative heartbeat success ordering
 
+- First correct the existing confirmation-integrity defect: a resolved
+  `confirmTransaction` result containing `value.err` must not be accepted as
+  successful confirmation.
 - Make a single orchestration boundary own key validation, submission,
   confirmation, local persistence, escalation reset, success notification and UI
   completion.
