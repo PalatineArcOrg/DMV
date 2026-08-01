@@ -106,7 +106,7 @@ jobs:
       # which is precisely why src/utils/rpcConfig.ts derives them at runtime instead.
       - name: Metro export → Hermes bytecode
         run: npx expo export --platform android --output-dir "$RUNNER_TEMP/bundle"
-      - name: Assert real Hermes bytecode containing app source exactly once
+      - name: Assert real Hermes bytecode containing app source
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -125,17 +125,22 @@ jobs:
             exit 1
           fi
 
-          # App source must be present, and present ONCE. Two copies means one module was
-          # reached by two different specifiers and duplicated into the graph — which for a
-          # stateful module means two divergent instances at runtime.
+          # PRESENCE check only: app source reached the bundle, so this is not an
+          # RN-runtime-only artifact produced by a graph that dropped our code.
+          #
+          # Deliberately NOT an occurrence count. Hermes interns identical string
+          # literals into a shared string table, so the number of times a literal
+          # appears in the bytecode says nothing about how many modules referenced it —
+          # a duplicated module would still contribute one interned string. Counting
+          # here would assert something this artifact cannot evidence. Module-instance
+          # uniqueness needs the source-map module list, not the bytecode.
           program_id=$(node -p "require('../release.manifest.json').programId")
-          hits=$(grep -a -c -- "$program_id" "$bundle" || true)
-          if [ "$hits" -ne 1 ]; then
-            echo "::error::expected the program id exactly once in the bundle, found $hits"
+          if ! grep -aq -- "$program_id" "$bundle"; then
+            echo "::error::program id not found in the bundle — app source may be missing from the graph"
             exit 1
           fi
 
-          echo "Hermes bundle OK — $(( $(stat -c%s "$bundle") / 1024 / 1024 )) MB, app source present exactly once"
+          echo "Hermes bundle OK — $(( $(stat -c%s "$bundle") / 1024 / 1024 )) MB, app source present"
 
   # ---- Web console: typecheck + build ----
   # The web app reuses the mobile app's src via the `@app` alias, so it needs BOTH the app's
