@@ -70,11 +70,21 @@
 - Metro/Hermes bundle (`npx expo export --platform android`): PASS. Produced a 6.04 MB
   Hermes `.hbc` with zero resolution errors. This is a deliberate check, not a build:
   type-checking green has three times not implied Hermes green in this repository. It
-  confirms the whole Phase 4 module graph bundles, that Metro resolves the explicit
-  `./agentFundingPolicy.ts` specifier required by the Node test runner, and that the
-  module is instantiated exactly once rather than duplicated by the two import forms.
-  Sampled marker strings from the readiness, journal, deadline and rotation modules
-  are each present exactly once. No APK was built and nothing was installed.
+  confirms the whole Phase 4 module graph bundles under Metro and compiles to Hermes
+  bytecode, and that Metro resolves the explicit `./agentFundingPolicy.ts` specifier
+  required by the Node test runner. No APK was built and nothing was installed.
+- Module-graph uniqueness (`--source-maps`, module list): PASS. 1,528 modules, 116 of
+  them app source, **zero duplicated module paths**. `agentFundingPolicy` resolves to
+  the single path `/src/services/agentFundingPolicy.ts`, so its two import forms —
+  `./agentFundingPolicy.ts` from the fee/funding services and the extensionless
+  `../services/agentFundingPolicy` from EstateReviewScreen — dedupe to one instance.
+  > Method note, recorded because the first attempt was wrong: this claim was
+  > originally made by counting a marker string's occurrences in the `.hbc`. That
+  > cannot evidence it. `grep -c` counts matching lines rather than matches, and more
+  > fundamentally Hermes interns identical string literals into a shared string table,
+  > so a duplicated module still contributes exactly one interned string. Module-instance
+  > uniqueness is only observable in the source-map module list, which is what is
+  > measured above.
 - Disposable local-validator integration: PASS (2/2 scenarios). It proves candidate-funded dual signing, candidate transaction ID, one successful rotation, unchanged heartbeat count, timestamp reset, old-agent heartbeat rejection, candidate heartbeat acceptance, restart slot resolution/promotion, failure retention of the old agent and exact-deadline rejection.
 - `git diff --check`: PASS.
 - Changed-file secret scan: PASS.
