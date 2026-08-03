@@ -131,8 +131,6 @@ fails all 12 shape cases while all 8 negative controls still pass, proving the t
 detect the regression they exist for. The mutation was local only, reverted, and the
 production file verified by checksum; no production code was changed by this gate.
 
-T1.3 was not started.
-
 ### Pre-merge T1.2 — populated legacy database migration: PASS
 
 Offline, file-backed. `src/db/legacyDatabaseMigration.test.ts`, 9/9 cases. Full app
@@ -181,6 +179,70 @@ Mutation-tested before acceptance: removing `${AGENT_ROTATION_SCHEMA_SQL}` from
 while the legacy-preservation cases correctly still pass. The mutation was local only,
 reverted, and the production file verified by checksum; no production code was changed
 by this gate.
+
+### Pre-merge T1.3 — release-tier validator-backed integration: PASS ON RETRY
+
+Workflow run `30810956036` (`workflow_dispatch`, ref `phase4-transactional-heartbeat`),
+tested SHA `b845aa1d519783bbcc49520328567276c4dd8f4a`.
+
+- **Attempt 1** — integration job `91677307378`: FAILURE after 3m33s. The embedded
+  validator never provided a blockhash (`Test validator does not look started`) and
+  **zero tests executed**. `anchor build -- --features devnet` had already succeeded, so
+  nothing in the branch was implicated.
+- **Attempt 2** — integration job `91679766001`: SUCCESS in 9m03s against the identical
+  committed SHA and configuration. Nothing was changed between attempts; the run's final
+  conclusion became `success` and every other job remained green.
+
+The ~4-minute failure against a ~9-minute success reproduces a pre-existing pattern: of
+the three historical dispatches on 2026-07-11, two failed at 4m37s/4m16s and one passed
+at 7m59s. Attempt 1 is recorded as a transient startup flake, not a branch defect.
+
+**Measured result: 41 passing, 0 failing, 0 pending.** Both expected files executed,
+confirmed from suite headers rather than inferred from the total:
+
+- `tests/dead-mans-vault.ts` — 39, under `dead-mans-vault — permissionless execution`
+  (`setup, owner ops & guards`; `execution flows (one grace wait)`; `Token-2022
+  extension characterization (RWA / tokenized-stock surface)`);
+- `tests/agent-rotation-local-validator.ts` — 2, under `WP 4.7 disposable
+  local-validator rotation`:
+  - `funds B, requires B+owner, rotates once, preserves count, rejects A and accepts B`
+    (2,490ms)
+  - `failed rotation retains A and rotation at the exact protocol deadline is frozen`
+    (41,128ms)
+
+These are **two compound tests**, not nine separately reported Mocha cases. Between them
+they assert candidate funding, dual signing, one successful rotation, unchanged
+heartbeat count, old-agent rejection, candidate acceptance, failed-rotation retention of
+the old agent and exact-deadline freezing — but Mocha reports at test granularity, so
+those assertions are internal and cannot be evidenced individually from the log.
+
+Execution was entirely local: `anchor test --skip-build --provider.cluster localnet`
+against an embedded validator, with a disposable runner-generated provider keypair.
+`api.devnet.solana.com`, `helius`, `mainnet-beta` and `api.mainnet` are all absent from
+the job log. No public-devnet transaction, no deployed-program change, no APK and no
+device action.
+
+Three CI-harness follow-ups were observed and deliberately **not** repaired here:
+
+1. intermittent embedded-validator startup (the attempt-1 failure mode);
+2. the validator-log artifact captured nothing during that startup failure, so the
+   diagnostic path is ineffective for exactly the failure it targets;
+3. `solana-keygen` prints a disposable runner mnemonic into the job log (verified by
+   marker only; the phrase is not reproduced here or anywhere in this repository).
+
+None of these invalidate the successful retry against the identical committed SHA. They
+are future CI-harness hardening items requiring their own gate.
+
+### Tier 1 pre-merge status
+
+```text
+T1.1 — PASS
+T1.2 — PASS
+T1.3 — PASS ON RETRY
+T1.4 — PASS
+Tier 1 — COMPLETE
+Tier 2 — NOT STARTED
+```
 
 ## Findings
 - Design A (owner-only) is protocol-compatible but does not prove candidate possession and is not used by the official flow.

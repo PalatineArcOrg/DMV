@@ -296,12 +296,20 @@ jobs:
         run: yarn test:fuzz
 
   # ---- Release-tier integration suite (full validator-backed ts-mocha) ----
-  # The 39-test suite (tests/dead-mans-vault.ts) needs a REAL validator (it airdrops 500 SOL,
-  # impossible on public devnet) + ~86s of real grace waits, so it's too slow for every PR.
-  # `workflow_dispatch`-ONLY for now (manual "run the full suite before a deploy"); add
-  # main/mainnet/tag triggers once it's proven green across a couple of runs. `anchor test`
-  # starts its OWN embedded solana-test-validator (no Agora port-8000 collision in a clean
-  # runner — that collision is VPS-only). Prelude mirrors the `fuzz` job.
+  # MEASURED (run 30810956036, 2026-08-03): 41 tests, all passing —
+  #   tests/dead-mans-vault.ts                 39
+  #   tests/agent-rotation-local-validator.ts   2  (WP 4.7 rotation; two compound tests)
+  # Anchor's `tests/*.ts` glob discovers BOTH files, so this is no longer the 39-test
+  # single-file suite the previous comment described.
+  #
+  # It needs a REAL embedded validator: it airdrops 500 SOL and waits out ~86s of real
+  # grace periods, neither of which public devnet can satisfy, so it is far too slow for
+  # every PR. `anchor test` starts its OWN solana-test-validator (no Agora port-8000
+  # collision in a clean runner — that collision is VPS-only).
+  #
+  # Manually dispatched to validate a devnet PR, and — per the executable `if:` below —
+  # it also runs on a push to main/mainnet when promoting toward release.
+  # Prelude mirrors the `fuzz` job.
   integration:
     # Runs on a manual dispatch AND on a push to a release branch (main/mainnet) — i.e. when
     # devnet is promoted toward a deploy. Stays OFF devnet PRs/pushes (too slow: ~8min).
