@@ -1,5 +1,5 @@
 {
-  "_comment": "Canonical release constants — the single source of truth cross-checked against source by scripts/verify-manifest.mjs (run in CI + before a build). Current values = the DEVNET phase. At mainnet cutover, update ALL fields together (expectedCluster, expectedGenesisHash, programId if it changes, feeWallet, notifyApi, webUrl, versionCode) and re-run verify-manifest. See MAINNET-CUTOVER-RUNBOOK.",
+  "_comment": "Canonical release constants \u2014 the single source of truth cross-checked against source by scripts/verify-manifest.mjs (run in CI + before a build). Current values = the DEVNET phase. At mainnet cutover, update ALL fields together (expectedCluster, expectedGenesisHash, programId if it changes, feeWallet, notifyApi, webUrl, versionCode) and re-run verify-manifest. See MAINNET-CUTOVER-RUNBOOK.",
   "expectedCluster": "devnet",
   "expectedGenesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
   "programId": "GXCu5964mvgAJDWmcMriZpzU3vDVqPzjYCM1sxCnsoEb",
@@ -8,5 +8,19 @@
   "webUrl": "https://dmvapp.palatinearc.com",
   "appVersion": "1.13.21",
   "versionCode": 107,
-  "idlSha256": "970d83fc07ecd448b459e44cbeee77a62cf427c65dfc956d3b3cef19ce558273"
+  "idlSha256": "970d83fc07ecd448b459e44cbeee77a62cf427c65dfc956d3b3cef19ce558273",
+  "coordinationClient": {
+    "sourceRepo": "PalatineArcOrg/palatine-coordination",
+    "sourceCommit": "f7fb3a2f6329a4abc1b7056588ab3af0392849dc",
+    "vendoredFrom": "clients/typescript/src",
+    "files": {
+      "borsh.ts": "945f84a964e2d16c0988789c19aead7aa00922200a2b1d420dfe089e13f28623",
+      "extraAccountMeta.ts": "f101a7011c1dce8d877d29d81a7766ae61cda1e32bb3d84b1e67c92ed5b07e74",
+      "instructions.ts": "33eb82194af6a16299ef19138989fb75b5aee00c5d4d151dafded1d4780248f5",
+      "job.ts": "bf26b5e87ea95ec2f526849cf64049ac9902937aa1b7277f409548ed210b7c51",
+      "layout.ts": "25e4fa8121e470bc5bf0f3b252682148ad10de7755b944cfbcf2253f4bbcb932",
+      "pdas.ts": "379506caa8d54aec4fd3af0107fe31d44c8472a550242ef314fca3188c5215e8",
+      "reward.ts": "1e3083bf5b78e6d3c1db5fa5cb4b3ea24e9ad0c2077dc33fe15db732a0a8a240"
+    }
+  }
 }

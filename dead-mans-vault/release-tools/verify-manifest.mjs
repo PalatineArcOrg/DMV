@@ -3,7 +3,7 @@
 // across every component, so a drifted PROGRAM_ID / FEE_WALLET / IDL / version can never ship.
 // The 3 IDL copies are hand-synced; this is the drift guard. Run in CI + before any build.
 // Exits non-zero on any mismatch.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -52,6 +52,41 @@ check('idlSha256: app idl.json', manifest.idlSha256, sha256('dead-mans-vault/app
 check('idlSha256: notify idl', manifest.idlSha256, sha256('notify-server/idl/dead_mans_vault.json'));
 check('idlSha256: keeper idl', manifest.idlSha256, sha256('keeper-bot/idl/dead_mans_vault.json'));
 
+// Vendored coordination client (palatine-coordination). DMV vendors seven modules into
+// app/src/coordination/ rather than taking a path dependency — Metro is hostile to symlinks
+// and .js specifiers, and this repo has no precedent for file: deps.
+//
+// This checks INTEGRITY only: the vendored bytes are the ones recorded when they were
+// vendored. It CANNOT check PROVENANCE — whether those hashes describe the commit the
+// manifest names — because this repo has no copy of palatine-coordination. That question is
+// answered there, by scripts/vendor-client.mjs --verify, and the failure text below names it.
+const cc = manifest.coordinationClient;
+if (!cc || typeof cc !== 'object') {
+  check('coordinationClient: manifest block', 'present', '(missing)');
+} else {
+  check('coordinationClient: sourceRepo', 'PalatineArcOrg/palatine-coordination', cc.sourceRepo);
+  check('coordinationClient: sourceCommit is a full sha', true, /^[0-9a-f]{40}$/.test(String(cc.sourceCommit ?? '')));
+
+  const VENDOR_DIR = 'dead-mans-vault/app/src/coordination';
+  const pinned = Object.keys(cc.files ?? {}).sort();
+
+  // Drift direction 1: a file was added to or removed from the vendored directory.
+  let onDisk = [];
+  try {
+    onDisk = readdirSync(p(VENDOR_DIR)).filter((f) => f.endsWith('.ts')).sort();
+  } catch {
+    onDisk = ['(directory unreadable)'];
+  }
+  check(`coordinationClient: file set in ${VENDOR_DIR}`, pinned.join(' '), onDisk.join(' '));
+
+  // Drift direction 2: a vendored file was edited locally.
+  for (const name of pinned) {
+    let found;
+    try { found = sha256(`${VENDOR_DIR}/${name}`); } catch { found = '(unreadable)'; }
+    check(`coordinationClient: ${name}`, cc.files[name], found);
+  }
+}
+
 // app version / versionCode
 const appJson = JSON.parse(read('dead-mans-vault/app/app.json'));
 check('appVersion: app.json', manifest.appVersion, appJson.expo?.version ?? appJson.version);
@@ -69,6 +104,36 @@ for (const c of checks) {
 console.log(`\n${checks.length - failed}/${checks.length} checks passed.`);
 if (failed) {
   console.error(`\n✗ release manifest is OUT OF SYNC with source (${failed} mismatch${failed > 1 ? 'es' : ''}).`);
+
+  // The vendored client has a specific remedy, and it lives in the other repo.
+  if (checks.some((c) => !c.ok && c.name.startsWith('coordinationClient'))) {
+    const commit = manifest.coordinationClient?.sourceCommit ?? '<sha>';
+    console.error(
+      [
+        '',
+        '  The vendored coordination client drifted. Two directions, one fix:',
+        '',
+        '    · a vendored file was edited here      → re-vendor to discard the local edit',
+        '    · palatine-coordination moved upstream → re-vendor to adopt it, then retest',
+        '',
+        '  Re-vendor (from a palatine-coordination checkout):',
+        '',
+        '    node scripts/vendor-client.mjs --commit <sha> \\',
+        '         --out <this-repo>/dead-mans-vault/app/src/coordination',
+        '',
+        '  ...then paste the emitted block into release.manifest.json as "coordinationClient".',
+        '',
+        `  This check proves INTEGRITY only — that these bytes are the ones recorded. It cannot`,
+        `  prove PROVENANCE, that they are what ${commit.slice(0, 12)} actually contains, because`,
+        '  this repo has no copy of palatine-coordination. Verify that there:',
+        '',
+        '    node scripts/vendor-client.mjs --verify <this-repo>/dead-mans-vault/release.manifest.json',
+        '',
+        '  The vendored surface is frozen by contract — see DECISIONS.md 26 in that repo.',
+        '',
+      ].join('\n'),
+    );
+  }
   process.exit(1);
 }
 console.log('✓ release manifest matches source.');
