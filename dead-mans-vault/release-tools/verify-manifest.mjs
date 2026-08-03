@@ -73,7 +73,13 @@ if (!cc || typeof cc !== 'object') {
   // Drift direction 1: a file was added to or removed from the vendored directory.
   let onDisk = [];
   try {
-    onDisk = readdirSync(p(VENDOR_DIR)).filter((f) => f.endsWith('.ts')).sort();
+    // Exclude *.test.ts: the vendored surface is source only. hostApiGuard.test.ts
+    // lives in this directory but is DMV-owned, written for node --test rather than
+    // the upstream runner, so it is deliberately outside the hash-guarded set — and
+    // it applies the same exclusion to its own file listing.
+    onDisk = readdirSync(p(VENDOR_DIR))
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+      .sort();
   } catch {
     onDisk = ['(directory unreadable)'];
   }
