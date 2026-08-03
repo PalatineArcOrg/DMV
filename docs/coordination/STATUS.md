@@ -131,7 +131,56 @@ fails all 12 shape cases while all 8 negative controls still pass, proving the t
 detect the regression they exist for. The mutation was local only, reverted, and the
 production file verified by checksum; no production code was changed by this gate.
 
-T1.2 and T1.3 were not started.
+T1.3 was not started.
+
+### Pre-merge T1.2 — populated legacy database migration: PASS
+
+Offline, file-backed. `src/db/legacyDatabaseMigration.test.ts`, 9/9 cases. Full app
+suite 554/554 (was 545), `tsc --noEmit` clean. Engine: `node:sqlite` (SQLite 3.51.2),
+already available via Node 24 and typed by the installed `@types/node` — no dependency
+was added.
+
+Unit tests elsewhere use fresh in-memory databases; nothing had opened a *populated*
+legacy file. Each case builds a real database on disk in a disposable temp directory
+and closes/reopens between phases, so results reflect persistence rather than
+connection state. Temp directories are removed in `finally`, including on failure.
+
+The legacy fixture is the verbatim schema from the pre-Phase-4 `database.ts` at
+`cd0264b` — SHA-256 `f4dc94ec…507d1d`, byte-identical to the v1.13.20 release commit
+`c786064`. It was taken from source, not derived by subtracting Phase 4 tables from the
+current schema. Six tables (`heartbeat_history`, `escalation_history`,
+`execution_steps`, `settings`, `price_history`, `defi_positions`) and three indexes,
+populated with 19 deterministic rows covering null/non-null signatures, null/non-null
+reasons, pending/failed/completed steps, composite-key price rows and both nullable and
+populated DeFi token fields.
+
+The migration under test is the **actual production SQL**: `database.ts` is read at
+runtime, its single `execAsync` template extracted, and the three real schema constants
+substituted. A guard fails the test if any `${…}` remains, so production growing a new
+interpolation cannot silently go unexercised.
+
+First migration preserves every legacy row, column definition, index and
+`sqlite_sequence` value byte-for-byte; `PRAGMA integrity_check` returns `ok` before and
+after. All four Phase 4 objects are created and verified at column level — `NOT NULL`,
+nullability, primary keys, and `u64` counts held as `TEXT`. All five indexes are
+verified by definition, including the partial predicates. A new heartbeat row then
+writes normally, `AUTOINCREMENT` continues at id 5, and the older rows are unchanged.
+A second migration over the already-migrated, journal-populated file leaves the full
+snapshot identical, creates no duplicate objects, and keeps `integrity_check` at `ok`.
+
+Partial unique indexes were proven behaviourally, not by reading their SQL: for each of
+the three journals a second unresolved operation for the same identity is rejected,
+terminal records coexist, a new unresolved operation is permitted once the first
+resolves, and duplicate signatures are rejected in every state. Journal rows survive
+close/reopen with `18446744073709551615` returned as the identical string and null
+resolution/error fields still null.
+
+Mutation-tested before acceptance: removing `${AGENT_ROTATION_SCHEMA_SQL}` from
+`database.ts` fails 5 of 9 cases with specific diagnostics
+(`agent_rotation_operations must exist`, `no such table: agent_rotation_operations`),
+while the legacy-preservation cases correctly still pass. The mutation was local only,
+reverted, and the production file verified by checksum; no production code was changed
+by this gate.
 
 ## Findings
 - Design A (owner-only) is protocol-compatible but does not prove candidate possession and is not used by the official flow.
