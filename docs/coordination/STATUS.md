@@ -91,6 +91,48 @@
 - Forbidden-artifact scan: PASS.
 - No existing test was removed or weakened merely to pass. The disposable ledger and wallet were removed after the run.
 
+### Pre-merge T1.1 — legacy agent-key upgrade compatibility: PASS
+
+Offline. `src/tee/legacyAgentKeyUpgrade.test.ts`, 20/20 cases. Full app suite 545/545
+(was 525), `tsc --noEmit` clean.
+
+Every existing installation holds an agent key written by the pre-Phase-4 KeyManager.
+If the compatibility path were wrong, readiness would report `agent_missing` and those
+owners would stop heartbeating silently while their on-chain deadline continued.
+
+Fixtures were reconstructed from source, not from the test-plan prose: the pre-Phase-4
+`KeyManager.ts` at `cd0264b` — byte-identical to the v1.13.20 release commit `c786064`
+and the app's **only** SecureStore call site — writes exactly `dmv_agent_secret_key`
+(bs58 of the 64-byte secret), `dmv_agent_public_key` and `dmv_agent_key_auth`, and
+reads the secret back with `authed = (auth === '1')`. No `dmv_agent_key_complete`
+exists in a legacy install.
+
+All three historical authentication shapes pass — `auth='1'`, `auth='0'` and auth
+absent. For each: the slot is complete, the public key matches, the key loads, exact
+on-chain resolution returns `active_match`, and the recovered key produces a signature
+that verifies by ed25519 over a real compiled message. Loading is read-only — storage
+is byte-identical afterwards, no set or remove is issued, no key is generated, no
+candidate or previous slot appears, and the completion marker stays absent. Each shape
+is re-verified from a rebuilt manager so success cannot come from a warm cache. Legacy
+promotion also passes for every shape: candidate becomes active, the legacy key is
+retained in `previous` with its original authentication mode and still signs, the
+candidate slot is fully removed, both surviving slots gain modern completion markers,
+and repeating the completed promotion changes nothing.
+
+The harness models the property that makes the result meaningful: a SecureStore secret
+read with the wrong authentication mode fails to decrypt. A control proves this, so a
+mismatched mode cannot pass vacuously. Eight negative controls confirm the
+compatibility path stays narrow — absent/malformed/mismatched public key, invalid auth
+value, malformed secret, and the missing-marker path being rejected for `candidate` and
+`previous`, so only a genuine legacy `active` slot benefits.
+
+The suite was mutation-tested before acceptance: disabling the `isLegacyActive` branch
+fails all 12 shape cases while all 8 negative controls still pass, proving the tests
+detect the regression they exist for. The mutation was local only, reverted, and the
+production file verified by checksum; no production code was changed by this gate.
+
+T1.2 and T1.3 were not started.
+
 ## Findings
 - Design A (owner-only) is protocol-compatible but does not prove candidate possession and is not used by the official flow.
 - Design B is compatible with the current instruction and installed MWA stack. Candidate fee-payer status makes it the first required signer and transaction-ID signature; the owner remains independently required by the instruction.
