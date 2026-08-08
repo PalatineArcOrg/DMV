@@ -104,6 +104,32 @@ from the PR's own branch.
 
 Requires an APK build (its own gate) and a device install (its own gate).
 
+### T2.0 — Build gate: what to assert on the APK
+
+Build via the authoritative local wrapper (`release-tools/build-android-release.sh`),
+**not** EAS. EAS signs with its own managed credentials, which would change the signing
+certificate and force an uninstall — destroying the very SecureStore agent key T2.1
+exists to test.
+
+Assert on the built APK: package `com.romulusol.deadmansvault`, versionName `1.13.21`,
+versionCode `107`, ZIP integrity, attestation `commit` / `expectedCluster` / `apkSha256`,
+and above all that the signing certificate equals the shipped v1.13.20 certificate
+(`FAC61745…033B9C`). `expo prebuild --clean` regenerates `android/` from a template
+carrying a fixed debug keystore, and that is what preserves in-place upgradeability.
+
+> **Do not expect a single ABI.** A correct build ships **four** — `arm64-v8a`,
+> `armeabi-v7a`, `x86`, `x86_64` — and the shipped v1.13.20 contains exactly the same
+> four. `reactNativeArchitectures=arm64-v8a` in `gradle.properties` only governs which
+> React Native libraries are **compiled from source**; prebuilt `.so` files from
+> dependencies are packaged for every ABI regardless. A four-ABI APK is therefore normal
+> and must not be flagged. Compare ABI shape against the previous shipped release, not
+> against `reactNativeArchitectures`. (Measured 2026-08-08 on the v1.13.21 build: four
+> ABIs, 70,552,539 bytes — within 84 KB of v1.13.20's 70,468,291.)
+
+Building on this host needs swap: peak demand is ~5 GB across the Gradle JVM
+(`-Xmx3072m` + 768 MB metaspace) and a separately forked Kotlin compile daemon (~1.9 GB).
+See the Swap section of the root `CLAUDE.md`.
+
 ### T2.1 — Upgrade in place over the existing install ★ do this first
 
 Not a fresh install. Install over an existing pre-Phase-4 build that already holds a
