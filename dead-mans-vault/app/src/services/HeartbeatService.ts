@@ -1,10 +1,13 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { HeartbeatMethod, HeartbeatConfig, HeartbeatStatus } from '../types';
 import {
-  recordHeartbeat,
+  recordConfirmedHeartbeat as persistConfirmedHeartbeat,
+  recordAuthoritativeHeartbeatCache,
+  recordNonAuthoritativeLocalHeartbeat,
   getLastHeartbeat,
   getHeartbeatCount,
 } from '../db/heartbeatRepo';
+import type { ConfirmedHeartbeatInsert } from '../db/heartbeatRepoCore';
 import { useHeartbeatStore } from '../store/useHeartbeatStore';
 
 export class HeartbeatService {
@@ -19,13 +22,35 @@ export class HeartbeatService {
     this.config = config;
   }
 
-  async confirmHeartbeat(method: HeartbeatMethod): Promise<void> {
-    await recordHeartbeat(method);
-    const status = await this.getStatus();
+  async recordConfirmedHeartbeat(
+    input: ConfirmedHeartbeatInsert,
+  ): Promise<void> {
+    await persistConfirmedHeartbeat(input);
+    const status = await this.getLocalHistoryStatus();
     useHeartbeatStore.getState().setStatus(status);
   }
 
-  async getStatus(): Promise<HeartbeatStatus> {
+  async recordAuthoritativeUnattributedHeartbeat(
+    input: Parameters<typeof recordAuthoritativeHeartbeatCache>[0],
+  ): Promise<void> {
+    await recordAuthoritativeHeartbeatCache(input);
+    const status = await this.getLocalHistoryStatus();
+    useHeartbeatStore.getState().setStatus(status);
+  }
+
+  async recordNonAuthoritativeActivityHeartbeat(
+    method: HeartbeatMethod,
+  ): Promise<void> {
+    await recordNonAuthoritativeLocalHeartbeat(method);
+    const status = await this.getLocalHistoryStatus();
+    useHeartbeatStore.getState().setStatus(status);
+  }
+
+  /**
+   * Activity/history display only. This device-clock projection is never used
+   * for authoritative deadline, escalation, or execution decisions.
+   */
+  async getLocalHistoryStatus(): Promise<HeartbeatStatus> {
     const last = await getLastHeartbeat();
     const totalCount = await getHeartbeatCount();
 
@@ -59,6 +84,8 @@ export class HeartbeatService {
     ownerPubkey: PublicKey,
     intervalMs: number = 60000,
   ): void {
+    // Disabled unless explicitly configured. Detected owner activity creates a
+    // non-authoritative history row only; it cannot reset chain liveness.
     if (!this.config.methods.includes('on_chain_activity')) return;
     if (this.monitoringInterval) return;
 
@@ -100,7 +127,9 @@ export class HeartbeatService {
 
         const last = await getLastHeartbeat();
         if (!last || ownerSignedTx.blockTime > last.timestamp) {
-          await this.confirmHeartbeat('on_chain_activity');
+          await this.recordNonAuthoritativeActivityHeartbeat(
+            'on_chain_activity',
+          );
         }
       } catch {
         // On-chain monitoring failure is non-fatal

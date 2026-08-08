@@ -1,4 +1,7 @@
 import * as SQLite from 'expo-sqlite';
+import { HEARTBEAT_OPERATION_SCHEMA_SQL } from './heartbeatOperationRepoCore';
+import { AGENT_ROTATION_SCHEMA_SQL } from './agentRotationRepoCore';
+import { AGENT_CANDIDATE_FUNDING_SCHEMA_SQL } from './agentCandidateFundingRepoCore';
 
 let db: SQLite.SQLiteDatabase | null = null;
 
@@ -12,6 +15,24 @@ export async function initDatabase(): Promise<void> {
       method TEXT NOT NULL,
       on_chain_tx TEXT,
       created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+
+    ${HEARTBEAT_OPERATION_SCHEMA_SQL}
+    ${AGENT_ROTATION_SCHEMA_SQL}
+    ${AGENT_CANDIDATE_FUNDING_SCHEMA_SQL}
+
+    CREATE TABLE IF NOT EXISTS authoritative_heartbeat_cache (
+      cluster TEXT NOT NULL,
+      program_id TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      vault TEXT NOT NULL,
+      heartbeat TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      method TEXT NOT NULL,
+      total_heartbeats TEXT NOT NULL,
+      source TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (cluster, program_id, owner, vault)
     );
 
     CREATE TABLE IF NOT EXISTS escalation_history (

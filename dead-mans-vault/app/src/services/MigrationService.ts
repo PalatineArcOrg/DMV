@@ -1,59 +1,40 @@
 import { PublicKey } from '@solana/web3.js';
-import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from './VaultTransactionService';
+import {
+  needsAgentRotationForState,
+} from './AgentMigrationFlow';
+import { KeyManager } from '../tee/KeyManager';
+import { DefaultAgentRotationService } from './DefaultAgentRotationService';
 
 export class MigrationService {
   static async needsAgentRotation(ownerPubkey: PublicKey): Promise<boolean> {
     const txService = new VaultTransactionService();
     const vaultData = await txService.fetchVaultConfig(ownerPubkey);
 
-    // No vault on-chain — no rotation needed
-    if (!vaultData) return false;
-
-    // Vault is executed or inactive — no rotation needed
-    if (vaultData.executed || !vaultData.active) return false;
+    if (!vaultData || vaultData.executed || !vaultData.active) return false;
 
     const keyManager = KeyManager.getInstance();
     const hasKey = await keyManager.hasAgentKey();
+    const localPubkey = hasKey
+      ? await keyManager.getAgentPublicKey()
+      : null;
 
-    if (!hasKey) return true;
-
-    // Key exists but doesn't match on-chain agent
-    const localPubkey = await keyManager.getAgentPublicKey();
-    const onChainAgent = vaultData.agentPubkey.toBase58();
-
-    return localPubkey !== onChainAgent;
+    return needsAgentRotationForState(
+      {
+        active: vaultData.active,
+        executed: vaultData.executed,
+        agentPublicKey: vaultData.agentPubkey.toBase58(),
+      },
+      hasKey,
+      localPubkey,
+    );
   }
 
-  static async executeRotation(
-    ownerPubkey: PublicKey,
-    signAndSendTransaction: (tx: any) => Promise<string>,
-  ): Promise<{ newPubkey: string; txSig: string }> {
-    const keyManager = KeyManager.getInstance();
-
-    // Destroy stale key if it exists
-    await keyManager.destroyKey();
-
-    // Generate new agent key
-    const newPubkey = await keyManager.generateAgentKey();
-    const newAgentPk = new PublicKey(newPubkey);
-
-    // Build rotate_agent transaction (owner-signed via MWA)
-    const txService = new VaultTransactionService();
-    const tx = await txService.buildRotateAgentTx(ownerPubkey, newAgentPk);
-
-    tx.feePayer = ownerPubkey;
-    const connection = txService.getConnection();
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-    tx.recentBlockhash = blockhash;
-
-    const txSig = await signAndSendTransaction(tx);
-
-    await connection.confirmTransaction(
-      { signature: txSig, blockhash, lastValidBlockHeight },
-      'confirmed',
+  static async reconcileRotation(ownerPubkey: PublicKey) {
+    // Startup/focus repair is strictly read-only: the reconciler has no
+    // transaction builder, signer, wallet callback or send dependency.
+    return new DefaultAgentRotationService().reconcileForOwner(
+      ownerPubkey,
     );
-
-    return { newPubkey, txSig };
   }
 }

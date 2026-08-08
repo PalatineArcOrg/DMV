@@ -1,13 +1,10 @@
 import { Keypair, Transaction } from '@solana/web3.js';
 import * as SecureStore from 'expo-secure-store';
-import bs58 from 'bs58';
-
-const SECRET_KEY = 'dmv_agent_secret_key';
-const PUBLIC_KEY = 'dmv_agent_public_key';
-// '1' when the secret was stored behind a device-credential/biometric gate, so
-// getKeypair() reads it back with matching options (mismatched options can fail
-// decryption on Android). Absent/'0' for legacy keys stored without the gate.
-const AUTH_FLAG = 'dmv_agent_key_auth';
+import {
+  createAgentKeySlotManager,
+  type AgentKeySlot,
+  type StoredAgentResolution,
+} from './AgentKeySlotManagerCore';
 
 const AUTH_PROMPT = 'Authenticate to use your Dead Man’s Vault agent key';
 
@@ -18,7 +15,36 @@ const BASE_OPTS: SecureStore.SecureStoreOptions = {
 
 export class KeyManager {
   private static instance: KeyManager | null = null;
-  private cachedKeypair: Keypair | null = null;
+  private readonly slots = createAgentKeySlotManager({
+    get: (key, authenticated) =>
+      SecureStore.getItemAsync(
+        key,
+        authenticated
+          ? {
+              requireAuthentication: true,
+              authenticationPrompt: AUTH_PROMPT,
+            }
+          : undefined,
+      ),
+    set: async (key, value, authenticated) => {
+      if (authenticated) {
+        try {
+          await SecureStore.setItemAsync(key, value, {
+            ...BASE_OPTS,
+            requireAuthentication: true,
+            authenticationPrompt: AUTH_PROMPT,
+          });
+          return true;
+        } catch {
+          // Preserve legacy availability on devices without an enrolled lock
+          // screen. Authentication mode is recorded per slot by the core.
+        }
+      }
+      await SecureStore.setItemAsync(key, value, BASE_OPTS);
+      return false;
+    },
+    remove: (key) => SecureStore.deleteItemAsync(key),
+  });
 
   static getInstance(): KeyManager {
     if (!KeyManager.instance) {
@@ -28,61 +54,22 @@ export class KeyManager {
   }
 
   async generateAgentKey(): Promise<string> {
-    const keypair = Keypair.generate();
-    const secretB58 = bs58.encode(keypair.secretKey);
-    const publicB58 = keypair.publicKey.toBase58();
-
-    // Prefer a biometric / device-credential gate on the secret. The agent key
-    // signs record_heartbeat (which resets the liveness clock), so gating it
-    // stops silently-extracted key material from forging heartbeats and stalling
-    // the switch. Fall back to unauthenticated (still device-only) storage if the
-    // device has no secure lock screen enrolled, so key generation never hard-fails.
-    let authed = true;
-    try {
-      await SecureStore.setItemAsync(SECRET_KEY, secretB58, {
-        ...BASE_OPTS,
-        requireAuthentication: true,
-        authenticationPrompt: AUTH_PROMPT,
-      });
-    } catch {
-      authed = false;
-      await SecureStore.setItemAsync(SECRET_KEY, secretB58, BASE_OPTS);
-    }
-
-    await SecureStore.setItemAsync(PUBLIC_KEY, publicB58, BASE_OPTS);
-    await SecureStore.setItemAsync(AUTH_FLAG, authed ? '1' : '0', BASE_OPTS);
-
-    this.cachedKeypair = keypair;
-    return publicB58;
+    // Initial vault setup is allowed only when no active slot exists. Candidate
+    // generation for rotation uses generateCandidateAgentKey() and never calls
+    // this method.
+    return this.slots.generateActive();
   }
 
   async getAgentPublicKey(): Promise<string | null> {
-    return SecureStore.getItemAsync(PUBLIC_KEY);
+    return this.slots.getPublicKey('active');
   }
 
   async hasAgentKey(): Promise<boolean> {
-    const pk = await SecureStore.getItemAsync(PUBLIC_KEY);
-    return pk !== null;
+    return this.slots.hasCompleteSlot('active');
   }
 
   async getKeypair(): Promise<Keypair> {
-    if (this.cachedKeypair) return this.cachedKeypair;
-
-    // Read back with options matching how it was stored (a legacy key with no
-    // flag was stored unauthenticated). This triggers the biometric prompt once
-    // per session for gated keys; subsequent calls hit the in-memory cache.
-    const authed = (await SecureStore.getItemAsync(AUTH_FLAG)) === '1';
-    const secretB58 = await SecureStore.getItemAsync(
-      SECRET_KEY,
-      authed ? { requireAuthentication: true, authenticationPrompt: AUTH_PROMPT } : undefined,
-    );
-    if (!secretB58) {
-      throw new Error('No agent key found in secure store');
-    }
-
-    const secretKey = bs58.decode(secretB58);
-    this.cachedKeypair = Keypair.fromSecretKey(secretKey);
-    return this.cachedKeypair;
+    return this.slots.loadSlot('active');
   }
 
   async signTransaction(tx: Transaction): Promise<Transaction> {
@@ -92,14 +79,45 @@ export class KeyManager {
   }
 
   async destroyKey(): Promise<void> {
-    // Wipe the secret bytes from the JS heap before dropping the reference, so a
-    // later heap dump can't recover a "destroyed" key.
-    if (this.cachedKeypair) {
-      this.cachedKeypair.secretKey.fill(0);
-    }
-    this.cachedKeypair = null;
-    await SecureStore.deleteItemAsync(SECRET_KEY);
-    await SecureStore.deleteItemAsync(PUBLIC_KEY);
-    await SecureStore.deleteItemAsync(AUTH_FLAG);
+    // Explicit vault teardown only. Rotation code must never call this method.
+    await this.slots.removeSlot('active');
   }
+
+  async generateCandidateAgentKey(): Promise<string> {
+    return this.slots.generateCandidate();
+  }
+
+  async getCandidatePublicKey(): Promise<string | null> {
+    return this.slots.getPublicKey('candidate');
+  }
+
+  async getPreviousAgentPublicKey(): Promise<string | null> {
+    return this.slots.getPublicKey('previous');
+  }
+
+  async loadCandidateKeypair(): Promise<Keypair> {
+    return this.slots.loadSlot('candidate');
+  }
+
+  async loadKeypairByExactPublicKey(publicKey: string): Promise<Keypair> {
+    return this.slots.loadByExactPublicKey(publicKey);
+  }
+
+  async resolveStoredAgentForOnChainPubkey(
+    publicKey: string,
+  ): Promise<StoredAgentResolution> {
+    return this.slots.resolveForOnChainPublicKey(publicKey);
+  }
+
+  async promoteCandidate(
+    oldAgent: string,
+    candidateAgent: string,
+  ): Promise<void> {
+    await this.slots.promoteCandidate(oldAgent, candidateAgent);
+  }
+
+  async deleteSlot(slot: AgentKeySlot): Promise<void> {
+    await this.slots.removeSlot(slot);
+  }
+
 }

@@ -21,15 +21,21 @@ import { useDemoStore } from '../store/useDemoStore';
 import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
 import { useEscalationStore } from '../store/useEscalationStore';
-import { clearHeartbeatHistory, recordHeartbeat } from '../db/heartbeatRepo';
+import {
+  clearHeartbeatHistory,
+  recordNonAuthoritativeLocalHeartbeat,
+} from '../db/heartbeatRepo';
 import { clearDistributableSnapshot, clearTokenSnapshot } from '../db/executionRepo';
 import { truncateAddress, formatDuration } from '../utils/formatting';
-import { COLORS, FONTS, PROGRAM_ID, KEEPER_BOUNTY_LAMPORTS } from '../utils/constants';
+import {
+  COLORS,
+  FONTS,
+  PROGRAM_ID,
+  KEEPER_BOUNTY_LAMPORTS,
+} from '../utils/constants';
+import { AGENT_RECOMMENDED_RESERVE_LAMPORTS } from '../services/agentFundingPolicy';
 import { StepIndicator } from '../components/StepIndicator';
-
-// Agent only needs heartbeat fees now — execution is permissionless and nothing
-// refunds the agent on autonomous execution (D7).
-const AGENT_FUNDING_LAMPORTS = Math.floor(0.005 * LAMPORTS_PER_SOL);
+import { getDeadlineStageDurations } from '../utils/deadlineStageConfig';
 
 export function EstateReviewScreen() {
   const navigation = useNavigation<any>();
@@ -42,11 +48,14 @@ export function EstateReviewScreen() {
 
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
 
-  const gracePeriod = isDemoMode
-    ? 90 // 30s per escalation stage in demo mode
-    : escalationConfig.stage1Duration +
-      escalationConfig.stage2Duration +
-      escalationConfig.stage3Duration;
+  const deadlineStages = getDeadlineStageDurations(
+    isDemoMode,
+    escalationConfig,
+  );
+  const gracePeriod =
+    deadlineStages.stage1Duration +
+    deadlineStages.stage2Duration +
+    deadlineStages.stage3Duration;
 
   const handleRegister = useCallback(async () => {
     if (!publicKey || !heartbeatConfig) {
@@ -125,7 +134,10 @@ export function EstateReviewScreen() {
       // Fund agent key so it can pay TX fees for heartbeats + execution
       // Skip if agent already has sufficient balance (e.g. reusing key after revoke)
       const agentBalance = await connection.getBalance(agentPubkey);
-      const fundingNeeded = Math.max(0, AGENT_FUNDING_LAMPORTS - agentBalance);
+      const fundingNeeded = Math.max(
+        0,
+        AGENT_RECOMMENDED_RESERVE_LAMPORTS - agentBalance,
+      );
       if (fundingNeeded > 0) {
         vaultTx.add(
           SystemProgram.transfer({
@@ -162,15 +174,13 @@ export function EstateReviewScreen() {
         'confirmed',
       );
 
-      // Reset stale state from any previous vault session
-      // This prevents the EscalationService from immediately jumping to Stage 4
-      // Execution logs are preserved so the user can still review past executions —
-      // they get cleared by ExecutionService when a new execution actually starts.
+      // Reset local diagnostic/history state from any previous vault session.
+      // Deadline authority is fetched from the newly created canonical accounts.
       const ownerWallet = publicKey.toString();
       await clearHeartbeatHistory();
       await clearDistributableSnapshot(ownerWallet);
       await clearTokenSnapshot(ownerWallet);
-      await recordHeartbeat('active_tap');
+      await recordNonAuthoritativeLocalHeartbeat('active_tap');
       useEscalationStore.getState().reset();
 
       // Sync vault config to store

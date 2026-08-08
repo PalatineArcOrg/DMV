@@ -29,11 +29,13 @@ import { RPC_OVERRIDE_KEY, explorerAddress, explorerTx, getRpcUrl, isCustomRpc, 
 import { getSetting, setSetting, deleteSetting } from '../db/settingsRepo';
 import { attemptSignedRegistration, attemptSignedDeregistration, successKey, deregPendingKey, closedVaultKey, recordVaultClosure, mapRegistrationError, mapDeregisterError } from '../services/NotificationRegistrationService';
 import { makeTokenObserver, operationIdentity, runExclusive, LifecycleState } from '../services/notificationLifecycle';
-import { DEV_ESCALATION } from '../hooks/useHeartbeat';
 import { registerMessageV2, deregisterMessageV2, generateNonceV2 } from '../utils/notifyAuth';
+import { getDeadlineStageDurations, toNotificationStageDurations } from '../utils/deadlineStageConfig';
 import { PushRegistrationService } from '../services/PushRegistrationService';
 import { useEscalationStore } from '../store/useEscalationStore';
 import appJson from '../../app.json';
+import { AgentFeeCard } from '../components/AgentFeeCard';
+import { AgentRotationCard } from '../components/AgentRotationCard';
 
 function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -46,7 +48,7 @@ export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const { publicKey, connected, connect, disconnect, signTransaction, signMessage } = useWallet();
   const { isDemoMode, setDemoMode, incrementTap } = useDemoStore();
-  const { beneficiaries, vaultConfig } = useVaultStore();
+  const { beneficiaries, vaultConfig, escalationConfig } = useVaultStore();
   const heartbeatConfig = useHeartbeatStore((s) => s.config);
   const escalationStage = useEscalationStore((s) => s.state.stage);
   const { isAuthEnabled, setAuthEnabled } = useAuthStore();
@@ -224,12 +226,11 @@ export function SettingsScreen() {
     const vault = deriveVaultB58(owner);
     const identity = operationIdentity({ cluster: notifCluster, programId: PROGRAM_ID, owner, vault });
     const op = notifReg.state === 'update_required' ? 'update' : 'register';
-    // Register the SAME stage durations the app's escalation actually uses (demo/dev = 30s
-    // each; otherwise the production defaults) so server-side timing matches the device.
-    const useDevTimers = __DEV__ || isDemoMode;
-    const stages = useDevTimers
-      ? { stage1: DEV_ESCALATION.stage1Duration, stage2: DEV_ESCALATION.stage2Duration, stage3: DEV_ESCALATION.stage3Duration }
-      : { stage1: ESCALATION_DEFAULTS.stage1, stage2: ESCALATION_DEFAULTS.stage2, stage3: ESCALATION_DEFAULTS.stage3 };
+    // Register the exact deterministic subdivision used by deadline display.
+    // Build mode never changes vault timing; only explicit demo mode does.
+    const stages = toNotificationStageDurations(
+      getDeadlineStageDurations(isDemoMode, escalationConfig),
+    );
     notifBusyRef.current = true;
     notifDeregPendingSessionRef.current = false; // a deliberate (re-)enable supersedes any pending-dereg guard
     setNotifReg({ state: 'registering', message: null });
@@ -294,7 +295,16 @@ export function SettingsScreen() {
       notifBusyRef.current = false;
       notifObserverRef.current?.invalidate(); // kill any stale in-flight check so it can't stomp the terminal state
     }
-  }, [notifReg.state, publicKey, signMessage, notifCluster, deriveVaultB58, notifSha256Hex]);
+  }, [
+    deriveVaultB58,
+    escalationConfig,
+    isDemoMode,
+    notifCluster,
+    notifReg.state,
+    notifSha256Hex,
+    publicKey,
+    signMessage,
+  ]);
 
   // WP6: DELIBERATE owner-signed DEREGISTRATION core. Only ever called from a confirmed
   // user action below. Never called on mount/heartbeat/disconnect/account-change/token-loss.
@@ -631,6 +641,15 @@ export function SettingsScreen() {
           </View>
         </View>
       )}
+
+      {vaultConfig && isOwner && vaultConfig.active && !vaultConfig.executed ? (
+        <>
+          <AgentFeeCard owner={publicKey} />
+          {publicKey ? (
+            <AgentRotationCard owner={publicKey} />
+          ) : null}
+        </>
+      ) : null}
 
       {/* Inheritances */}
       <View style={styles.sectionBlock}>

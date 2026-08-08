@@ -28,11 +28,22 @@ import { HeartbeatButton } from '../components/HeartbeatButton';
 import { RpcStatusBanner } from '../components/RpcStatusBanner';
 import { EscalationBanner } from '../components/EscalationBanner';
 import { BrandMark } from '../components/BrandMark';
+import { AgentFeeCard } from '../components/AgentFeeCard';
 import { COLORS, SPACING, FONTS, STAGE_CONFIG, TOKEN_COLORS } from '../utils/constants';
-import { formatUsd, formatTokenAmount, truncateAddress, timeAgo } from '../utils/formatting';
+import { formatDuration, formatUsd, formatTokenAmount, truncateAddress } from '../utils/formatting';
 import { EscalationStage } from '../types';
-import { KeyManager } from '../tee/KeyManager';
 import { VaultTransactionService } from '../services/VaultTransactionService';
+import {
+  createHeartbeatCoordinator,
+  type HeartbeatExplorerTransactionStatus,
+} from '../services/HeartbeatCoordinator';
+import { createDefaultAgentReadinessService } from '../services/DefaultAgentReadinessService';
+import { createDefaultHeartbeatConfirmationVerifier } from '../services/DefaultHeartbeatConfirmationVerifier';
+import { DefaultHeartbeatOperationService } from '../services/DefaultHeartbeatOperationService';
+import {
+  getHeartbeatAttemptMessage,
+  type HeartbeatAttemptMessage,
+} from '../services/heartbeatAttemptUi';
 import { PortfolioScanner } from '../services/PortfolioScanner';
 import { DepositModal } from '../components/DepositModal';
 import { PublicKey, LAMPORTS_PER_SOL, Transaction } from '@solana/web3.js';
@@ -96,12 +107,10 @@ export function DashboardScreen() {
   const navigation = useNavigation<any>();
   const { publicKey, connected, connect, signTransaction } = useWallet();
   const { balances, defiPositions: portfolioDefi, totalUsdValue, solBalance, isLoading, error, refresh } = usePortfolio();
-  const { fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA } = useVaultProgram();
+  const { fetchVaultConfig, getVaultPDA } = useVaultProgram();
   const isDemoMode = useDemoStore((s) => s.isDemoMode);
-  const executionStarted = useEscalationStore((s) => s.state.executionStarted);
   const [vaultData, setVaultData] = useState<any>(null);
   const [executionCompleted, setExecutionCompleted] = useState(false);
-  const [heartbeatData, setHeartbeatData] = useState<any>(null);
   const [isLoadingVault, setIsLoadingVault] = useState(false);
   const executionJustCompleted = useVaultStore((s) => s.executionJustCompleted);
   const storeDefiPositions = useVaultStore((s) => s.defiPositions);
@@ -122,11 +131,13 @@ export function DashboardScreen() {
   const isVaultSetup = vaultData !== null;
 
   const {
-    confirmHeartbeat,
-    status: heartbeatStatus,
+    recordConfirmedHeartbeat,
+    recordAuthoritativeUnattributedHeartbeat,
+    refreshAuthoritativeDeadline,
+    sendConfirmedHeartbeatNotification,
+    deadlineState,
     escalationStage,
     secondsRemaining,
-    isConfirming,
   } = useHeartbeat(isVaultSetup && (vaultData?.active ?? false), publicKey ?? null);
 
   const cfg = STAGE_CONFIG[escalationStage] || STAGE_CONFIG[0];
@@ -136,31 +147,22 @@ export function DashboardScreen() {
     setIsLoadingVault(true);
     try {
       const vault: any = await fetchVaultConfig(publicKey);
-      setVaultData(vault);
-      if (!vault && useVaultStore.getState().vaultConfig) {
-        // Vault PDAs closed — sync Zustand so Vault tab reflects this
-        // Only clear if we previously had a vault; don't wipe mid-setup state
-        useVaultStore.getState().setVaultConfig(null);
-        // Check if execution completed
-        const escState = useEscalationStore.getState().state;
-        if (escState.executionStarted) {
-          setExecutionCompleted(true);
-          useEscalationStore.getState().reset();
+      if (!vault) {
+        // This fetch boundary collapses "missing" and RPC failure. Preserve a
+        // previously loaded vault and let the hardened deadline service publish
+        // vault_missing/RPC state; never infer execution from local flags.
+        if (!useVaultStore.getState().vaultConfig) {
+          setVaultData(null);
+          setExecutionCompleted(false);
         }
-      } else if (!vault && !useVaultStore.getState().vaultConfig) {
-        // No vault on-chain and none in store — clear any stale execution state
-        setExecutionCompleted(false);
-      }
-      if (vault) {
+      } else {
+        setVaultData(vault);
         if (vault.executed) {
           setExecutionCompleted(true);
           useEscalationStore.getState().reset();
         }
         useVaultStore.getState().setVaultConfig(vault);
         const [vaultPda] = getVaultPDA(publicKey);
-        const hb = await fetchHeartbeatRecord(vaultPda);
-        setHeartbeatData(hb);
-
         // Fetch vault PDA balance for deposit card
         try {
           const txService = new VaultTransactionService();
@@ -204,7 +206,7 @@ export function DashboardScreen() {
     } finally {
       setIsLoadingVault(false);
     }
-  }, [publicKey, fetchVaultConfig, fetchHeartbeatRecord, getVaultPDA]);
+  }, [publicKey, fetchVaultConfig, getVaultPDA]);
 
   const handleDeposit = useCallback(async (lamports: number) => {
     if (!publicKey || !signTransaction) throw new Error('Wallet not connected');
@@ -312,7 +314,6 @@ export function DashboardScreen() {
     const currentKey = publicKey?.toBase58() ?? '';
     if (prevPublicKey.current && currentKey && prevPublicKey.current !== currentKey) {
       setVaultData(null);
-      setHeartbeatData(null);
       setExecutionCompleted(false);
     }
     prevPublicKey.current = currentKey;
@@ -322,7 +323,6 @@ export function DashboardScreen() {
   useEffect(() => {
     if (executionJustCompleted) {
       setVaultData(null);
-      setHeartbeatData(null);
       setExecutionCompleted(true);
       setVaultBalance(0);
       setVaultTokenBalances([]);
@@ -345,48 +345,313 @@ export function DashboardScreen() {
   );
 
   const onRefresh = useCallback(async () => {
-    await Promise.all([refresh(), loadVaultState()]);
-  }, [refresh, loadVaultState]);
+    await Promise.all([
+      refresh(),
+      loadVaultState(),
+      refreshAuthoritativeDeadline(),
+    ]);
+  }, [refresh, loadVaultState, refreshAuthoritativeDeadline]);
 
-  const lastOnChainTxRef = useRef<string | null>(null);
-  const [lastOnChainTx, setLastOnChainTx] = useState<string | null>(null);
-  const [onChainBeatError, setOnChainBeatError] = useState(false);
+  const [lastConfirmedHeartbeatTx, setLastConfirmedHeartbeatTx] =
+    useState<string | null>(null);
+  const [currentHeartbeatTx, setCurrentHeartbeatTx] = useState<{
+    signature: string;
+    status: Exclude<
+      HeartbeatExplorerTransactionStatus,
+      'confirmed_success'
+    >;
+  } | null>(null);
+  const [heartbeatAttemptMessage, setHeartbeatAttemptMessage] =
+    useState<HeartbeatAttemptMessage | null>(null);
+  const [isHeartbeatAttemptInFlight, setIsHeartbeatAttemptInFlight] =
+    useState(false);
+  const [heartbeatConfirmationSucceeded, setHeartbeatConfirmationSucceeded] =
+    useState(false);
+  const heartbeatCoordinator = useRef(createHeartbeatCoordinator()).current;
+  const heartbeatOperationService =
+    useRef(new DefaultHeartbeatOperationService()).current;
 
   const handleHeartbeat = useCallback(async () => {
-    try {
-      await confirmHeartbeat('active_tap');
-      // Also record on-chain via the agent key. This is the AUTHORITATIVE liveness proof
-      // the notify-server + keeper watch; if it silently fails the on-chain clock keeps
-      // aging toward execution while the UI looks healthy — so surface any failure.
-      try {
-        const keyManager = KeyManager.getInstance();
-        const keypair = await keyManager.getKeypair();
-        if (keypair && publicKey) {
-          const txService = new VaultTransactionService();
-          const sig = await txService.recordHeartbeatOnChain(keypair, publicKey, 'activeTap');
-          lastOnChainTxRef.current = sig;
-          setLastOnChainTx(sig);
-          setOnChainBeatError(false);
+    setHeartbeatConfirmationSucceeded(false);
+    setHeartbeatAttemptMessage(null);
+    setCurrentHeartbeatTx(null);
+
+    const result = await heartbeatCoordinator.attempt({
+      method: 'active_tap',
+      getUnresolvedOperation: async () =>
+        publicKey
+          ? heartbeatOperationService.getUnresolved(publicKey)
+          : null,
+      reconcileOperation: (operation) =>
+        heartbeatOperationService.reconcile(operation, {
+          recordConfirmedHeartbeat,
+          recordAuthoritativeUnattributedHeartbeat,
+          refreshAuthoritativeDeadline,
+          reloadVaultState: loadVaultState,
+        }),
+      checkAgentReadiness: () =>
+        createDefaultAgentReadinessService().check(publicKey ?? null),
+      prepareOperation: (readiness, prepared) =>
+        heartbeatOperationService.prepare(
+          readiness,
+          'active_tap',
+          prepared,
+        ),
+      transitionOperation: (signature, state, patch) =>
+        heartbeatOperationService.transition(
+          signature,
+          state,
+          patch,
+        ),
+      prepareHeartbeatTransaction: (agent) => {
+        if (!publicKey) {
+          throw new Error('Connected owner became unavailable');
         }
-      } catch {
-        setOnChainBeatError(true);
-      }
-      await loadVaultState();
-    } catch {
-      // Error handling
-    }
-  }, [confirmHeartbeat, loadVaultState, publicKey]);
+        const txService = new VaultTransactionService();
+        return txService.prepareHeartbeatTransaction(
+          agent,
+          publicKey,
+          'active_tap',
+        );
+      },
+      recordHeartbeatOnChain: (agentKeypair, prepared, lifecycle) => {
+        const txService = new VaultTransactionService();
+        return txService.recordHeartbeatOnChain(
+          agentKeypair,
+          prepared,
+          lifecycle,
+        );
+      },
+      verifyHeartbeatConfirmation: (input) =>
+        createDefaultHeartbeatConfirmationVerifier().verify(input),
+      recordConfirmedHeartbeat,
+      refreshAuthoritativeDeadline,
+      sendLocalConfirmationNotification:
+        sendConfirmedHeartbeatNotification,
+      reloadVaultState: loadVaultState,
+      publishExplorerTransaction: (signature, status) => {
+        if (status === 'confirmed_success') {
+          setLastConfirmedHeartbeatTx(signature);
+          setCurrentHeartbeatTx(null);
+        } else {
+          setCurrentHeartbeatTx({ signature, status });
+        }
+      },
+      publishInFlightState: (isInFlight) => {
+        setIsHeartbeatAttemptInFlight(isInFlight);
+        if (isInFlight) {
+          setHeartbeatAttemptMessage({
+            tone: 'pending',
+            text: 'Verifying the current on-chain heartbeat agent…',
+          });
+        }
+      },
+    });
 
-  // Heartbeat stats
-  const lastBeatLabel = heartbeatData
-    ? timeAgo(heartbeatData.lastHeartbeat.toNumber())
-    : heartbeatStatus?.lastHeartbeat
-      ? timeAgo(heartbeatStatus.lastHeartbeat)
-      : 'N/A';
+    setHeartbeatConfirmationSucceeded(
+      result.status === 'confirmed_on_chain' ||
+      result.status === 'heartbeat_reconciled_confirmed',
+    );
+    setHeartbeatAttemptMessage(getHeartbeatAttemptMessage(result));
+  }, [
+    heartbeatCoordinator,
+    heartbeatOperationService,
+    loadVaultState,
+    publicKey,
+    recordAuthoritativeUnattributedHeartbeat,
+    recordConfirmedHeartbeat,
+    refreshAuthoritativeDeadline,
+    sendConfirmedHeartbeatNotification,
+  ]);
 
-  const nextDueLabel = escalationStage === 0
-    ? (heartbeatStatus?.nextDue ? timeAgo(heartbeatStatus.nextDue).replace(' ago', '') : 'N/A')
-    : 'Overdue';
+  useFocusEffect(
+    useCallback(() => {
+      if (!connected || !publicKey) return;
+      void refreshAuthoritativeDeadline();
+      let active = true;
+      const reconcileOnFocus = async () => {
+        try {
+          const operation =
+            await heartbeatOperationService.getReconciliable(publicKey);
+          if (!operation || !active) return;
+          setIsHeartbeatAttemptInFlight(true);
+          setHeartbeatAttemptMessage({
+            tone: 'pending',
+            text:
+              'A heartbeat transaction is pending reconciliation. ' +
+              'No new transaction will be submitted.',
+          });
+          const result = await heartbeatOperationService.reconcile(
+            operation,
+            {
+              recordConfirmedHeartbeat,
+              recordAuthoritativeUnattributedHeartbeat,
+              refreshAuthoritativeDeadline,
+              reloadVaultState: loadVaultState,
+            },
+          );
+          if (!active) return;
+          const mapped =
+            result.status === 'reconciled_confirmed'
+              ? {
+                  status: 'heartbeat_reconciled_confirmed' as const,
+                  signature: result.signature,
+                  lastHeartbeat: result.lastHeartbeat,
+                  totalHeartbeats: result.totalHeartbeats,
+                  localSync: 'complete' as const,
+                }
+              : result.status === 'local_sync_pending'
+                ? {
+                    status:
+                      'heartbeat_reconciled_local_sync_pending' as const,
+                    signature: result.signature,
+                    lastHeartbeat: result.lastHeartbeat,
+                    totalHeartbeats: result.totalHeartbeats,
+                  }
+                : result.status === 'reconciled_failed'
+                  ? {
+                      status: 'heartbeat_reconciled_failed' as const,
+                      signature: result.signature,
+                    }
+                  : result.status === 'reconciled_expired'
+                    ? {
+                        status: 'heartbeat_reconciled_expired' as const,
+                        signature: result.signature,
+                      }
+                    : result.status === 'reconciled_chain_advanced'
+                      ? {
+                          status:
+                            'heartbeat_reconciled_chain_advanced' as const,
+                          lastHeartbeat: result.lastHeartbeat,
+                          totalHeartbeats: result.totalHeartbeats,
+                        }
+                      : result.status === 'invalid_local_record'
+                        ? {
+                            status: 'invalid_local_record' as const,
+                          }
+                        : result.status === 'still_pending'
+                          ? {
+                              status: 'heartbeat_still_pending' as const,
+                              signature: result.signature,
+                            }
+                          : {
+                              status:
+                                'heartbeat_reconciliation_unavailable' as const,
+                              signature: result.signature,
+                            };
+          setHeartbeatAttemptMessage(getHeartbeatAttemptMessage(mapped));
+          if (
+            result.status === 'reconciled_confirmed' ||
+            result.status === 'local_sync_pending'
+          ) {
+            setLastConfirmedHeartbeatTx(result.signature);
+            setCurrentHeartbeatTx(null);
+            setHeartbeatConfirmationSucceeded(true);
+          } else if (
+            'signature' in result &&
+            result.status !== 'reconciled_expired'
+          ) {
+            setCurrentHeartbeatTx({
+              signature: result.signature,
+              status:
+                result.status === 'reconciled_failed'
+                  ? 'confirmed_failed'
+                  : result.status === 'post_state_unverified'
+                    ? 'post_state_unverified'
+                    : 'pending_reconciliation',
+            });
+          }
+        } catch {
+          if (active) {
+            setHeartbeatAttemptMessage({
+              tone: 'warning',
+              text:
+                'The existing heartbeat transaction could not be checked. ' +
+                'No new transaction was submitted.',
+            });
+          }
+        } finally {
+          if (active) setIsHeartbeatAttemptInFlight(false);
+        }
+      };
+      void reconcileOnFocus();
+      return () => {
+        active = false;
+      };
+    }, [
+      connected,
+      heartbeatOperationService,
+      loadVaultState,
+      publicKey,
+      recordAuthoritativeUnattributedHeartbeat,
+      recordConfirmedHeartbeat,
+      refreshAuthoritativeDeadline,
+    ]),
+  );
+
+  const displayedHeartbeatTx = currentHeartbeatTx ?? (
+    lastConfirmedHeartbeatTx
+      ? {
+          signature: lastConfirmedHeartbeatTx,
+          status: 'confirmed_success' as const,
+        }
+      : null
+  );
+
+  const displayedHeartbeatTxLabel =
+    displayedHeartbeatTx?.status === 'confirmed_success'
+      ? 'Last confirmed tx'
+      : displayedHeartbeatTx?.status === 'confirmed_failed'
+        ? 'Confirmed failed tx'
+        : displayedHeartbeatTx?.status === 'confirmation_unknown'
+          ? 'Submitted tx — confirmation unknown'
+          : displayedHeartbeatTx?.status === 'submission_unknown'
+            ? 'Expected tx — submission unknown'
+            : displayedHeartbeatTx?.status === 'pending_reconciliation'
+              ? 'Pending reconciliation'
+              : 'Tx — heartbeat state unverified';
+
+  const authoritativeSnapshot =
+    'snapshot' in deadlineState
+      ? deadlineState.snapshot
+      : deadlineState.lastVerified;
+  const formatRelativeToChain = (timestamp: number): string => {
+    if (!authoritativeSnapshot) return 'N/A';
+    const delta = timestamp - authoritativeSnapshot.chainUnixTime;
+    if (delta > 0) return `in ${formatDuration(delta)}`;
+    const elapsed = Math.abs(delta);
+    return elapsed < 60 ? 'just now' : `${formatDuration(elapsed)} ago`;
+  };
+  const lastBeatLabel = authoritativeSnapshot
+    ? formatRelativeToChain(authoritativeSnapshot.lastHeartbeat)
+    : 'N/A';
+  const nextDueLabel = authoritativeSnapshot
+    ? authoritativeSnapshot.chainUnixTime > authoritativeSnapshot.nextDue
+      ? 'Overdue'
+      : formatRelativeToChain(authoritativeSnapshot.nextDue)
+    : 'N/A';
+
+  const deadlineStatusMessage =
+    deadlineState.status === 'verified_projected'
+      ? 'Deadline display is projected from a recent verified Solana chain-time observation.'
+      : deadlineState.status === 'checking' ||
+          deadlineState.status === 'stale'
+        ? 'Checking the current on-chain deadline…'
+        : deadlineState.status === 'rpc_unavailable' ||
+            deadlineState.status === 'chain_time_unavailable'
+          ? 'The on-chain heartbeat deadline could not be refreshed. The last verified state is shown as stale; no execution action was started by this device.'
+          : deadlineState.status === 'invalid_on_chain_state'
+            ? 'The vault’s on-chain heartbeat state could not be validated. Deadline and escalation actions are paused on this device.'
+              : deadlineState.status ===
+                'stage_configuration_invalid'
+              ? 'The warning-stage configuration does not match the vault’s on-chain grace period. This device will not infer escalation or start execution until the configuration is corrected.'
+              : deadlineState.status === 'vault_missing'
+                ? 'The canonical vault account could not be found. Deadline monitoring is paused on this device; execution was not inferred.'
+                : deadlineState.status === 'vault_inactive'
+                  ? 'This vault is inactive. Heartbeat deadline monitoring and execution actions are stopped on this device.'
+                  : deadlineState.status === 'vault_executed'
+                    ? 'This vault is already executed on-chain. Deadline monitoring and execution actions have stopped.'
+              : null;
 
   const beneficiaryCount = vaultData?.beneficiaries?.length ?? storeBeneficiaryCount;
 
@@ -449,18 +714,61 @@ export function DashboardScreen() {
         </View>
       )}
 
+      {deadlineStatusMessage && isVaultSetup && !vaultData?.executed && (
+        <View style={styles.deadlineStatusBanner}>
+          <MaterialCommunityIcons
+            name={
+              deadlineState.status === 'verified_projected'
+                ? 'clock-check-outline'
+                : 'cloud-sync-outline'
+            }
+            size={16}
+            color={
+              deadlineState.status === 'verified_projected'
+                ? COLORS.textSecondary
+                : COLORS.warning
+            }
+          />
+          <Text
+            style={[
+              styles.deadlineStatusText,
+              deadlineState.status === 'verified_projected' && {
+                color: COLORS.textSecondary,
+              },
+            ]}
+          >
+            {deadlineStatusMessage}
+          </Text>
+        </View>
+      )}
+
       {/* === VAULT STATUS CARD (MOVED TO TOP) === */}
       {isVaultSetup && !vaultData?.executed && (
         <View style={[styles.vaultCard, { borderColor: cfg.borderColor }]}>
           {/* Status Header */}
-          <StatusIndicator stage={escalationStage} isActive={vaultData?.active ?? false} />
+          <StatusIndicator
+            stage={escalationStage}
+            isActive={vaultData?.active ?? false}
+            deadlineVerification={
+              deadlineState.status === 'verified_current' ||
+              deadlineState.status === 'verified_projected'
+                ? deadlineState.status
+                : 'unverified'
+            }
+          />
 
           {/* Heartbeat Button */}
           <View style={styles.heartbeatContainer}>
             <HeartbeatButton
               onPress={handleHeartbeat}
-              disabled={!isVaultSetup}
-              loading={isConfirming}
+              disabled={!isVaultSetup || isHeartbeatAttemptInFlight}
+              loading={isHeartbeatAttemptInFlight}
+              confirmationSucceeded={heartbeatConfirmationSucceeded}
+              label={
+                isHeartbeatAttemptInFlight
+                  ? 'Verifying heartbeat…'
+                  : undefined
+              }
               stage={escalationStage}
               secondsRemaining={secondsRemaining}
             />
@@ -485,30 +793,79 @@ export function DashboardScreen() {
             </View>
           </View>
 
-          {/* On-chain heartbeat failed — liveness NOT recorded on-chain. Surface it so the
-              owner knows to retry (a silent failure lets the on-chain clock keep aging). */}
-          {onChainBeatError ? (
+          {/* Typed attempt state remains distinct from confirmed success. */}
+          {heartbeatAttemptMessage ? (
             <View style={styles.onChainTxRow}>
-              <MaterialCommunityIcons name="alert" size={10} color={COLORS.warning} />
-              <Text style={[styles.onChainTxText, { color: COLORS.warning }]}>
-                On-chain heartbeat didn't record — liveness not updated. Check your network and tap again.
+              <MaterialCommunityIcons
+                name={
+                  heartbeatAttemptMessage.tone === 'pending'
+                    ? 'clock-outline'
+                    : 'alert'
+                }
+                size={10}
+                color={
+                  heartbeatAttemptMessage.tone === 'pending'
+                    ? COLORS.accent
+                    : heartbeatAttemptMessage.tone === 'critical'
+                      ? COLORS.critical
+                      : COLORS.warning
+                }
+              />
+              <Text
+                style={[
+                  styles.onChainTxText,
+                  {
+                    color:
+                      heartbeatAttemptMessage.tone === 'pending'
+                        ? COLORS.accent
+                        : heartbeatAttemptMessage.tone === 'critical'
+                          ? COLORS.critical
+                          : COLORS.warning,
+                  },
+                ]}
+              >
+                {heartbeatAttemptMessage.text}
               </Text>
             </View>
-          ) : (
-            lastOnChainTx && (
-              <TouchableOpacity
-                style={styles.onChainTxRow}
-                onPress={() => Linking.openURL(explorerTx(lastOnChainTx))}
-              >
-                <MaterialCommunityIcons name="open-in-new" size={10} color={COLORS.accent} />
-                <Text style={styles.onChainTxText}>
-                  Last tx: {lastOnChainTx.slice(0, 8)}...{lastOnChainTx.slice(-4)}
-                </Text>
-              </TouchableOpacity>
-            )
+          ) : null}
+          {displayedHeartbeatTx && (
+            <TouchableOpacity
+              style={styles.onChainTxRow}
+              onPress={() =>
+                Linking.openURL(
+                  explorerTx(displayedHeartbeatTx.signature),
+                )
+              }
+            >
+              <MaterialCommunityIcons
+                name="open-in-new"
+                size={10}
+                color={
+                  displayedHeartbeatTx.status === 'confirmed_success'
+                    ? COLORS.accent
+                    : COLORS.warning
+                }
+              />
+              <Text style={styles.onChainTxText}>
+                {displayedHeartbeatTxLabel}:{' '}
+                {displayedHeartbeatTx.signature.slice(0, 8)}...
+                {displayedHeartbeatTx.signature.slice(-4)}
+              </Text>
+            </TouchableOpacity>
           )}
         </View>
       )}
+
+      {isVaultSetup && vaultData?.active && !vaultData?.executed ? (
+        <AgentFeeCard
+          owner={publicKey}
+          refreshKey={
+            lastConfirmedHeartbeatTx ??
+            currentHeartbeatTx?.signature ??
+            null
+          }
+        />
+      ) : null}
 
       {/* Escalation Banner */}
       {escalationStage > 0 && escalationStage < 4 && (
@@ -917,6 +1274,25 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   demoWarningText: {
+    flex: 1,
+    color: COLORS.warning,
+    fontSize: 11,
+    fontFamily: FONTS.primary,
+    lineHeight: 16,
+  },
+  deadlineStatusBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.22)',
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  deadlineStatusText: {
     flex: 1,
     color: COLORS.warning,
     fontSize: 11,

@@ -65,10 +65,6 @@ export class ExecutionService {
     const ownerWallet = owner.toString();
 
     try {
-      // The client escalation may reach Stage 4 slightly before the on-chain
-      // deadline (clock drift / heartbeat-confirmation lag) — wait it out.
-      await this.waitForOnChainDeadline();
-
       const config = await this.txService.fetchVaultConfig(owner);
       if (!config) return;
 
@@ -319,20 +315,4 @@ export class ExecutionService {
     } catch {}
   }
 
-  private async waitForOnChainDeadline(): Promise<void> {
-    const MAX_WAIT_MS = 120_000;
-    const POLL_INTERVAL_MS = 5_000;
-    const BUFFER_SECONDS = 2;
-    const start = Date.now();
-
-    while (Date.now() - start < MAX_WAIT_MS) {
-      const deadline = await this.txService.getOnChainDeadline(this.ownerPubkey);
-      if (deadline === null) return;
-      const slot = await this.txService.getConnection().getSlot('confirmed');
-      const blockTime = await this.txService.getConnection().getBlockTime(slot);
-      if (blockTime === null) return;
-      if (blockTime > deadline + BUFFER_SECONDS) return;
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-    }
-  }
 }

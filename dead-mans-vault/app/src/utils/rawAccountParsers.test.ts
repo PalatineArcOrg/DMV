@@ -5,6 +5,7 @@ import { PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import {
   parseVaultConfig,
+  parseHeartbeatRecord,
   parseExecutionLog,
   parseAssetPlan,
   parseTokenDist,
@@ -72,6 +73,37 @@ test('valid VaultConfig parses', () => {
   assert.equal(c!.beneficiaries[0].shareBps, 6000);
   assert.equal(c!.heartbeatInterval.toNumber(), 86400);
   assert.equal(c!.active, true);
+});
+
+test('valid HeartbeatRecord parses; foreign and short accounts are rejected', () => {
+  const data = Buffer.concat([
+    disc('HeartbeatRecord'),
+    pk(1).toBuffer(),
+    i64(1000),
+    Buffer.from([2]),
+    (() => {
+      const bytes = Buffer.alloc(8);
+      bytes.writeBigUInt64LE(7n);
+      return bytes;
+    })(),
+    Buffer.from([252]),
+    Buffer.alloc(32),
+  ]);
+  const heartbeat = parseHeartbeatRecord(acct(data), PROGRAM);
+  assert.ok(heartbeat);
+  assert.equal(heartbeat!.vault.equals(pk(1)), true);
+  assert.equal(heartbeat!.lastHeartbeat.toNumber(), 1000);
+  assert.equal(heartbeat!.lastMethod, 2);
+  assert.equal(heartbeat!.totalHeartbeats, 7n);
+  assert.equal(heartbeat!.bump, 252);
+  assert.equal(parseHeartbeatRecord(acct(data, pk(2)), PROGRAM), null);
+  assert.equal(
+    parseHeartbeatRecord(acct(data.subarray(0, 50)), PROGRAM),
+    null,
+  );
+  const invalidMethod = Buffer.from(data);
+  invalidMethod[48] = 5;
+  assert.equal(parseHeartbeatRecord(acct(invalidMethod), PROGRAM), null);
 });
 
 test('VaultConfig wrong owner → null', () => {

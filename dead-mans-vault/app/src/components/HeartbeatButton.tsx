@@ -15,6 +15,7 @@ interface HeartbeatButtonProps {
   onPress: () => void;
   disabled?: boolean;
   loading?: boolean;
+  confirmationSucceeded?: boolean;
   label?: string;
   stage?: EscalationStage;
   secondsRemaining?: number;
@@ -47,12 +48,12 @@ export function HeartbeatButton({
   onPress,
   disabled = false,
   loading = false,
+  confirmationSucceeded = false,
   label,
   stage = 0,
   secondsRemaining = 0,
 }: HeartbeatButtonProps) {
   const [confirmed, setConfirmed] = useState(false);
-  const wasLoading = useRef(false);
 
   const cfg = STAGE_CONFIG[stage] || STAGE_CONFIG[0];
   const buttonSize = getButtonSize(stage);
@@ -204,9 +205,10 @@ export function HeartbeatButton({
     return () => clearInterval(interval);
   }, [stage]);
 
-  // Detect loading -> not loading transition to show confirmed state
+  // Success is explicit: a readiness failure also ends a loading state, but
+  // must never render "Vault Secured".
   useEffect(() => {
-    if (wasLoading.current && !loading) {
+    if (confirmationSucceeded) {
       setConfirmed(true);
       checkScale.setValue(0);
       Animated.spring(checkScale, {
@@ -218,8 +220,8 @@ export function HeartbeatButton({
       const timer = setTimeout(() => setConfirmed(false), 800);
       return () => clearTimeout(timer);
     }
-    wasLoading.current = loading;
-  }, [loading]);
+    setConfirmed(false);
+  }, [confirmationSucceeded]);
 
   const handlePress = useCallback(() => {
     if (confirmed) return;

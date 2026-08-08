@@ -3,7 +3,10 @@ import { EscalationStage, EscalationState } from '../types';
 
 interface EscalationStore {
   state: EscalationState;
-  setStage: (stage: EscalationStage) => void;
+  setStage: (
+    stage: EscalationStage,
+    observedChainTime: number,
+  ) => void;
   setExecutionDeadline: (deadline: number) => void;
   setExecutionStarted: (started: boolean) => void;
   recordNotification: () => void;
@@ -21,12 +24,12 @@ const initialState: EscalationState = {
 export const useEscalationStore = create<EscalationStore>((set) => ({
   state: initialState,
 
-  setStage: (stage) =>
+  setStage: (stage, observedChainTime) =>
     set((prev) => ({
       state: {
         ...prev.state,
         stage,
-        stageEnteredAt: Math.floor(Date.now() / 1000),
+        stageEnteredAt: observedChainTime,
         executionDeadline: null,
         lastNotificationAt: null,
       },

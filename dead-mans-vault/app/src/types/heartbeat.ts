@@ -5,6 +5,21 @@ export type HeartbeatMethod =
   | 'pin_challenge'
   | 'hardware_switch';
 
+export const HEARTBEAT_INSTRUCTION_METHOD: Record<
+  HeartbeatMethod,
+  | 'activeTap'
+  | 'biometricConfirm'
+  | 'onChainActivity'
+  | 'pinChallenge'
+  | 'hardwareSwitch'
+> = {
+  active_tap: 'activeTap',
+  biometric_confirm: 'biometricConfirm',
+  on_chain_activity: 'onChainActivity',
+  pin_challenge: 'pinChallenge',
+  hardware_switch: 'hardwareSwitch',
+};
+
 export interface HeartbeatConfig {
   methods: HeartbeatMethod[];
   intervalSeconds: number;
