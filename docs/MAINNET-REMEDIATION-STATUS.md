@@ -5,7 +5,7 @@ sanitized companion to a private authoritative implementation plan (see **Plan a
 It intentionally contains **no exploit mechanics** — only phase/branch/status information.
 
 **Overall status:** IN PROGRESS — Phases 1–3 complete (merged to `devnet`); Phase 4 in review (draft PR,
-not merged); Phases 5–11 not started. **Phase 11 is mainnet-blocking and was added 2026-08-08.**
+not merged); Phases 5–13 not started except Phase 12 (fix branch open). **Phases 11, 12 and 13 are mainnet-blocking, all added 2026-08-08 from Phase 4 on-device acceptance.**
 **Mainnet:** NO-GO until the Track B phases (6–10) ship and pass an external implementation review.
 **Last updated:** 2026-08-08.
 
@@ -46,6 +46,8 @@ remediation log. This file is updated as phases complete.
 | 9 | Post-finalization token recovery + client alignment | `wp2-post-finalize-token-recovery` | B | Not started | — |
 | 10 | Regression, fuzzing, docs, external-review package | `wp2-mainnet-review-candidate` | B | Not started | — |
 | 11 | **Agent-rotation preflight recovery** | `wp1-rotation-preflight-recovery` | A | 🔴 **Not started — MAINNET BLOCKING** | — |
+| 12 | **Startup key-presence check requires authentication** | `wp1-startup-key-check-fix` | A | 🟠 **Fix branch open — MAINNET BLOCKING** | 8 new tests; app 562/562; tsc clean |
+| 13 | Heartbeat readiness `invalid_on_chain_state` on device | `wp1-heartbeat-readiness-invalid-state` | A | 🔴 **Not started — under investigation, MAINNET BLOCKING** | — |
 
 Phases run one at a time; each is implemented on its own branch, fully tested, reviewed, and merged
 before the next begins.
@@ -93,6 +95,62 @@ Interim mitigation: a standalone break-glass client that submits owner-signed `r
 directly, proven end-to-end on a disposable devnet vault (create → destroy agent key → rotate
 with the owner key alone → new agent heartbeats → old agent rejected). It is an operator tool,
 not a user-accessible remedy, so it does not clear this phase.
+
+### Phase 12 — startup key-presence check requires authentication (false "Agent Recovery Required")
+
+**MAINNET BLOCKING.** Reproduced on a Seeker 2026-08-08 during Phase 4 on-device
+acceptance, upgrading v1.13.20 → 1.13.21.
+
+A fingerprint prompt appears at cold start and is followed by **"Agent Recovery
+Required — The on-chain heartbeat agent does not match a usable active key on this
+installation."** The key is intact: Settings then shows the agent matching on-chain
+(`Create candidate` offered, no recovery warning).
+
+Phase 4 changed what "do I have a key?" means:
+
+| | v1.13.20 | Phase 4 |
+|---|---|---|
+| `getAgentPublicKey()` | `getItemAsync(PUBLIC_KEY)` — unauthenticated | `getPublicKey('active')` → `readSlot()` |
+| `hasAgentKey()` | `getItemAsync(PUBLIC_KEY)` — unauthenticated | `hasCompleteSlot('active')` → `readSlot()` |
+
+`readSlot()` loads the **secret** under `requireAuthentication` when `auth === '1'`.
+`RootNavigator` runs the check at launch, in a background async block with no resumed
+Activity, so the read cannot prompt, throws, and a healthy key is reported missing.
+
+Impact is worse than a cosmetic alert: it tells owners their agent is unusable and
+directs them to the recovery flow. An owner who acts on it replaces a working key — and
+under Phase 11 may find rotation refused midway, leaving them worse off than if they had
+ignored the app.
+
+**Fix (this branch):** add metadata-only `hasStoredSlot` / `getStoredPublicKey`, sharing
+`readSlot`'s shape rule (including the legacy-active allowance) but never touching the
+secret, and point the two startup-facing `KeyManager` methods at them. Presence answers
+"is a key stored?"; loading for signature still requires authentication, so custody is
+unchanged. Eight tests model a cold start where every authenticated read throws; three
+fail if the fix is reverted.
+
+### Phase 13 — heartbeat readiness returns `invalid_on_chain_state` on device
+
+**MAINNET BLOCKING — cause not yet established.** Same session. Tapping heartbeat is
+refused with *"The on-chain vault state could not be validated safely. No local or
+on-chain heartbeat was recorded."* (`invalid_on_chain_state`), so **no heartbeat can be
+submitted** — the product's core function.
+
+Established so far:
+
+- The chain data is valid. Running the app's own `parseVaultConfig` / `parseHeartbeatRecord`
+  against the live accounts off-device passes every check readiness performs:
+  discriminator, owner, bump 254 = canonical, active, heartbeat vault-ref and bump,
+  interval 604800 / grace 1468800, `total_heartbeats` 3.
+- A `readBigUInt64LE` / `BigInt` explanation was **investigated and refuted**:
+  `DefaultAgentRotationService` calls the same `parseHeartbeatRecord` and the rotation
+  card renders healthy on-device, so the parser works and Hermes has `BigInt`.
+- Readiness reaches `invalid_on_chain_state` only at lines 116–200, **before** the key is
+  loaded at line 207 — so this is independent of Phase 12.
+
+Diagnosis needs `adb logcat -d -s ReactNativeJS:E` from a host with the device attached.
+Note that `AgentReadinessService` catches parse throws and collapses them into one opaque
+state; whatever the fix, that catch should preserve the underlying reason.
 
 ---
 

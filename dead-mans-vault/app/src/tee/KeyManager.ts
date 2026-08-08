@@ -60,12 +60,17 @@ export class KeyManager {
     return this.slots.generateActive();
   }
 
+  /**
+   * Metadata-only: no biometric prompt. Startup callers ask this to decide whether
+   * a key exists, and must not be told "no" because the device could not prompt.
+   */
   async getAgentPublicKey(): Promise<string | null> {
-    return this.slots.getPublicKey('active');
+    return this.slots.getStoredPublicKey('active');
   }
 
+  /** Metadata-only presence check; raises no biometric prompt. See getAgentPublicKey. */
   async hasAgentKey(): Promise<boolean> {
-    return this.slots.hasCompleteSlot('active');
+    return this.slots.hasStoredSlot('active');
   }
 
   async getKeypair(): Promise<Keypair> {
