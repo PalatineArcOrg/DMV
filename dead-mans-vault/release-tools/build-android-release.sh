@@ -77,6 +77,29 @@ APK="$(ls -1 "$APP"/android/app/build/outputs/apk/release/*.apk 2>/dev/null | he
 [ -n "$APK" ] && [ -f "$APK" ] || fail "release APK not found after gradle build"
 APK_SHA="$(sha256sum "$APK" | awk '{print $1}')"
 
+# 4b. HARD CHECK: the RPC host must actually be present in the shipped bundle.
+#
+# EXPO_PUBLIC_* are inlined at bundle time and do not reliably survive; a build run
+# without .env produced an APK whose DEFAULT_RPC_URL was empty. Preflight now rejects
+# an unset RPC, but that only proves the value was in the ENV -- this proves it
+# reached the BUNDLE. Without it the app cannot reach Solana at all and reports only
+# an opaque "on-chain vault state could not be validated safely".
+RPC_HOST=""
+if [ -n "${EXPO_PUBLIC_RPC_URL:-}" ]; then
+  RPC_HOST="$(printf '%s' "$EXPO_PUBLIC_RPC_URL" | sed -E 's#^[a-zA-Z]+://##; s#^.*@##; s#[/?].*$##')"
+elif [ -f "$APP/.env" ]; then
+  RPC_HOST="$(sed -n 's/^EXPO_PUBLIC_RPC_URL=//p' "$APP/.env" | head -1 | sed -E 's#^[a-zA-Z]+://##; s#^.*@##; s#[/?].*$##')"
+fi
+[ -n "$RPC_HOST" ] || fail "could not resolve an RPC host to verify in the bundle"
+BUNDLE_TMP="$(mktemp -d)"
+unzip -o -q "$APK" 'assets/index.android.bundle' -d "$BUNDLE_TMP" || fail "APK has no assets/index.android.bundle"
+if ! grep -qa -- "$RPC_HOST" "$BUNDLE_TMP/assets/index.android.bundle"; then
+  rm -rf "$BUNDLE_TMP"
+  fail "RPC host '$RPC_HOST' is NOT in the JS bundle -- this build had no usable EXPO_PUBLIC_RPC_URL. Refusing to attest."
+fi
+rm -rf "$BUNDLE_TMP"
+log "bundle check: RPC host '$RPC_HOST' present in assets/index.android.bundle"
+
 # 5. Attestation (build-artifact dir — gitignored).
 ATT="$(dirname "$APK")/release-attestation.json"
 cat >"$ATT" <<JSON
@@ -85,6 +108,7 @@ cat >"$ATT" <<JSON
   "commit": "$COMMIT",
   "workingTreeClean": $CLEAN,
   "expectedCluster": "$CLUSTER",
+  "rpcHost": "$RPC_HOST",
   "releaseManifestSha256": "$MANIFEST_SHA",
   "idlSha256": "$IDL_SHA",
   "apk": "$(basename "$APK")",

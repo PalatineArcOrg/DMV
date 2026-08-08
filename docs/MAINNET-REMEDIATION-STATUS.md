@@ -47,7 +47,7 @@ remediation log. This file is updated as phases complete.
 | 10 | Regression, fuzzing, docs, external-review package | `wp2-mainnet-review-candidate` | B | Not started | — |
 | 11 | **Agent-rotation preflight recovery** | `wp1-rotation-preflight-recovery` | A | 🔴 **Not started — MAINNET BLOCKING** | — |
 | 12 | **Startup key-presence check requires authentication** | `wp1-startup-key-check-fix` | A | 🟠 **Fix branch open — MAINNET BLOCKING** | 8 new tests; app 562/562; tsc clean |
-| 13 | Heartbeat readiness `invalid_on_chain_state` on device | `wp1-heartbeat-readiness-invalid-state` | A | 🔴 **Not started — under investigation, MAINNET BLOCKING** | — |
+| 13 | **Release preflight must fail closed on a missing/invalid RPC URL** | `wp1-preflight-rpc-fail-closed` | A | 🟠 **Fix branch open — MAINNET BLOCKING** | 9 new preflight tests (27 total); 7 fail if the gate is reverted |
 
 Phases run one at a time; each is implemented on its own branch, fully tested, reviewed, and merged
 before the next begins.
@@ -129,28 +129,57 @@ secret, and point the two startup-facing `KeyManager` methods at them. Presence 
 unchanged. Eight tests model a cold start where every authenticated read throws; three
 fail if the fix is reverted.
 
-### Phase 13 — heartbeat readiness returns `invalid_on_chain_state` on device
+### Phase 13 — release preflight passes a build with no RPC URL
 
-**MAINNET BLOCKING — cause not yet established.** Same session. Tapping heartbeat is
-refused with *"The on-chain vault state could not be validated safely. No local or
-on-chain heartbeat was recorded."* (`invalid_on_chain_state`), so **no heartbeat can be
-submitted** — the product's core function.
+**MAINNET BLOCKING.** Found 2026-08-08 when a Phase 4 acceptance APK proved unable to
+reach Solana.
 
-Established so far:
+`EXPO_PUBLIC_RPC_URL` is inlined into the JS bundle at build time and becomes
+`DEFAULT_RPC_URL`. The release preflight validated the RPC URL **only for mainnet
+builds** — for devnet it merely formatted the value for display:
 
-- The chain data is valid. Running the app's own `parseVaultConfig` / `parseHeartbeatRecord`
-  against the live accounts off-device passes every check readiness performs:
-  discriminator, owner, bump 254 = canonical, active, heartbeat vault-ref and bump,
-  interval 604800 / grace 1468800, `total_heartbeats` 3.
-- A `readBigUInt64LE` / `BigInt` explanation was **investigated and refuted**:
-  `DefaultAgentRotationService` calls the same `parseHeartbeatRecord` and the rotation
-  card renders healthy on-device, so the parser works and Hermes has `BigInt`.
-- Readiness reaches `invalid_on_chain_state` only at lines 116–200, **before** the key is
-  loaded at line 207 — so this is independent of Phase 12.
+```js
+`rpc=${rpc ? redact(rpc) : '(unset)'}  notify=${notify ? redact(notify) : '(unset)'}`
+```
 
-Diagnosis needs `adb logcat -d -s ReactNativeJS:E` from a host with the device attached.
-Note that `AgentReadinessService` catches parse throws and collapses them into one opaque
-state; whatever the fix, that catch should preserve the underlying reason.
+So a devnet release built without `.env` printed `rpc=(unset)`, **passed**, and was
+attested as a valid production artifact. The resulting APK had an empty
+`DEFAULT_RPC_URL`. Constructing the RPC connection then throws, and because
+`HeartbeatCoordinator` collapses any throw from readiness into one state, the owner
+sees only *"The on-chain vault state could not be validated safely. No local or
+on-chain heartbeat was recorded."* — with no indication that the build has no
+endpoint. The deadline fails identically. **Heartbeats are impossible and the cause is
+invisible.**
+
+This directly contradicts Phase 1's goal that *"a production client build cannot bypass
+its network/manifest preflight"*: the gate existed and the absence sailed through it.
+
+**Fix (this branch):**
+
+- `validateRpcUrl` runs on **every** cluster: present, parseable, HTTPS, no embedded
+  credentials. Absence is an error, not a formatted `(unset)`.
+- Cluster/host consistency, asymmetric by design: a mainnet build rejects
+  devnet/testnet/local hosts; a devnet build rejects mainnet hosts. A devnet host is
+  deliberately **not** required to contain the literal "devnet" — neutral first-party
+  proxy hostnames are legitimate devnet endpoints and such a rule would reject them.
+- The release wrapper now greps the built `assets/index.android.bundle` for the
+  resolved RPC host and **refuses to attest** if absent. Preflight proves the value was
+  in the environment; this proves it reached the bundle.
+- The attestation records `rpcHost`, so an artifact's endpoint is auditable after the
+  fact.
+
+**The regression test is the absence**, since silent absence was the gap: nine tests
+cover unset, empty/whitespace, malformed, non-HTTPS, mainnet-host-on-devnet, embedded
+credentials (asserting the secret never reaches errors or summary), plus positive cases
+for a neutral proxy host and a real devnet provider. Seven fail if the gate is removed.
+
+> **Withdrawn:** an earlier Phase 13 recorded a suspected on-device defect where
+> heartbeat readiness returned `invalid_on_chain_state`. That was **diagnosed in error** —
+> the cause was this preflight gap producing an RPC-less APK, not application code. A
+> `BigInt`/`readBigUInt64LE` hypothesis raised during that investigation was also
+> refuted (the rotation card exercises the same parser successfully on-device). Both are
+> recorded here so neither is re-investigated.
+
 
 ---
 

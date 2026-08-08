@@ -141,6 +141,58 @@ on-chain agent; the dashboard reaches a verified deadline state; a heartbeat suc
 **STOP if:** the dashboard reports `agent_missing` or `agent_mismatch` after an upgrade
 that changed no key. That is the regression this whole tier exists to catch.
 
+### T2.1 result — 2026-08-08: PASS (key survival)
+
+A SecureStore slot written by v1.13.20 was read by Phase 4 for the first time on a
+Seeker and the key survived: the Settings rotation card showed the agent matching the
+on-chain value, with no "Recovery required". `isLegacyActive` is validated on real
+hardware.
+
+**Provenance caveat, recorded deliberately.** The evidence was gathered while the device
+had a **custom RPC override** set in Settings. That mattered, because the APK used for
+this run was built without `.env` and therefore had no default RPC (see remediation
+Phase 13) — the override was the only reason the app could reach chain at all.
+
+The result nevertheless stands, because **key survival is RPC-independent**:
+`hasAgentKey()` / `getAgentPublicKey()` read SecureStore only. The RPC was needed solely
+to fetch the on-chain agent for comparison, and that fetch demonstrably succeeded — the
+card rendered the matching pubkey. A different endpoint could not have made a missing
+key appear present.
+
+Two criteria did **not** clear on that run and are re-run against a corrected build:
+
+- the cold-start "Agent Recovery Required" alert — a false negative, tracked as
+  Phase 12; its criterion moves to the first build containing that fix;
+- heartbeat submission and deadline rendering — blocked by the RPC-less build, retested
+  per the acceptance run below.
+
+### T2.1b — acceptance run for a corrected build
+
+Run against an APK whose attestation carries a non-empty `rpcHost` and which passed the
+wrapper's bundle check. **Leave any custom RPC override in place** until the corrected
+build is installed and (a) passes — the override is what keeps the device usable.
+
+**(a) Heartbeat succeeds.** Tap heartbeat. It must reach `confirmed_on_chain`, not
+`invalid_on_chain_state`. Verify **on-chain via an independent RPC** (not the app's) that
+`total_heartbeats` advanced **3 → 4** and `last_heartbeat` moved. The on-chain read is
+the verdict; the UI is corroboration.
+
+**(b) Deadline renders verified.** The status card must show a real countdown, not
+"Deadline unverified". *Depends on production mode being on:* stage durations must sum
+to the on-chain grace (259,200+604,800+604,800 = 1,468,800 = 17d). In demo mode the sum
+is 90s and `stage_configuration_invalid` is expected and correct — confirm the mode
+before reading this as a failure.
+
+**(c) No regression on the rotation card.** Agent still matches on-chain, vault Active,
+interval/grace correct, no "Recovery required". This path worked on the previous build;
+it must not break.
+
+**Not in this run: the cold-start alert.** The false "Agent Recovery Required" is
+Phase 12 and is not fixed in a build made from the Phase 4 head. That criterion belongs
+to the **first build containing `wp1-startup-key-check-fix`** — i.e. after that branch is
+reviewed and merged. Expect the alert to still appear here; it is a known false negative
+and not a T2.1b failure.
+
 ### T2.2 — Normal heartbeat
 
 Readiness passes → fee state shown → tap → **no premature success**. The button must
