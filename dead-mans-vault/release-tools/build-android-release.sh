@@ -41,6 +41,34 @@ fi
 # 2. Fail-closed pre-build checks.
 log "verify-manifest"
 node "$SCRIPT_DIR/verify-manifest.mjs" || fail "manifest verification failed"
+# Preflight validates the process environment, but Metro inlines EXPO_PUBLIC_* from
+# the app's .env at bundle time. Those were never connected: a build could satisfy
+# preflight and bundle something else, or -- as happened on 2026-08-08 -- bundle
+# nothing while preflight printed "rpc=(unset)" and passed. Load .env into the
+# environment first so preflight validates the values Metro will actually use.
+#
+# Only EXPO_PUBLIC_* KEY=VALUE lines are read, and nothing is evaluated as shell.
+# An explicitly exported variable wins, so callers can still override.
+if [ -f "$APP/.env" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      EXPO_PUBLIC_*=*)
+        key="${line%%=*}"
+        case "$key" in
+          *[!A-Z0-9_]*) continue ;;
+        esac
+        if [ -z "$(eval "printf '%s' \"\${$key:-}\"")" ]; then
+          value="${line#*=}"
+          value="${value%\"}"; value="${value#\"}"
+          value="${value%\'}"; value="${value#\'}"
+          export "$key=$value"
+        fi
+        ;;
+    esac
+  done < "$APP/.env"
+  log "loaded EXPO_PUBLIC_* from $APP/.env for preflight + bundling"
+fi
+
 log "preflight (app surface, cluster=$CLUSTER)"
 node "$SCRIPT_DIR/preflight-prod-build.mjs" --surface app || fail "app preflight failed"
 
