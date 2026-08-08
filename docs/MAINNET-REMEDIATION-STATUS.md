@@ -5,9 +5,9 @@ sanitized companion to a private authoritative implementation plan (see **Plan a
 It intentionally contains **no exploit mechanics** — only phase/branch/status information.
 
 **Overall status:** IN PROGRESS — Phases 1–3 complete (merged to `devnet`); Phase 4 in review (draft PR,
-not merged); Phases 5–10 not started.
+not merged); Phases 5–11 not started. **Phase 11 is mainnet-blocking and was added 2026-08-08.**
 **Mainnet:** NO-GO until the Track B phases (6–10) ship and pass an external implementation review.
-**Last updated:** 2026-07-31.
+**Last updated:** 2026-08-08.
 
 ---
 
@@ -45,9 +45,54 @@ remediation log. This file is updated as phases complete.
 | 8 | Non-closing late-SOL distribution | `wp2-late-sol-sweep` | B | Not started | — |
 | 9 | Post-finalization token recovery + client alignment | `wp2-post-finalize-token-recovery` | B | Not started | — |
 | 10 | Regression, fuzzing, docs, external-review package | `wp2-mainnet-review-candidate` | B | Not started | — |
+| 11 | **Agent-rotation preflight recovery** | `wp1-rotation-preflight-recovery` | A | 🔴 **Not started — MAINNET BLOCKING** | — |
 
 Phases run one at a time; each is implemented on its own branch, fully tested, reviewed, and merged
 before the next begins.
+
+### Phase 11 — agent-rotation preflight refuses recovery in the states it exists to fix
+
+**MAINNET BLOCKING.** Found 2026-08-08 while establishing recovery paths ahead of on-device
+Phase 4 acceptance.
+
+The app cannot rotate the agent key in exactly the situations where rotation is the remedy.
+`AgentRotationCoordinator.commonPreflight` resolves the on-chain agent against local
+SecureStore and refuses unless it is found in the **active** slot:
+
+```ts
+const stored = await dependencies.resolveStoredAgent(preflight.value.state.agent.toBase58());
+if (stored.status !== 'active_match') return { status: 'active_agent_mismatch' };
+```
+
+`commonPreflight` gates **both** `createCandidate` and `rotate`, so a user in a broken state
+cannot even generate a candidate:
+
+| Broken state | `resolveForOnChainPublicKey` | Rotation |
+|---|---|---|
+| Key lost or unreadable after an upgrade/reinstall | `no_match` | refused |
+| Slot present but fails validation | `corrupt_slot` | refused |
+| Key survives only in the `previous` slot | `previous_match` | refused |
+
+The restriction is client-side only. On-chain `rotate_agent` takes three accounts — `owner`
+(Signer), `vault_config`, `heartbeat_record` — and the old agent never signs, so the protocol
+permits exactly the recovery the app blocks. The web owner console has no rotation path, so
+there is currently **no shipped route** for an owner whose agent key is gone.
+
+Impact: such an owner cannot restore liveness through any first-party client. The switch keeps
+counting down while the app reports rotation unavailable. On mainnet that is a path to an
+unwanted distribution with no user-accessible remedy.
+
+Proposed fix (design only — **not implemented**): allow owner-signed rotation to proceed when
+resolution is `no_match`, `corrupt_slot` or `previous_match`. None of those weakens the
+guarantee — owner authority plus candidate possession is unchanged; only the *old* key's
+whereabouts differ. Keep `active_match` as the normal path and keep refusing
+`multiple_matches`. Requires review of the WP 4.7 promotion invariants, which assume the old
+active key is present and readable (`promoteCandidate` requires `active.publicKey === oldAgent`).
+
+Interim mitigation: a standalone break-glass client that submits owner-signed `rotate_agent`
+directly, proven end-to-end on a disposable devnet vault (create → destroy agent key → rotate
+with the owner key alone → new agent heartbeats → old agent rejected). It is an operator tool,
+not a user-accessible remedy, so it does not clear this phase.
 
 ---
 
@@ -64,6 +109,7 @@ before the next begins.
 8. **Late-SOL distribution** — a repeatable, non-destructive sweep of post-finalization SOL to the deterministic largest-share beneficiary.
 9. **Post-finalization recovery** — executors/keeper continue token/NFT recovery after SOL finalization; all removed-instruction call sites are gone across app/web/keeper/notify.
 10. **Review candidate** — full regression + fuzz suite, migrated tests, coordinated deployment runbook, and an external-implementation-review package pinned to the final commit.
+11. **Rotation preflight recovery** — an owner whose agent key is lost, unreadable or only present in the `previous` slot can still rotate through a first-party client; the app stops refusing the one action that restores liveness.
 
 ---
 
