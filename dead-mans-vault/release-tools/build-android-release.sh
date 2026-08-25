@@ -41,6 +41,34 @@ fi
 # 2. Fail-closed pre-build checks.
 log "verify-manifest"
 node "$SCRIPT_DIR/verify-manifest.mjs" || fail "manifest verification failed"
+# Preflight validates the process environment, but Metro inlines EXPO_PUBLIC_* from
+# the app's .env at bundle time. Those were never connected: a build could satisfy
+# preflight and bundle something else, or -- as happened on 2026-08-08 -- bundle
+# nothing while preflight printed "rpc=(unset)" and passed. Load .env into the
+# environment first so preflight validates the values Metro will actually use.
+#
+# Only EXPO_PUBLIC_* KEY=VALUE lines are read, and nothing is evaluated as shell.
+# An explicitly exported variable wins, so callers can still override.
+if [ -f "$APP/.env" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      EXPO_PUBLIC_*=*)
+        key="${line%%=*}"
+        case "$key" in
+          *[!A-Z0-9_]*) continue ;;
+        esac
+        if [ -z "$(eval "printf '%s' \"\${$key:-}\"")" ]; then
+          value="${line#*=}"
+          value="${value%\"}"; value="${value#\"}"
+          value="${value%\'}"; value="${value#\'}"
+          export "$key=$value"
+        fi
+        ;;
+    esac
+  done < "$APP/.env"
+  log "loaded EXPO_PUBLIC_* from $APP/.env for preflight + bundling"
+fi
+
 log "preflight (app surface, cluster=$CLUSTER)"
 node "$SCRIPT_DIR/preflight-prod-build.mjs" --surface app || fail "app preflight failed"
 
@@ -77,6 +105,29 @@ APK="$(ls -1 "$APP"/android/app/build/outputs/apk/release/*.apk 2>/dev/null | he
 [ -n "$APK" ] && [ -f "$APK" ] || fail "release APK not found after gradle build"
 APK_SHA="$(sha256sum "$APK" | awk '{print $1}')"
 
+# 4b. HARD CHECK: the RPC host must actually be present in the shipped bundle.
+#
+# EXPO_PUBLIC_* are inlined at bundle time and do not reliably survive; a build run
+# without .env produced an APK whose DEFAULT_RPC_URL was empty. Preflight now rejects
+# an unset RPC, but that only proves the value was in the ENV -- this proves it
+# reached the BUNDLE. Without it the app cannot reach Solana at all and reports only
+# an opaque "on-chain vault state could not be validated safely".
+RPC_HOST=""
+if [ -n "${EXPO_PUBLIC_RPC_URL:-}" ]; then
+  RPC_HOST="$(printf '%s' "$EXPO_PUBLIC_RPC_URL" | sed -E 's#^[a-zA-Z]+://##; s#^.*@##; s#[/?].*$##')"
+elif [ -f "$APP/.env" ]; then
+  RPC_HOST="$(sed -n 's/^EXPO_PUBLIC_RPC_URL=//p' "$APP/.env" | head -1 | sed -E 's#^[a-zA-Z]+://##; s#^.*@##; s#[/?].*$##')"
+fi
+[ -n "$RPC_HOST" ] || fail "could not resolve an RPC host to verify in the bundle"
+BUNDLE_TMP="$(mktemp -d)"
+unzip -o -q "$APK" 'assets/index.android.bundle' -d "$BUNDLE_TMP" || fail "APK has no assets/index.android.bundle"
+if ! grep -qa -- "$RPC_HOST" "$BUNDLE_TMP/assets/index.android.bundle"; then
+  rm -rf "$BUNDLE_TMP"
+  fail "RPC host '$RPC_HOST' is NOT in the JS bundle -- this build had no usable EXPO_PUBLIC_RPC_URL. Refusing to attest."
+fi
+rm -rf "$BUNDLE_TMP"
+log "bundle check: RPC host '$RPC_HOST' present in assets/index.android.bundle"
+
 # 5. Attestation (build-artifact dir — gitignored).
 ATT="$(dirname "$APK")/release-attestation.json"
 cat >"$ATT" <<JSON
@@ -85,6 +136,7 @@ cat >"$ATT" <<JSON
   "commit": "$COMMIT",
   "workingTreeClean": $CLEAN,
   "expectedCluster": "$CLUSTER",
+  "rpcHost": "$RPC_HOST",
   "releaseManifestSha256": "$MANIFEST_SHA",
   "idlSha256": "$IDL_SHA",
   "apk": "$(basename "$APK")",

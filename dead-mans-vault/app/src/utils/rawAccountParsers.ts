@@ -25,6 +25,62 @@ export interface AccountInfoLike {
   data: Buffer;
 }
 
+/**
+ * Byte-wise prefix compare that depends on nothing but indexing.
+ *
+ * The previous check was `info.data.subarray(0, 8).equals(disc)`. `buffer@6.0.3`
+ * overrides `Buffer.prototype.slice` but NOT `subarray`, so `subarray` comes from
+ * `Uint8Array`. Under Node, species handling hands back a Buffer and `.equals`
+ * exists; under Hermes that is unreliable and `subarray` yields a plain
+ * `Uint8Array`, which has no `.equals` — so the call threw. Because
+ * `isProgramAccount` is invoked OUTSIDE each parser's try/catch, that TypeError
+ * escaped to the caller, where agent readiness reported the opaque
+ * "vault account validation failed" and refused every heartbeat on device.
+ *
+ * Node and CI never saw it: `fetchVaultConfig` tries Anchor first and only falls
+ * back to the raw parse, so before Phase 4 this path was rarely load-bearing.
+ */
+function bytesEqualPrefix(
+  data: Uint8Array,
+  expected: Uint8Array,
+  length: number,
+): boolean {
+  if (data.length < length || expected.length < length) return false;
+  for (let i = 0; i < length; i += 1) {
+    if (data[i] !== expected[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Why the account is not a valid `name` account, or null when it is valid.
+ * Returned as text so a caller can say which check failed instead of collapsing
+ * every cause into one message. Contains only public on-chain facts.
+ */
+export function programAccountProblem(
+  info: AccountInfoLike | null | undefined,
+  name: keyof typeof DISCRIMINATORS,
+  minLen: number,
+  programId: PublicKey,
+): string | null {
+  if (!info) return 'account not found';
+  if (!info.owner) return 'account has no owner field';
+  if (!info.owner.equals(programId)) {
+    return `account owner ${info.owner.toBase58()} is not the DMV program`;
+  }
+  if (!info.data) return 'account has no data';
+  const required = Math.max(minLen, 8);
+  if (info.data.length < required) {
+    return `account data too short: ${info.data.length} < ${required}`;
+  }
+  const disc = DISCRIMINATORS[name];
+  if (!disc) return `no discriminator registered for ${name}`;
+  if (!bytesEqualPrefix(info.data, disc, 8)) {
+    return `discriminator mismatch for ${name}`;
+  }
+  return null;
+}
+
 /** True iff the account is program-owned, long enough, and has the discriminator. */
 export function isProgramAccount(
   info: AccountInfoLike | null | undefined,
@@ -32,10 +88,7 @@ export function isProgramAccount(
   minLen: number,
   programId: PublicKey,
 ): boolean {
-  if (!info || !info.owner || !info.owner.equals(programId)) return false;
-  if (info.data.length < Math.max(minLen, 8)) return false;
-  const disc = DISCRIMINATORS[name];
-  return !!disc && info.data.subarray(0, 8).equals(disc);
+  return programAccountProblem(info, name, minLen, programId) === null;
 }
 
 // Bounds-checked sequential reader; throws RangeError on over-read (callers → null).

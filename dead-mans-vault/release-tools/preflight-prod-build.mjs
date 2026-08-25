@@ -130,6 +130,51 @@ function validateMainnetUrl(label, value, errors) {
   }
 }
 
+function looksMainnetHost(hostname) {
+  return /mainnet/i.test(hostname);
+}
+
+/**
+ * EVERY release build must carry a usable RPC URL, on any cluster.
+ *
+ * This gate previously ran only for mainnet, so a devnet release could be built,
+ * attested and shipped with the RPC env var unset — the summary printed
+ * "rpc=(unset)" and passed. That yields an APK with an empty DEFAULT_RPC_URL: it
+ * cannot reach Solana at all, and the app surfaces only an opaque "on-chain vault
+ * state could not be validated safely". Absence must fail, loudly.
+ *
+ * Host policy is deliberately asymmetric. A mainnet build is rejected if the host
+ * looks devnet/testnet/local; a devnet build is rejected if the host looks
+ * mainnet. We do NOT require a devnet host to literally contain "devnet", because
+ * neutral proxy hostnames (e.g. a first-party RPC proxy) are legitimate devnet
+ * endpoints and such a rule would reject them.
+ */
+function validateRpcUrl(label, value, cluster, errors) {
+  const v = (value ?? '').trim();
+  if (!v) {
+    errors.push(`${label} is not set. Every release build must specify an RPC URL.`);
+    return;
+  }
+  const u = parseUrl(v);
+  if (!u) {
+    errors.push(`${label} is not a valid URL: ${redact(v)}`);
+    return;
+  }
+  if (u.username || u.password) {
+    errors.push(`${label} must not embed credentials (userinfo) in the URL: ${redact(v)}`);
+  }
+  if (u.protocol !== 'https:') {
+    errors.push(`${label} must be HTTPS for a release build: ${redact(v)}`);
+    return;
+  }
+  if (cluster === 'mainnet-beta' && looksNonMainnetHost(u.hostname)) {
+    errors.push(`${label} looks non-mainnet/local for a mainnet build: ${redact(v)}`);
+  }
+  if (cluster === 'devnet' && looksMainnetHost(u.hostname)) {
+    errors.push(`${label} looks like a mainnet host for a devnet build: ${redact(v)}`);
+  }
+}
+
 /**
  * Pure preflight. Returns { ok, errors, summary }. No process.exit, no file reads.
  * @param {{surface:'app'|'web', env:Record<string,string|undefined>, manifest:object}} args
@@ -186,7 +231,10 @@ export function runPreflight({ surface, env = {}, manifest }) {
     );
   }
 
-  // 4. cluster-specific value checks.
+  // 4. RPC is mandatory on EVERY cluster — its absence used to pass silently.
+  validateRpcUrl(keys.rpc, rpc, cluster, errors);
+
+  // 5. cluster-specific value checks.
   if (cluster === 'mainnet-beta') {
     validateMainnetUrl(keys.rpc, rpc, errors);
     validateMainnetUrl(keys.notify, notify, errors);

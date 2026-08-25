@@ -276,3 +276,123 @@ test('mainnet IPv4-mapped loopback [::ffff:127.0.0.1] is rejected', () => {
   assert.equal(r.ok, false);
   assert.match(r.errors.join('\n'), /non-mainnet/);
 });
+
+// ---------------------------------------------------------------------------
+// RPC is mandatory on every cluster.
+//
+// The gate's gap was that ABSENCE passed silently: the RPC URL was validated only
+// for mainnet, so a devnet release built with EXPO_PUBLIC_RPC_URL unset printed
+// "rpc=(unset)" and passed. That shipped an APK with an empty DEFAULT_RPC_URL,
+// unable to reach Solana, reporting only an opaque validation failure in the app.
+// The regression test is therefore the absence itself.
+// ---------------------------------------------------------------------------
+
+test('devnet app build with RPC UNSET fails (the regression this gate missed)', () => {
+  const r = runPreflight({
+    surface: 'app',
+    env: { EXPO_PUBLIC_EXPECTED_CLUSTER: 'devnet' },
+    manifest: devnetManifest,
+  });
+  assert.equal(r.ok, false);
+  assert.ok(
+    r.errors.some((e) => e.includes('EXPO_PUBLIC_RPC_URL') && e.includes('not set')),
+    `expected a "not set" error for the RPC url, got: ${r.errors.join('; ')}`,
+  );
+});
+
+test('devnet app build with RPC set to empty/whitespace fails', () => {
+  for (const value of ['', '   ']) {
+    const r = runPreflight({
+      surface: 'app',
+      env: { EXPO_PUBLIC_EXPECTED_CLUSTER: 'devnet', EXPO_PUBLIC_RPC_URL: value },
+      manifest: devnetManifest,
+    });
+    assert.equal(r.ok, false, `value ${JSON.stringify(value)} should fail`);
+  }
+});
+
+test('devnet web build with RPC UNSET fails', () => {
+  const r = runPreflight({
+    surface: 'web',
+    env: { VITE_EXPECTED_CLUSTER: 'devnet' },
+    manifest: devnetManifest,
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.includes('VITE_RPC_URL')));
+});
+
+test('devnet build with a malformed RPC url fails', () => {
+  for (const value of ['not-a-url', 'http//missing-colon', 'ftp:/x']) {
+    const r = runPreflight({
+      surface: 'app',
+      env: { EXPO_PUBLIC_EXPECTED_CLUSTER: 'devnet', EXPO_PUBLIC_RPC_URL: value },
+      manifest: devnetManifest,
+    });
+    assert.equal(r.ok, false, `value ${JSON.stringify(value)} should fail`);
+  }
+});
+
+test('devnet build with a non-HTTPS RPC url fails', () => {
+  const r = runPreflight({
+    surface: 'app',
+    env: { EXPO_PUBLIC_EXPECTED_CLUSTER: 'devnet', EXPO_PUBLIC_RPC_URL: 'http://api.devnet.solana.com' },
+    manifest: devnetManifest,
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.includes('HTTPS')));
+});
+
+test('devnet build pointed at a MAINNET host fails', () => {
+  const r = runPreflight({
+    surface: 'app',
+    env: {
+      EXPO_PUBLIC_EXPECTED_CLUSTER: 'devnet',
+      EXPO_PUBLIC_RPC_URL: 'https://api.mainnet-beta.solana.com',
+    },
+    manifest: devnetManifest,
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.includes('mainnet host')));
+});
+
+test('RPC url embedding credentials fails, and the value is never echoed', () => {
+  const secret = 'sup3rs3cr3t';
+  const r = runPreflight({
+    surface: 'app',
+    env: {
+      EXPO_PUBLIC_EXPECTED_CLUSTER: 'devnet',
+      EXPO_PUBLIC_RPC_URL: `https://user:${secret}@rpc.devnet.example.com`,
+    },
+    manifest: devnetManifest,
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.includes('credentials')));
+  assert.ok(!r.errors.join(' ').includes(secret), 'secret must not appear in errors');
+  assert.ok(!r.summary.includes(secret), 'secret must not appear in the summary');
+});
+
+test('a neutral proxy hostname is accepted on devnet (must not require the literal "devnet")', () => {
+  // A first-party RPC proxy is a legitimate devnet endpoint; requiring the host to
+  // contain "devnet" would reject it and push builders back to raw provider URLs.
+  const r = runPreflight({
+    surface: 'app',
+    env: {
+      EXPO_PUBLIC_EXPECTED_CLUSTER: 'devnet',
+      EXPO_PUBLIC_RPC_URL: 'https://notify.palatinearc.com/rpc',
+    },
+    manifest: devnetManifest,
+  });
+  assert.equal(r.ok, true, r.errors.join('; '));
+});
+
+test('a genuine devnet provider url still passes', () => {
+  const r = runPreflight({
+    surface: 'app',
+    env: {
+      EXPO_PUBLIC_EXPECTED_CLUSTER: 'devnet',
+      EXPO_PUBLIC_RPC_URL: 'https://devnet.helius-rpc.com/?api-key=redacted',
+    },
+    manifest: devnetManifest,
+  });
+  assert.equal(r.ok, true, r.errors.join('; '));
+});

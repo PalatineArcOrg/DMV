@@ -160,7 +160,11 @@ export function getHeartbeatAttemptMessage(
         tone: 'warning',
         text:
           'The on-chain vault state could not be validated safely. ' +
-          'No local or on-chain heartbeat was recorded.',
+          'No local or on-chain heartbeat was recorded.' +
+          // Without this an owner cannot tell a bad endpoint from a bad key from a
+          // bad vault — every readiness failure reads identically. The reason comes
+          // from on-chain state and local derivation only.
+          (result.reason ? ` Reason: ${result.reason}` : ''),
       };
     case 'insufficient_agent_funds':
       return {

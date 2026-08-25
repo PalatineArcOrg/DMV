@@ -32,6 +32,15 @@ export interface AgentKeySlotManager {
   generateCandidate: () => Promise<string>;
   getPublicKey: (slot: AgentKeySlot) => Promise<string | null>;
   hasCompleteSlot: (slot: AgentKeySlot) => Promise<boolean>;
+  /**
+   * Metadata-only presence check. Reads the slot's public key and flags, which
+   * are stored WITHOUT `requireAuthentication`, and never touches the secret — so
+   * it raises no biometric prompt and works from a cold start before any Activity
+   * is resumed. Answers "is a key stored here?", not "can I use it right now?".
+   */
+  hasStoredSlot: (slot: AgentKeySlot) => Promise<boolean>;
+  /** Metadata-only public key. Same no-prompt guarantee as `hasStoredSlot`. */
+  getStoredPublicKey: (slot: AgentKeySlot) => Promise<string | null>;
   loadSlot: (slot: AgentKeySlot) => Promise<Keypair>;
   loadByExactPublicKey: (publicKey: string) => Promise<Keypair>;
   resolveForOnChainPublicKey: (
@@ -109,6 +118,39 @@ function isCanonicalPublicKey(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+interface SlotMetadata {
+  publicKey: string | null;
+  auth: string | null;
+  complete: string | null;
+}
+
+/**
+ * True iff the slot's unauthenticated metadata describes a stored key — the same
+ * shape rule `readSlot` applies, including the legacy-active allowance for a
+ * pre-Phase-4 slot with no completion marker, but without reading the secret.
+ *
+ * A `true` here means "a key is stored"; it does not promise the secret is
+ * readable right now (that needs authentication and a resumed Activity).
+ */
+function isStoredSlotShape(
+  slot: AgentKeySlot,
+  metadata: SlotMetadata,
+): boolean {
+  if (metadata.publicKey === null) return false;
+  if (!isCanonicalPublicKey(metadata.publicKey)) return false;
+  const isLegacyActive =
+    slot === 'active' &&
+    metadata.complete === null &&
+    (metadata.auth === null ||
+      metadata.auth === '0' ||
+      metadata.auth === '1');
+  if (metadata.auth !== '0' && metadata.auth !== '1' && !isLegacyActive) {
+    return false;
+  }
+  if (metadata.complete !== '1' && !isLegacyActive) return false;
+  return true;
 }
 
 function wipe(keypair: Keypair | undefined): void {
@@ -345,6 +387,19 @@ export function createAgentKeySlotManager(
       } catch {
         return false;
       }
+    },
+    // Metadata-only. Deliberately does NOT call readSlot(): that loads the secret
+    // under `requireAuthentication` when auth === '1', which raises a biometric
+    // prompt and fails outright at cold start with no resumed Activity. Callers
+    // asking "is a key stored?" must not be answered "no" merely because the
+    // device could not prompt at that instant.
+    hasStoredSlot: async (slot) => {
+      const metadata = await readMetadata(slot);
+      return isStoredSlotShape(slot, metadata);
+    },
+    getStoredPublicKey: async (slot) => {
+      const metadata = await readMetadata(slot);
+      return isStoredSlotShape(slot, metadata) ? metadata.publicKey : null;
     },
     loadSlot: async (slot) => (await readSlot(slot)).keypair,
     loadByExactPublicKey: async (publicKey) => {

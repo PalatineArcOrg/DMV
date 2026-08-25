@@ -165,6 +165,13 @@ jobs:
         run: npm run typecheck
       - name: Build
         working-directory: web
+        # The web build's prebuild runs preflight, which now REQUIRES an RPC URL on
+        # every cluster. CI has no .env, so these public devnet endpoints are supplied
+        # for the same reason as the manifest job: exercise the real gate rather than
+        # bypass it. Vite reads VITE_* from the environment as well as .env files.
+        env:
+          VITE_RPC_URL: https://api.devnet.solana.com
+          VITE_NOTIFY_URL: https://notify.palatinearc.com
         run: npm run build
 
   # ---- Release-manifest drift guard (cross-component constants) ----
@@ -186,6 +193,16 @@ jobs:
       - name: Preflight — app surface against the current manifest
         # web surface needs vite's loadEnv (installed only in the `web` job, which runs it via the
         # `npm run build` prebuild + the env-precedence tests below).
+        #
+        # The RPC/notify URLs are supplied here because preflight now REQUIRES them on every
+        # cluster (a devnet release once shipped with none, printing "rpc=(unset)" and passing).
+        # CI has no .env, so without these the gate would fail on its own smoke check. These are
+        # public, non-secret devnet endpoints chosen to match the manifest's cluster, so the step
+        # exercises the real gate — including the mainnet-host rejection — rather than bypassing
+        # it. The bad-config matrix above is what proves absence and mismatch still fail.
+        env:
+          EXPO_PUBLIC_RPC_URL: https://api.devnet.solana.com
+          EXPO_PUBLIC_NOTIFY_URL: https://notify.palatinearc.com
         run: node dead-mans-vault/release-tools/preflight-prod-build.mjs --surface app
 
   # ---- Anchor program: prod-safe build + devnet tests ----

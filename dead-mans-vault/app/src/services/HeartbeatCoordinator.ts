@@ -112,7 +112,15 @@ export type HeartbeatAttemptResult =
       status: 'rpc_unavailable';
     }
   | {
+      /**
+       * Every distinct readiness failure used to collapse into this one state with
+       * its `reason` discarded, so an owner refused a heartbeat could not tell a bad
+       * endpoint from a bad key from a bad vault. The reason is now carried through
+       * and shown. It is derived from on-chain state and local derivation only —
+       * never from key material, secrets or environment values.
+       */
       status: 'invalid_on_chain_state';
+      reason?: string;
     }
   | {
       status: 'insufficient_agent_funds';
@@ -214,6 +222,17 @@ export interface HeartbeatCoordinator {
   isInFlight: () => boolean;
 }
 
+/**
+ * Message text for a thrown error, bounded and non-sensitive. Only the message is
+ * used — never a stack, and never the error object — so nothing incidental can be
+ * carried into the UI.
+ */
+function safeErrorText(error: unknown): string {
+  const message =
+    error instanceof Error ? error.message : String(error ?? 'unknown error');
+  return message.slice(0, 200);
+}
+
 const HEARTBEAT_METHOD_INDEX: Record<HeartbeatMethod, number> = {
   active_tap: 0,
   biometric_confirm: 1,
@@ -232,6 +251,8 @@ function readinessFailureResult(
         localAgent: readiness.localAgent.toBase58(),
         onChainAgent: readiness.onChainAgent.toBase58(),
       };
+    case 'invalid_on_chain_state':
+      return { status: readiness.status, reason: readiness.reason };
     case 'owner_missing':
     case 'agent_missing':
     case 'agent_unavailable':
@@ -239,7 +260,6 @@ function readinessFailureResult(
     case 'vault_inactive':
     case 'vault_executed':
     case 'rpc_unavailable':
-    case 'invalid_on_chain_state':
       return { status: readiness.status };
   }
 }
@@ -478,8 +498,11 @@ export function createHeartbeatCoordinator(): HeartbeatCoordinator {
         let readiness: AgentReadinessResult;
         try {
           readiness = await dependencies.checkAgentReadiness();
-        } catch {
-          return { status: 'invalid_on_chain_state' };
+        } catch (error: unknown) {
+          return {
+            status: 'invalid_on_chain_state',
+            reason: `readiness threw: ${safeErrorText(error)}`,
+          };
         }
         if (readiness.status !== 'ready') {
           return readinessFailureResult(readiness);
