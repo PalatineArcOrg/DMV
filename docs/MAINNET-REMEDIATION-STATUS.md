@@ -277,17 +277,40 @@ that anything is wrong.
 
 **Proposed fix (design only — not implemented):**
 
-- On successful vault creation, if a registration previously existed for that owner (or the
-  app holds a prior signed-registration record), prompt to re-register rather than leaving it
-  to the owner to remember.
+- **Offer registration as a step in vault creation, unconditionally.** Anyone arming a
+  dead-man's switch wants to be warned before it fires; there is no sensible reading where an
+  owner wants the switch armed and the warnings off. Creation is the one moment the intent is
+  unambiguous and the owner is already present and signing.
 - Surface registration state on the Dashboard — an explicit "notifications: not registered"
   is the missing signal, and it covers the reinstall case for free.
 - Consider having the server distinguish *deregistered because the vault ended* from
   *deregistered because it went missing mid-life*, so the two are auditable apart.
 
+> An earlier draft of this entry proposed prompting only *when a prior registration existed*,
+> i.e. treating this purely as a revoke-and-recreate repair. That is too narrow, and the
+> owner corrected it: a first-time user creating their first vault would get no offer at all
+> and would have to discover the Settings screen unaided. The registration gap is not a
+> re-creation bug with a repair — it is a missing step in vault creation, of which
+> re-creation is one symptom and reinstall another.
+
 Care is needed not to overcorrect: registration must stay a deliberate owner-signed action,
-and re-registration must not become an automatic background call. The fix is a prompt and an
-indicator, not silent re-registration.
+and it must never become an automatic background call. A prompt inside the creation flow
+satisfies both — it is deliberate, it appears at exactly the right moment, and it does not
+depend on the owner remembering later. The fix is a prompt and an indicator, never silent
+registration.
+
+**Field evidence that the mechanism works once registered** (devnet, 2026-08-25): after the
+owner registered from Settings, the poller picked it up and delivered the overdue Stage 1
+push within five seconds — `[register] signed created` at 16:31:37, `[fcm] ACCEPTED "Heartbeat
+due"` and `[push] sent stage 1` at 16:31:42. The stored stage durations summed to exactly the
+on-chain grace period. Nothing is wrong with delivery; the defect is purely that nothing
+brings the owner to that action.
+
+One open observation from the same run: `last_stage` remained `0` and `last_notified_at`
+`never` in the registrations row even though the push logged as sent. If that counter does not
+advance on a later tick, the per-stage throttle cannot suppress repeats and an owner would be
+re-notified more often than the cadence intends. Not yet investigated; recorded here so it is
+not lost.
 
 ---
 
