@@ -5,9 +5,9 @@ sanitized companion to a private authoritative implementation plan (see **Plan a
 It intentionally contains **no exploit mechanics** — only phase/branch/status information.
 
 **Overall status:** IN PROGRESS — Phases 1–3 complete (merged to `devnet`); Phase 4 in review (draft PR,
-not merged); Phases 5–13 not started except Phase 12 (fix branch open). **Phases 11, 12 and 13 are mainnet-blocking, all added 2026-08-08 from Phase 4 on-device acceptance.**
+not merged); Phases 5–10 not started; Phases 12, 13 and 14 have fix branches open in [PR #55](https://github.com/Romulus-Sol/DMV/pull/55); Phase 11 is unfixed. **Phases 11–14 are all mainnet-blocking and were all found by Phase 4 on-device acceptance (2026-08-08) — none was reachable by any offline gate.**
 **Mainnet:** NO-GO until the Track B phases (6–10) ship and pass an external implementation review.
-**Last updated:** 2026-08-08.
+**Last updated:** 2026-08-25.
 
 ---
 
@@ -48,6 +48,7 @@ remediation log. This file is updated as phases complete.
 | 11 | **Agent-rotation preflight recovery** | `wp1-rotation-preflight-recovery` | A | 🔴 **Not started — MAINNET BLOCKING** | — |
 | 12 | **Startup key-presence check requires authentication** | `wp1-startup-key-check-fix` | A | 🟠 **Fix branch open — MAINNET BLOCKING** | 8 new tests; app 562/562; tsc clean |
 | 13 | **Release preflight must fail closed on a missing/invalid RPC URL** | `wp1-preflight-rpc-fail-closed` | A | 🟠 **Fix branch open — MAINNET BLOCKING** | 9 new preflight tests (27 total); 7 fail if the gate is reverted |
+| 14 | **Account guard broke under Hermes — heartbeats impossible on device** | `wp1-parser-hermes-subarray` | A | 🟠 **Fix branch open ([PR #55](https://github.com/Romulus-Sol/DMV/pull/55)) — MAINNET BLOCKING** | 5 new tests; 3 fail if the fix is reverted; app 571/571; verified on-chain on device |
 
 Phases run one at a time; each is implemented on its own branch, fully tested, reviewed, and merged
 before the next begins.
@@ -181,6 +182,58 @@ for a neutral proxy host and a real devnet provider. Seven fail if the gate is r
 > recorded here so neither is re-investigated.
 
 
+### Phase 14 — account guard depended on a Buffer-only method; Hermes made heartbeats impossible
+
+**MAINNET BLOCKING — the most severe defect found in Phase 4 acceptance.** Reproduced on
+a Seeker 2026-08-08; fixed and confirmed on-chain the same day.
+
+`isProgramAccount`, the gate every raw account parser runs first, ended with:
+
+```js
+info.data.subarray(0, 8).equals(disc)
+```
+
+`buffer@6.0.3` overrides `Buffer.prototype.slice` but **not `subarray`**, so `subarray` is
+inherited from `Uint8Array`. Under Node, species handling returns a `Buffer` and `.equals`
+exists. **Under Hermes it returns a plain `Uint8Array`, which has no `.equals`** — the call
+threw a `TypeError`.
+
+`isProgramAccount` is invoked **outside** each parser's `try/catch`, so the throw escaped to
+the caller. `AgentReadinessService` caught it and returned
+`invalid_on_chain_state('vault account validation failed')`.
+
+**Effect: no heartbeat could be submitted at all.** The dead-man's switch could not be reset
+from the device. The deadline failed identically (same accounts, same parser), and agent
+rotation was stuck at *create candidate* because its preflight parses the same accounts. The
+owner saw only *"The on-chain vault state could not be validated safely"* — the same string
+for every possible cause.
+
+**Why no automated gate caught it:**
+
+- `tsc`, 571 unit tests and a Metro/Hermes bundle check all passed. Node's `subarray` returns
+  a `Buffer`, so the defect is invisible off-device by construction.
+- `fetchVaultConfig` tries Anchor first and falls back to the raw parse, so before Phase 4
+  this path was rarely load-bearing. Startup vault fetch, the migration alert and the rotation
+  card's *display* all kept working, which repeatedly misdirected diagnosis.
+- **Phase 4 made the raw parse the sole path** for heartbeat readiness and the deadline. A
+  long-latent defect became fatal.
+
+**Fix:** an index-based prefix compare depending on nothing but indexing. Adds
+`programAccountProblem`, which names the failing check — owner, length or discriminator —
+rather than returning a bare boolean. Five tests pass plain `Uint8Array` data to model the
+Hermes shape; they fail three ways against the original implementation, and a `Buffer` case
+pins that off-device behaviour is unchanged.
+
+**Verified on device:** after installing the fix, `total_heartbeats` advanced 3 → 4 → 5,
+confirmed on two independent RPCs.
+
+**Standing lesson.** This is the fourth Hermes-only failure in this codebase, after v1.13.0,
+v1.13.9 and v1.13.16. The existing guardrail says to keep hot-path helpers inline; it should
+be widened: **on a Hermes hot path, do not rely on `Buffer`-only methods surviving a
+`subarray`/`slice`, and do not place a throwing guard outside the `try` that is meant to
+contain it.** Both halves were required to turn this into a total loss of function — the
+second is what made a parse failure indistinguishable from every other cause.
+
 ---
 
 ## Phase goals (high level)
@@ -197,6 +250,9 @@ for a neutral proxy host and a real devnet provider. Seven fail if the gate is r
 9. **Post-finalization recovery** — executors/keeper continue token/NFT recovery after SOL finalization; all removed-instruction call sites are gone across app/web/keeper/notify.
 10. **Review candidate** — full regression + fuzz suite, migrated tests, coordinated deployment runbook, and an external-implementation-review package pinned to the final commit.
 11. **Rotation preflight recovery** — an owner whose agent key is lost, unreadable or only present in the `previous` slot can still rotate through a first-party client; the app stops refusing the one action that restores liveness.
+12. **Startup key presence** — a cold-start presence check answers from unauthenticated metadata, so a device that cannot show a biometric prompt never reports a healthy key as missing.
+13. **Release RPC gate** — no release build, on any cluster, can be produced or attested without a valid RPC URL that reaches the bundle.
+14. **Hermes-safe account parsing** — the account guard depends only on indexing, and a guard that can throw sits inside the try that contains it.
 
 ---
 
