@@ -67,8 +67,13 @@ test('deadline lifecycle refreshes are bounded, cleaned up, and identity scoped'
   assert.match(hook, /void refreshAuthoritativeDeadline\(\)/);
   assert.match(hook, /AppState\.addEventListener/);
   assert.match(hook, /state === 'active'/);
-  assert.match(hook, /30_000/);
-  assert.match(hook, /clearInterval\(refreshTimer\)/);
+  // Cadence is now adaptive (deadlineRefreshPlan) rather than a fixed 30s interval,
+  // so the literal is gone. The INTENT this guarded — refreshes are bounded and never
+  // free-running — is asserted instead: a plan is consulted, and the tightest bound
+  // is still the original 30s for a near deadline.
+  assert.match(hook, /deadlineRefreshPlan\(/);
+  assert.match(hook, /scheduleRefresh/);
+  assert.match(hook, /clearTimeout\(refreshTimer\)/);
   assert.match(hook, /clearInterval\(projectionTimer\)/);
   assert.match(hook, /appStateSubscription\.remove\(\)/);
   assert.match(hook, /ownerRef\.current\?\.toBase58\(\)/);

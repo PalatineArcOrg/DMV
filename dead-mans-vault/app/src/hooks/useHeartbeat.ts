@@ -27,7 +27,10 @@ import {
   getMonotonicNowMs,
 } from '../services/DefaultOnChainDeadlineService';
 import {
+  deadlineRefreshPlan,
   projectAuthoritativeDeadline,
+  DEADLINE_FRESHNESS_WINDOW_MS,
+  DEADLINE_REFRESH_NEAR_MS,
   type AuthoritativeDeadlineResult,
   type AuthoritativeDeadlineSnapshot,
 } from '../services/OnChainDeadlineService';
@@ -264,9 +267,19 @@ export function useHeartbeat(
     setIsMonitoring(true);
     void refreshAuthoritativeDeadline();
 
-    const refreshTimer = setInterval(() => {
-      void refreshAuthoritativeDeadline();
-    }, 30_000);
+    // Self-rescheduling rather than a fixed interval, so the cadence can widen when
+    // the deadline is days away and tighten as it approaches. Each tick re-reads the
+    // plan from the latest verified snapshot.
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      const { intervalMs } = deadlineRefreshPlan(
+        lastVerifiedRef.current?.secondsUntilFinalDeadline ?? null,
+      );
+      refreshTimer = setTimeout(() => {
+        void refreshAuthoritativeDeadline().finally(scheduleRefresh);
+      }, intervalMs);
+    };
+    scheduleRefresh();
 
     const projectionTimer = setInterval(() => {
       const lastVerified = lastVerifiedRef.current;
@@ -276,6 +289,10 @@ export function useHeartbeat(
         projection = projectAuthoritativeDeadline(
           lastVerified,
           getMonotonicNowMs(),
+          // Window matches the poll cadence, so a widened interval cannot strand the
+          // countdown in a spurious `stale` state between reads.
+          deadlineRefreshPlan(lastVerified.secondsUntilFinalDeadline)
+            .freshnessWindowMs,
         );
       } catch {
         projection = {
@@ -322,7 +339,7 @@ export function useHeartbeat(
 
     return () => {
       generationRef.current += 1;
-      clearInterval(refreshTimer);
+      if (refreshTimer) clearTimeout(refreshTimer);
       clearInterval(projectionTimer);
       appStateSubscription.remove();
       historyService.destroy();
