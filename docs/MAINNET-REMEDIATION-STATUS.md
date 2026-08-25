@@ -5,7 +5,7 @@ sanitized companion to a private authoritative implementation plan (see **Plan a
 It intentionally contains **no exploit mechanics** — only phase/branch/status information.
 
 **Overall status:** IN PROGRESS — Phases 1–3 complete (merged to `devnet`); Phase 4 in review (draft PR,
-not merged); Phases 5–10 not started; Phases 12, 13 and 14 have fix branches open in [PR #55](https://github.com/Romulus-Sol/DMV/pull/55); Phase 11 is unfixed. **Phases 11–14 are all mainnet-blocking and were all found by Phase 4 on-device acceptance (2026-08-08) — none was reachable by any offline gate.**
+not merged); Phases 5–10 not started; Phases 12, 13 and 14 have fix branches open in [PR #55](https://github.com/Romulus-Sol/DMV/pull/55); Phases 11 and 15 are unfixed. **Phases 11–15 are all mainnet-blocking and were all found by on-device / live-service observation, not by any offline gate.**
 **Mainnet:** NO-GO until the Track B phases (6–10) ship and pass an external implementation review.
 **Last updated:** 2026-08-25.
 
@@ -49,6 +49,7 @@ remediation log. This file is updated as phases complete.
 | 12 | **Startup key-presence check requires authentication** | `wp1-startup-key-check-fix` | A | 🟠 **Fix branch open — MAINNET BLOCKING** | 8 new tests; app 562/562; tsc clean |
 | 13 | **Release preflight must fail closed on a missing/invalid RPC URL** | `wp1-preflight-rpc-fail-closed` | A | 🟠 **Fix branch open — MAINNET BLOCKING** | 9 new preflight tests (27 total); 7 fail if the gate is reverted |
 | 14 | **Account guard broke under Hermes — heartbeats impossible on device** | `wp1-parser-hermes-subarray` | A | 🟠 **Fix branch open ([PR #55](https://github.com/Romulus-Sol/DMV/pull/55)) — MAINNET BLOCKING** | 5 new tests; 3 fail if the fix is reverted; app 571/571; verified on-chain on device |
+| 15 | **Vault re-creation leaves notifications silently unregistered** | `wp1-registration-lifecycle` | A | 🔴 **Not started — MAINNET BLOCKING** | — |
 
 Phases run one at a time; each is implemented on its own branch, fully tested, reviewed, and merged
 before the next begins.
@@ -234,6 +235,60 @@ be widened: **on a Hermes hot path, do not rely on `Buffer`-only methods survivi
 contain it.** Both halves were required to turn this into a total loss of function — the
 second is what made a parse failure indistinguishable from every other cause.
 
+### Phase 15 — revoke-and-recreate silently ends escalation notifications
+
+**MAINNET BLOCKING.** Observed on devnet 2026-08-25: no escalation notifications arrived for
+an overdue vault. Server-side diagnosis found the vault was not being watched at all.
+
+Sequence, from the notify-server's own log:
+
+```
+Aug 08 15:14:57   revoke_vault closes the vault account on-chain
+Aug 08 15:15:00   [drop] deregistered_missing -> GoNx3dqY     (poller.js:120)
+Aug 08 15:18:03   initialize_vault re-creates a vault at the SAME address
+                  ...nothing re-registers it
+```
+
+The registrations table then held **zero rows**, and the server logged **zero FCM sends**
+afterwards. The vault went overdue on 2026-08-24 and entered Stage 1 with no push.
+
+**Neither component is malfunctioning.** The poller's auto-drop is correct and carefully
+guarded — it re-checks liveness, network verification and program readiness *after* the probe
+before deleting, so a transient blip cannot drop a registration. `revokeVault.ts` documents the
+behaviour as intentional: *"the notify-server's poller auto-drops the registration … the
+on-chain close is the source of truth and needs no extra prompt."* For a revoke that ends a
+vault's life, that is right.
+
+**The gap is the lifecycle.** The design treats revoke as terminal, but revoke-and-recreate is
+an ordinary flow — the app even supports atomic close+reinit for zombie vaults. Nothing
+re-registers on vault creation, registration is deliberately owner-signed so it cannot
+reattach itself, and **nothing in the UI indicates the vault is unwatched**. The owner is left
+believing they are covered.
+
+That matters more here than in most products. Escalation pushes are the mechanism by which a
+living owner learns their switch is counting down. Losing them silently is a path to an estate
+distributing while the owner is alive and unaware — the exact failure the product exists to
+prevent. Execution itself is unaffected: the keeper cranks from on-chain state and does not
+depend on registration.
+
+A second instance of the same class: **the FCM device token changes on every app reinstall**,
+so a reinstalled app is also silently unwatched until the owner re-registers, with no signal
+that anything is wrong.
+
+**Proposed fix (design only — not implemented):**
+
+- On successful vault creation, if a registration previously existed for that owner (or the
+  app holds a prior signed-registration record), prompt to re-register rather than leaving it
+  to the owner to remember.
+- Surface registration state on the Dashboard — an explicit "notifications: not registered"
+  is the missing signal, and it covers the reinstall case for free.
+- Consider having the server distinguish *deregistered because the vault ended* from
+  *deregistered because it went missing mid-life*, so the two are auditable apart.
+
+Care is needed not to overcorrect: registration must stay a deliberate owner-signed action,
+and re-registration must not become an automatic background call. The fix is a prompt and an
+indicator, not silent re-registration.
+
 ---
 
 ## Phase goals (high level)
@@ -253,6 +308,7 @@ second is what made a parse failure indistinguishable from every other cause.
 12. **Startup key presence** — a cold-start presence check answers from unauthenticated metadata, so a device that cannot show a biometric prompt never reports a healthy key as missing.
 13. **Release RPC gate** — no release build, on any cluster, can be produced or attested without a valid RPC URL that reaches the bundle.
 14. **Hermes-safe account parsing** — the account guard depends only on indexing, and a guard that can throw sits inside the try that contains it.
+15. **Registration lifecycle** — a vault cannot end up unwatched without the owner being told; re-creation and reinstall both surface the unregistered state instead of failing silently.
 
 ---
 
