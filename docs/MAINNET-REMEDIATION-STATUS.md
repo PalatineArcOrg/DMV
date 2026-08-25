@@ -5,7 +5,7 @@ sanitized companion to a private authoritative implementation plan (see **Plan a
 It intentionally contains **no exploit mechanics** — only phase/branch/status information.
 
 **Overall status:** IN PROGRESS — Phases 1–3 complete (merged to `devnet`); Phase 4 in review (draft PR,
-not merged); Phases 5–10 not started; Phases 12, 13 and 14 have fix branches open in [PR #55](https://github.com/Romulus-Sol/DMV/pull/55); Phases 11 and 15 are unfixed. **Phases 11–15 are all mainnet-blocking and were all found by on-device / live-service observation, not by any offline gate.**
+not merged); Phases 5–10 not started; Phases 12, 13 and 14 have fix branches open in [PR #55](https://github.com/Romulus-Sol/DMV/pull/55); Phases 11 and 15 are unfixed; Phase 16 has a client-side fix branch. **Phases 11–15 are all mainnet-blocking and were all found by on-device / live-service observation, not by any offline gate.**
 **Mainnet:** NO-GO until the Track B phases (6–10) ship and pass an external implementation review.
 **Last updated:** 2026-08-25.
 
@@ -50,6 +50,7 @@ remediation log. This file is updated as phases complete.
 | 13 | **Release preflight must fail closed on a missing/invalid RPC URL** | `wp1-preflight-rpc-fail-closed` | A | 🟠 **Fix branch open — MAINNET BLOCKING** | 9 new preflight tests (27 total); 7 fail if the gate is reverted |
 | 14 | **Account guard broke under Hermes — heartbeats impossible on device** | `wp1-parser-hermes-subarray` | A | 🟠 **Fix branch open ([PR #55](https://github.com/Romulus-Sol/DMV/pull/55)) — MAINNET BLOCKING** | 5 new tests; 3 fail if the fix is reverted; app 571/571; verified on-chain on device |
 | 15 | **Vault re-creation leaves notifications silently unregistered** | `wp1-registration-lifecycle` | A | 🔴 **Not started — MAINNET BLOCKING** | — |
+| 16 | **App RPC load gets the client rate-limited** | `wp1-rpc-load-reduction` | A | 🟠 **Fix branch open — client side done; key separation is an ops change** | 6 new tests incl. 2 safety invariants; app 577/577 |
 
 Phases run one at a time; each is implemented on its own branch, fully tested, reviewed, and merged
 before the next begins.
@@ -312,6 +313,70 @@ advance on a later tick, the per-stage throttle cannot suppress repeats and an o
 re-notified more often than the cadence intends. Not yet investigated; recorded here so it is
 not lost.
 
+### Phase 16 — app RPC load causes throttling and a slow, unresponsive open
+
+**MAINNET RELEVANT.** Reported from the device 2026-08-25: the app appears rate-limited and
+the heartbeat view takes a long time to load. Measured, not inferred.
+
+**Two independent causes.**
+
+*1 — one RPC key shared by three consumers.* The app, the notify-server poller (every 15s) and
+the keeper-bot (every 60s) all authenticate with the same Helius key (verified by hashing:
+identical). Each keeper tick issues a `getProgramAccounts` scan of the whole program — among
+the heaviest RPC methods — whether or not any vault is due. A phone competes with two
+server-side pollers for one quota and loses.
+
+*2 — the client asks for far too much, sequentially, twice.* Measured against the real
+endpoint:
+
+```
+loadVaultState()                    8 RPC calls, 558ms strictly sequential
+  getAccountInfo(vault)      x2  (fetchVaultConfig, then again for rent)
+  getParsedTokenAccountsByOwner x4  (getVaultTokenBalances and PortfolioScanner
+                                     each scan BOTH token programs)
+  getMinimumBalanceForRentExemption, getBalance
+refreshAuthoritativeDeadline()      4 RPC calls, 165ms
+```
+
+`DashboardScreen` had **both** a mount `useEffect` and a `useFocusEffect` calling
+`loadVaultState`, with no single-flight guard, so app open cost ~24 calls and ~1.45s of
+serial latency measured from a VPS. At mobile latency (200–500ms per round trip) that is
+5–15 seconds of apparent hang. Steady state then cost ~480 calls/hour per foregrounded
+Dashboard.
+
+The deadline poll is new in Phase 4 — before it, this cost was **zero**. It was flagged in the
+Phase 4 review as "worth measuring against the shared proxy before this ships widely" and not
+followed up; the device report is that prediction arriving.
+
+**Fixed on this branch (client side):**
+
+- Single-flight guard on `loadVaultState`, and the duplicate mount effect removed —
+  `useFocusEffect` already covers first focus and `connected`/`publicKey` changes. Open now
+  loads once instead of twice.
+- The four independent reads run concurrently. **Each branch keeps its own catch and resolves
+  to a neutral value** — a bare `Promise.all` would let one rejection discard every other
+  result, which is precisely the enrichment-drops-the-load failure this codebase has hit
+  before. Measured 558ms → **249ms**.
+- Deadline cadence is adaptive (`deadlineRefreshPlan`): 30s within an hour of the deadline,
+  60s within a day, 300s beyond. The freshness window scales with it, so a widened interval
+  cannot strand the countdown in a spurious `stale` state. At Stage 0 with a fortnight of
+  margin this is **480 → 48 calls/hour, a 90% reduction**.
+
+**The safety boundary is unchanged and is asserted at the widest cadence.** A projection can
+never enter Stage 4: `projectAuthoritativeDeadline` returns `stage4_refresh_required` the
+moment a projection would cross `finalDeadline`, and pins `executableByTime: false` on every
+projected snapshot. Two tests assert both at the 300s window. Unknown or nonsensical margin
+falls back to the *tightest* cadence — backing off is an optimisation, never the fallback for
+missing information.
+
+An existing WP 4.5 guard test asserted the literal `30_000` in source. It was updated to
+assert the intent it was protecting — that refreshes are bounded and never free-running —
+rather than deleted.
+
+**Not fixed here — ops change, owner's call:** give the keeper-bot and notify-server their own
+RPC keys. That is the single largest win and needs no code change. Until then the client
+improvements are shared with two pollers on the same quota.
+
 ---
 
 ## Phase goals (high level)
@@ -332,6 +397,7 @@ not lost.
 13. **Release RPC gate** — no release build, on any cluster, can be produced or attested without a valid RPC URL that reaches the bundle.
 14. **Hermes-safe account parsing** — the account guard depends only on indexing, and a guard that can throw sits inside the try that contains it.
 15. **Registration lifecycle** — a vault cannot end up unwatched without the owner being told; re-creation and reinstall both surface the unregistered state instead of failing silently.
+16. **Client RPC budget** — the app's steady-state and open-time RPC cost is proportional to what it actually needs to know, and no single shared key can be exhausted by routine polling.
 
 ---
 

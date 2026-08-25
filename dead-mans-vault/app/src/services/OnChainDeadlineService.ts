@@ -20,6 +20,74 @@ export type ConfirmedChainTimeResult =
   | { status: 'chain_time_unavailable' }
   | { status: 'chain_time_invalid' };
 
+/**
+ * How often to re-read the canonical deadline, and how long a monotonic projection
+ * may be trusted between reads.
+ *
+ * A fixed 30s poll costs ~480 RPC calls/hour for every foregrounded Dashboard,
+ * which on a shared key is enough to get the app throttled — while it watches a
+ * clock whose next event may be a week away. The cost is paid to answer a question
+ * that barely changes.
+ *
+ * The interval therefore scales with the remaining margin, and the freshness window
+ * scales WITH it so the countdown never falls into a spurious `stale` state between
+ * reads. Extending the window is safe: a projection is monotonic-clock arithmetic on
+ * a verified snapshot, so it stays exact for as long as the clock is monotonic.
+ *
+ * This CANNOT weaken the execution boundary. `projectAuthoritativeDeadline` returns
+ * `stage4_refresh_required` the moment a projection would cross `finalDeadline`, and
+ * pins `executableByTime: false` on every projected snapshot, so Stage 4 is only ever
+ * entered from a fresh verified read. Both behaviours are independent of the values
+ * chosen here — the tests assert that at the widest interval.
+ */
+export interface DeadlineRefreshPlan {
+  intervalMs: number;
+  freshnessWindowMs: number;
+}
+
+export const DEADLINE_REFRESH_NEAR_MS = 30_000;
+export const DEADLINE_REFRESH_MID_MS = 60_000;
+export const DEADLINE_REFRESH_FAR_MS = 300_000;
+
+/** Seconds of remaining margin below which we keep the tightest cadence. */
+export const DEADLINE_NEAR_SECONDS = 3_600;
+/** Seconds of remaining margin above which the widest cadence is used. */
+export const DEADLINE_FAR_SECONDS = 86_400;
+
+export function deadlineRefreshPlan(
+  secondsUntilFinalDeadline: number | null | undefined,
+): DeadlineRefreshPlan {
+  // Unknown margin (no verified snapshot yet, or a nonsense value) keeps the
+  // tightest cadence. Backing off is an optimisation and must never be the
+  // fallback for missing information.
+  if (
+    typeof secondsUntilFinalDeadline !== 'number' ||
+    !Number.isFinite(secondsUntilFinalDeadline) ||
+    secondsUntilFinalDeadline < 0
+  ) {
+    return {
+      intervalMs: DEADLINE_REFRESH_NEAR_MS,
+      freshnessWindowMs: DEADLINE_FRESHNESS_WINDOW_MS,
+    };
+  }
+  if (secondsUntilFinalDeadline <= DEADLINE_NEAR_SECONDS) {
+    return {
+      intervalMs: DEADLINE_REFRESH_NEAR_MS,
+      freshnessWindowMs: DEADLINE_FRESHNESS_WINDOW_MS,
+    };
+  }
+  if (secondsUntilFinalDeadline <= DEADLINE_FAR_SECONDS) {
+    return {
+      intervalMs: DEADLINE_REFRESH_MID_MS,
+      freshnessWindowMs: DEADLINE_REFRESH_MID_MS,
+    };
+  }
+  return {
+    intervalMs: DEADLINE_REFRESH_FAR_MS,
+    freshnessWindowMs: DEADLINE_REFRESH_FAR_MS,
+  };
+}
+
 export interface AuthoritativeDeadlineSnapshot {
   cluster: string;
   programId: string;

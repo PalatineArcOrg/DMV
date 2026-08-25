@@ -142,8 +142,15 @@ export function DashboardScreen() {
 
   const cfg = STAGE_CONFIG[escalationStage] || STAGE_CONFIG[0];
 
+  const loadVaultInFlightRef = useRef<Promise<void> | null>(null);
+
   const loadVaultState = useCallback(async () => {
     if (!publicKey) return;
+    // Single-flight. Mount, focus, wallet-connect and pull-to-refresh can all ask for
+    // this at once; without a guard each one paid the full round-trip set again.
+    const inFlight = loadVaultInFlightRef.current;
+    if (inFlight) return inFlight;
+    const task = (async () => {
     setIsLoadingVault(true);
     try {
       const vault: any = await fetchVaultConfig(publicKey);
@@ -163,29 +170,57 @@ export function DashboardScreen() {
         }
         useVaultStore.getState().setVaultConfig(vault);
         const [vaultPda] = getVaultPDA(publicKey);
-        // Fetch vault PDA balance for deposit card
+        // These four reads are independent of one another, so they run concurrently
+        // rather than in series — the previous sequential chain cost the sum of every
+        // round trip on a screen that opens constantly.
+        //
+        // Each branch carries its OWN catch and resolves to a neutral value. Promise.all
+        // is only safe here BECAUSE of that: a bare Promise.all would let one rejection
+        // discard every other result, which is exactly the enrichment-drops-the-load bug
+        // this codebase has hit before.
         try {
           const txService = new VaultTransactionService();
           const connection = txService.getConnection();
-          const accountInfo = await connection.getAccountInfo(vaultPda);
-          if (accountInfo) {
-            const rent = await connection.getMinimumBalanceForRentExemption(accountInfo.data.length);
-            setVaultBalance(Math.max(0, accountInfo.lamports - rent));
-          }
-          setWalletBalance(await connection.getBalance(publicKey));
-
-          // Fetch vault PDA token balances (authoritative amounts).
-          const vaultTokens = await txService.getVaultTokenBalances(vaultPda);
-          // ENRICH with names/logos (best-effort). Vault-held tokens aren't in the
-          // owner's wallet, so scan the vault PDA itself for metadata. Isolated —
-          // if this fails, tokens still show by mint prefix (the LOAD is unaffected).
-          const metaByMint = new Map<string, { symbol: string; logoUri?: string | null }>();
-          try {
-            const scanned = await new PortfolioScanner(getRpcUrl(), getHeliusApiKey()).getTokenBalances(vaultPda);
-            for (const s of scanned) metaByMint.set(s.mint.toString(), { symbol: s.symbol, logoUri: s.logoUri ?? s.image ?? null });
-          } catch {
-            // no metadata — fall back to mint prefixes
-          }
+          const [vaultLamports, ownerLamports, vaultTokens, metaByMint] =
+            await Promise.all([
+              (async () => {
+                try {
+                  const accountInfo = await connection.getAccountInfo(vaultPda);
+                  if (!accountInfo) return null;
+                  const rent = await connection.getMinimumBalanceForRentExemption(
+                    accountInfo.data.length,
+                  );
+                  return Math.max(0, accountInfo.lamports - rent);
+                } catch {
+                  return null;
+                }
+              })(),
+              connection.getBalance(publicKey).catch(() => null),
+              txService.getVaultTokenBalances(vaultPda).catch(() => []),
+              // Decorative only. Vault-held tokens aren't in the owner's wallet, so the
+              // vault PDA is scanned for metadata; a failure here must never drop the
+              // token list itself.
+              (async () => {
+                const out = new Map<string, { symbol: string; logoUri?: string | null }>();
+                try {
+                  const scanned = await new PortfolioScanner(
+                    getRpcUrl(),
+                    getHeliusApiKey(),
+                  ).getTokenBalances(vaultPda);
+                  for (const s of scanned) {
+                    out.set(s.mint.toString(), {
+                      symbol: s.symbol,
+                      logoUri: s.logoUri ?? s.image ?? null,
+                    });
+                  }
+                } catch {
+                  // no metadata — fall back to mint prefixes
+                }
+                return out;
+              })(),
+            ]);
+          if (vaultLamports !== null) setVaultBalance(vaultLamports);
+          if (ownerLamports !== null) setWalletBalance(ownerLamports);
           setVaultTokenBalances(vaultTokens.map((t) => {
             const m = metaByMint.get(t.mint.toString());
             const wallet = balances.find((b) => b.mint.toString() === t.mint.toString());
@@ -206,6 +241,13 @@ export function DashboardScreen() {
     } finally {
       setIsLoadingVault(false);
     }
+    })().finally(() => {
+      if (loadVaultInFlightRef.current === task) {
+        loadVaultInFlightRef.current = null;
+      }
+    });
+    loadVaultInFlightRef.current = task;
+    return task;
   }, [publicKey, fetchVaultConfig, getVaultPDA]);
 
   const handleDeposit = useCallback(async (lamports: number) => {
@@ -330,11 +372,8 @@ export function DashboardScreen() {
     }
   }, [executionJustCompleted]);
 
-  useEffect(() => {
-    if (connected && publicKey) {
-      loadVaultState();
-    }
-  }, [connected, publicKey, loadVaultState]);
+  // NOTE: no mount useEffect — useFocusEffect already covers first focus and
+  // connected/publicKey changes; a separate mount effect duplicated every read on open.
 
   useFocusEffect(
     useCallback(() => {
